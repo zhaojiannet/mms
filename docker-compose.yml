@@ -1,0 +1,77 @@
+services:
+  # ============================================================
+  # Go 后端
+  # 通过外部 docker-net 网络连接通用 postgres 容器
+  # ============================================================
+  backend:
+    build:
+      context: ./backend
+      args:
+        UID: ${HOST_UID:-1000}
+        GID: ${HOST_GID:-1000}
+    container_name: mms_backend
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./backend:/app
+      - mms-go-mod-cache:/home/app/go/pkg/mod
+      - mms-go-build-cache:/home/app/.cache/go-build
+    ports:
+      - "8081:8080"   # 宿主机 8081 → 容器 8080（避开 anydeli-api 占用的 8080）
+    env_file:
+      - .env
+    restart: unless-stopped
+    command: >
+      sh -c "
+      set -e &&
+      echo '=== Go 依赖同步 ===' &&
+      go mod tidy &&
+      echo '=== 启动 MMS ===' &&
+      go run ./cmd/server
+      "
+    networks:
+      - docker-net
+
+  # ============================================================
+  # Nuxt 4 前端
+  # ============================================================
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        UID: ${HOST_UID:-1000}
+        GID: ${HOST_GID:-1000}
+    container_name: mms_frontend
+    user: "${HOST_UID:-1000}:${HOST_GID:-1000}"
+    volumes:
+      - ./frontend:/app
+      - mms-node-modules:/app/node_modules
+      - mms-pnpm-store:/home/node/.local/share/pnpm/store
+      - mms-nuxt-cache:/app/.nuxt
+      - mms-nuxt-output:/app/.output
+    ports:
+      - "3001:3000"   # 宿主机 3001 → 容器 3000
+    env_file:
+      - .env
+    restart: unless-stopped
+    command: sh -c "pnpm install && pnpm dev"
+    networks:
+      - docker-net
+
+# ============================================================
+# 外部网络（预先创建：docker network create docker-net）
+# 通用 postgres 容器也在此网络内，容器名 "postgres"，DB_HOST=postgres
+# ============================================================
+networks:
+  docker-net:
+    external: true
+
+# ============================================================
+# 具名卷（依赖/缓存隔离，不污染宿主机）
+# ============================================================
+volumes:
+  mms-go-mod-cache:
+  mms-go-build-cache:
+  mms-node-modules:
+  mms-pnpm-store:
+  mms-nuxt-cache:
+  mms-nuxt-output:

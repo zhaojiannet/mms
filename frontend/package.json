@@ -1,0 +1,31 @@
+{
+  "name": "mms-frontend",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "nuxt build",
+    "dev": "nuxt dev --host 0.0.0.0 --port 3000",
+    "generate": "nuxt generate",
+    "preview": "nuxt preview",
+    "postinstall": "nuxt prepare",
+    "typecheck": "nuxt typecheck"
+  },
+  "dependencies": {
+    "@iconify-json/heroicons": "latest",
+    "@iconify-json/lucide": "latest",
+    "@nuxt/ui": "^4.0.0",
+    "@pinia/nuxt": "latest",
+    "@vueuse/core": "latest",
+    "@vueuse/nuxt": "latest",
+    "nuxt": "^4.0.0",
+    "pinia": "latest",
+    "tailwindcss": "latest",
+    "vue": "latest",
+    "vue-router": "latest"
+  },
+  "devDependencies": {
+    "typescript": "latest"
+  },
+  "packageManager": "pnpm@10.33.0"
+}
