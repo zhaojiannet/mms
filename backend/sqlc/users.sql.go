@@ -17,7 +17,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5, COALESCE($6::text, 'staff')
 )
-RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at
+RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id
 `
 
 type CreateUserParams struct {
@@ -51,12 +51,22 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyID,
 	)
 	return i, err
 }
 
+const deleteUser = `-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1
+`
+
+func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, deleteUser, id)
+	return err
+}
+
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at FROM users WHERE email = $1
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -74,12 +84,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyID,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at FROM users WHERE id = $1
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -97,24 +108,26 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.LastLoginAt,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyID,
 	)
 	return i, err
 }
 
 const listUsersByTenant = `-- name: ListUsersByTenant :many
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at FROM users
-WHERE status = 'active'
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id FROM users
+WHERE ($3::text IS NULL OR status = $3::text)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
 `
 
 type ListUsersByTenantParams struct {
-	Limit  int32 `json:"limit"`
-	Offset int32 `json:"offset"`
+	Limit  int32   `json:"limit"`
+	Offset int32   `json:"offset"`
+	Status *string `json:"status"`
 }
 
 func (q *Queries) ListUsersByTenant(ctx context.Context, arg ListUsersByTenantParams) ([]User, error) {
-	rows, err := q.db.Query(ctx, listUsersByTenant, arg.Limit, arg.Offset)
+	rows, err := q.db.Query(ctx, listUsersByTenant, arg.Limit, arg.Offset, arg.Status)
 	if err != nil {
 		return nil, err
 	}
@@ -134,6 +147,7 @@ func (q *Queries) ListUsersByTenant(ctx context.Context, arg ListUsersByTenantPa
 			&i.LastLoginAt,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyID,
 		); err != nil {
 			return nil, err
 		}
@@ -145,6 +159,51 @@ func (q *Queries) ListUsersByTenant(ctx context.Context, arg ListUsersByTenantPa
 	return items, nil
 }
 
+const updateUser = `-- name: UpdateUser :one
+UPDATE users
+SET name   = COALESCE($2::text,   name),
+    phone  = COALESCE($3::text,  phone),
+    role   = COALESCE($4::text,   role),
+    status = COALESCE($5::text, status),
+    updated_at = now()
+WHERE id = $1
+RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id
+`
+
+type UpdateUserParams struct {
+	ID     uuid.UUID `json:"id"`
+	Name   *string   `json:"name"`
+	Phone  *string   `json:"phone"`
+	Role   *string   `json:"role"`
+	Status *string   `json:"status"`
+}
+
+func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, error) {
+	row := q.db.QueryRow(ctx, updateUser,
+		arg.ID,
+		arg.Name,
+		arg.Phone,
+		arg.Role,
+		arg.Status,
+	)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Email,
+		&i.Phone,
+		&i.PasswordHash,
+		&i.Name,
+		&i.Role,
+		&i.Status,
+		&i.LastLoginAt,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.LegacyID,
+	)
+	return i, err
+}
+
 const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
 UPDATE users
 SET last_login_at = now(),
@@ -154,5 +213,19 @@ WHERE id = $1
 
 func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
 	_, err := q.db.Exec(ctx, updateUserLastLogin, id)
+	return err
+}
+
+const updateUserPassword = `-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1
+`
+
+type UpdateUserPasswordParams struct {
+	ID           uuid.UUID `json:"id"`
+	PasswordHash string    `json:"password_hash"`
+}
+
+func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	return err
 }

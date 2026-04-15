@@ -44,10 +44,9 @@
           <tr>
             <th class="text-left px-4 py-3 font-medium">会员</th>
             <th class="text-left px-4 py-3 font-medium">手机</th>
-            <th class="text-left px-4 py-3 font-medium">性别</th>
-            <th class="text-left px-4 py-3 font-medium">生日</th>
+            <th class="text-right px-4 py-3 font-medium">卡余额</th>
+            <th class="text-right px-4 py-3 font-medium">挂账</th>
             <th class="text-left px-4 py-3 font-medium">状态</th>
-            <th class="text-left px-4 py-3 font-medium">加入时间</th>
             <th class="text-right px-4 py-3 font-medium">操作</th>
           </tr>
         </thead>
@@ -58,18 +57,23 @@
             class="hover:bg-stone-50/60 dark:hover:bg-stone-800/40 transition-colors"
           >
             <td class="px-4 py-3">
-              <div class="flex items-center gap-2.5">
+              <NuxtLink :to="`/members/${m.id}`" class="flex items-center gap-2.5 hover:text-primary-600 transition-colors">
                 <UAvatar :alt="m.name" size="sm" />
                 <span class="font-medium">{{ m.name }}</span>
-              </div>
+              </NuxtLink>
             </td>
             <td class="px-4 py-3 text-stone-600 dark:text-stone-400 tabular-nums">
               {{ m.phone || '—' }}
             </td>
-            <td class="px-4 py-3">
-              <UBadge :label="genderLabel(m.gender)" color="neutral" variant="soft" size="sm" />
+            <td class="px-4 py-3 text-right tabular-nums">
+              <span v-if="parseFloat(m.total_balance) > 0" class="font-medium">¥{{ m.total_balance }}</span>
+              <span v-else class="text-stone-400">—</span>
+              <span v-if="m.card_count > 0" class="text-xs text-stone-400 ml-1">({{ m.card_count }})</span>
             </td>
-            <td class="px-4 py-3 text-stone-600 dark:text-stone-400 tabular-nums">{{ m.birthday || '—' }}</td>
+            <td class="px-4 py-3 text-right tabular-nums">
+              <span v-if="parseFloat(m.total_pending) > 0" class="text-warning-600 font-medium">¥{{ m.total_pending }}</span>
+              <span v-else class="text-stone-400">—</span>
+            </td>
             <td class="px-4 py-3">
               <UBadge
                 :label="m.status === 'active' ? '正常' : '停用'"
@@ -78,7 +82,6 @@
                 size="sm"
               />
             </td>
-            <td class="px-4 py-3 text-stone-500 text-sm tabular-nums">{{ formatDate(m.created_at) }}</td>
             <td class="px-4 py-3 text-right">
               <div class="flex justify-end gap-1">
                 <UButton size="xs" variant="ghost" color="neutral" @click="openEdit(m)">编辑</UButton>
@@ -194,6 +197,9 @@ interface Member {
   birthday: string | null
   notes: string | null
   status: 'active' | 'inactive'
+  total_balance: string
+  total_pending: string
+  card_count: number
   created_at: string
   updated_at: string
 }

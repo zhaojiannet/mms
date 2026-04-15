@@ -1,0 +1,65 @@
+-- name: ListCardsByMember :many
+-- 会员名下的所有卡，附带卡型模板字段（前端显示用）
+SELECT
+  c.id, c.tenant_id, c.member_id, c.card_type_id,
+  c.final_price, c.final_discount_rate, c.balance,
+  c.issued_at, c.expires_at, c.status, c.notes,
+  c.legacy_id, c.created_at, c.updated_at,
+  ct.name          AS card_type_name,
+  ct.price         AS card_type_price,
+  ct.discount_rate AS card_type_discount_rate
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.member_id = $1
+ORDER BY c.issued_at DESC;
+
+-- name: GetCardByID :one
+SELECT
+  c.id, c.tenant_id, c.member_id, c.card_type_id,
+  c.final_price, c.final_discount_rate, c.balance,
+  c.issued_at, c.expires_at, c.status, c.notes,
+  c.legacy_id, c.created_at, c.updated_at,
+  ct.name          AS card_type_name,
+  ct.price         AS card_type_price,
+  ct.discount_rate AS card_type_discount_rate
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.id = $1;
+
+-- name: IssueCard :one
+-- 最小单元：只建 card 不建 transaction（开卡+收款联动由 handler 层组合）
+-- balance 默认 = final_price；调用方也可显式传（比如迁移时保留老余额）
+INSERT INTO cards (
+  tenant_id, member_id, card_type_id,
+  final_price, final_discount_rate, balance,
+  expires_at, notes
+)
+VALUES (
+  $1, $2, $3, $4, $5,
+  COALESCE(sqlc.narg('balance')::numeric, $4),
+  sqlc.narg('expires_at')::timestamptz,
+  sqlc.narg('notes')::text
+)
+RETURNING *;
+
+-- name: UpdateCard :one
+UPDATE cards
+SET final_price         = COALESCE(sqlc.narg('final_price')::numeric,         final_price),
+    final_discount_rate = COALESCE(sqlc.narg('final_discount_rate')::numeric, final_discount_rate),
+    status              = COALESCE(sqlc.narg('status')::text,                 status),
+    expires_at          = COALESCE(sqlc.narg('expires_at')::timestamptz,      expires_at),
+    notes               = COALESCE(sqlc.narg('notes')::text,                  notes),
+    updated_at          = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: DeleteCard :exec
+DELETE FROM cards WHERE id = $1;
+
+-- name: CountCardUsage :one
+SELECT count(*) FROM transactions WHERE card_id = $1;
+
+-- name: SumMemberActiveBalance :one
+SELECT COALESCE(SUM(balance), 0)::numeric AS total_balance
+FROM cards
+WHERE member_id = $1 AND status = 'active';

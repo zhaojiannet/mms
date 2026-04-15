@@ -10,15 +10,24 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgtype"
+	"github.com/shopspring/decimal"
 )
 
 const countMembers = `-- name: CountMembers :one
 SELECT count(*) FROM members
-WHERE status = COALESCE($1::text, status)
+WHERE ($1::text IS NULL OR status = $1::text)
+  AND ($2::text IS NULL
+       OR name  ILIKE '%' || $2::text || '%'
+       OR phone LIKE  '%' || $2::text || '%')
 `
 
-func (q *Queries) CountMembers(ctx context.Context, status *string) (int64, error) {
-	row := q.db.QueryRow(ctx, countMembers, status)
+type CountMembersParams struct {
+	Status *string `json:"status"`
+	Search *string `json:"search"`
+}
+
+func (q *Queries) CountMembers(ctx context.Context, arg CountMembersParams) (int64, error) {
+	row := q.db.QueryRow(ctx, countMembers, arg.Status, arg.Search)
 	var count int64
 	err := row.Scan(&count)
 	return count, err
@@ -27,7 +36,7 @@ func (q *Queries) CountMembers(ctx context.Context, status *string) (int64, erro
 const createMember = `-- name: CreateMember :one
 INSERT INTO members (tenant_id, name, phone, gender, birthday, notes)
 VALUES ($1, $2, $3, COALESCE($6::text, 'unknown'), $4, $5)
-RETURNING id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at
+RETURNING id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at, legacy_id
 `
 
 type CreateMemberParams struct {
@@ -60,6 +69,7 @@ func (q *Queries) CreateMember(ctx context.Context, arg CreateMemberParams) (Mem
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyID,
 	)
 	return i, err
 }
@@ -74,7 +84,7 @@ func (q *Queries) DeleteMember(ctx context.Context, id uuid.UUID) error {
 }
 
 const getMemberByID = `-- name: GetMemberByID :one
-SELECT id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at FROM members WHERE id = $1
+SELECT id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at, legacy_id FROM members WHERE id = $1
 `
 
 func (q *Queries) GetMemberByID(ctx context.Context, id uuid.UUID) (Member, error) {
@@ -91,14 +101,32 @@ func (q *Queries) GetMemberByID(ctx context.Context, id uuid.UUID) (Member, erro
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyID,
 	)
 	return i, err
 }
 
 const listMembers = `-- name: ListMembers :many
-SELECT id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at FROM members
-WHERE status = COALESCE($3::text, status)
-ORDER BY created_at DESC
+SELECT
+  m.id, m.tenant_id, m.name, m.phone, m.gender, m.birthday, m.notes, m.status,
+  m.created_at, m.updated_at, m.legacy_id,
+  COALESCE(cb.total_balance, 0)::numeric AS total_balance,
+  COALESCE(pc.total_pending, 0)::numeric AS total_pending,
+  COALESCE(cb.card_count, 0)::bigint     AS card_count
+FROM members m
+LEFT JOIN (
+  SELECT member_id, SUM(balance)::numeric AS total_balance, COUNT(*)::bigint AS card_count
+  FROM cards WHERE status = 'active' GROUP BY member_id
+) cb ON cb.member_id = m.id
+LEFT JOIN (
+  SELECT member_id, SUM(amount)::numeric AS total_pending
+  FROM member_credits WHERE settled_at IS NULL GROUP BY member_id
+) pc ON pc.member_id = m.id
+WHERE ($3::text IS NULL OR m.status = $3::text)
+  AND ($4::text IS NULL
+       OR m.name  ILIKE '%' || $4::text || '%'
+       OR m.phone LIKE  '%' || $4::text || '%')
+ORDER BY m.created_at DESC
 LIMIT $1 OFFSET $2
 `
 
@@ -106,17 +134,40 @@ type ListMembersParams struct {
 	Limit  int32   `json:"limit"`
 	Offset int32   `json:"offset"`
 	Status *string `json:"status"`
+	Search *string `json:"search"`
 }
 
-func (q *Queries) ListMembers(ctx context.Context, arg ListMembersParams) ([]Member, error) {
-	rows, err := q.db.Query(ctx, listMembers, arg.Limit, arg.Offset, arg.Status)
+type ListMembersRow struct {
+	ID           uuid.UUID          `json:"id"`
+	TenantID     uuid.UUID          `json:"tenant_id"`
+	Name         string             `json:"name"`
+	Phone        *string            `json:"phone"`
+	Gender       string             `json:"gender"`
+	Birthday     pgtype.Date        `json:"birthday"`
+	Notes        *string            `json:"notes"`
+	Status       string             `json:"status"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	LegacyID     *string            `json:"legacy_id"`
+	TotalBalance decimal.Decimal    `json:"total_balance"`
+	TotalPending decimal.Decimal    `json:"total_pending"`
+	CardCount    int64              `json:"card_count"`
+}
+
+func (q *Queries) ListMembers(ctx context.Context, arg ListMembersParams) ([]ListMembersRow, error) {
+	rows, err := q.db.Query(ctx, listMembers,
+		arg.Limit,
+		arg.Offset,
+		arg.Status,
+		arg.Search,
+	)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []Member
+	var items []ListMembersRow
 	for rows.Next() {
-		var i Member
+		var i ListMembersRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -128,6 +179,10 @@ func (q *Queries) ListMembers(ctx context.Context, arg ListMembersParams) ([]Mem
 			&i.Status,
 			&i.CreatedAt,
 			&i.UpdatedAt,
+			&i.LegacyID,
+			&i.TotalBalance,
+			&i.TotalPending,
+			&i.CardCount,
 		); err != nil {
 			return nil, err
 		}
@@ -149,7 +204,7 @@ SET name       = COALESCE($2::text,    name),
     status     = COALESCE($7::text,  status),
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at
+RETURNING id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at, legacy_id
 `
 
 type UpdateMemberParams struct {
@@ -184,6 +239,7 @@ func (q *Queries) UpdateMember(ctx context.Context, arg UpdateMemberParams) (Mem
 		&i.Status,
 		&i.CreatedAt,
 		&i.UpdatedAt,
+		&i.LegacyID,
 	)
 	return i, err
 }

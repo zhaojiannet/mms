@@ -16,16 +16,20 @@ import (
 )
 
 // MemberDTO 对外的会员视图，隐藏 tenant_id（前端无需知道）
+// 列表场景会附带聚合字段（TotalBalance/TotalPending/CardCount），单查/创建/更新时保持 0
 type MemberDTO struct {
-	ID        uuid.UUID `json:"id"`
-	Name      string    `json:"name"`
-	Phone     *string   `json:"phone"`
-	Gender    string    `json:"gender"`
-	Birthday  *string   `json:"birthday"`
-	Notes     *string   `json:"notes"`
-	Status    string    `json:"status"`
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	ID           uuid.UUID `json:"id"`
+	Name         string    `json:"name"`
+	Phone        *string   `json:"phone"`
+	Gender       string    `json:"gender"`
+	Birthday     *string   `json:"birthday"`
+	Notes        *string   `json:"notes"`
+	Status       string    `json:"status"`
+	TotalBalance string    `json:"total_balance"`
+	TotalPending string    `json:"total_pending"`
+	CardCount    int64     `json:"card_count"`
+	CreatedAt    time.Time `json:"created_at"`
+	UpdatedAt    time.Time `json:"updated_at"`
 }
 
 type ListResponse struct {
@@ -61,19 +65,25 @@ func List(c *echo.Context) error {
 	if s := c.Request().URL.Query().Get("status"); s != "" {
 		status = &s
 	}
+	var search *string
+	if s := c.Request().URL.Query().Get("search"); s != "" {
+		search = &s
+	}
 
-	rows, err := q.ListMembers(ctx, sqlc.ListMembersParams{Limit: limit, Offset: offset, Status: status})
+	rows, err := q.ListMembers(ctx, sqlc.ListMembersParams{
+		Limit: limit, Offset: offset, Status: status, Search: search,
+	})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "list members: "+err.Error())
 	}
-	total, err := q.CountMembers(ctx, status)
+	total, err := q.CountMembers(ctx, sqlc.CountMembersParams{Status: status, Search: search})
 	if err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, "count members: "+err.Error())
 	}
 
 	items := make([]MemberDTO, 0, len(rows))
 	for _, m := range rows {
-		items = append(items, toDTO(m))
+		items = append(items, toListDTO(m))
 	}
 	return c.JSON(http.StatusOK, ListResponse{Items: items, Total: total})
 }
@@ -183,17 +193,40 @@ func Delete(c *echo.Context) error {
 
 func toDTO(m sqlc.Member) MemberDTO {
 	dto := MemberDTO{
-		ID:        m.ID,
-		Name:      m.Name,
-		Phone:     m.Phone,
-		Gender:    m.Gender,
-		Notes:     m.Notes,
-		Status:    m.Status,
-		CreatedAt: m.CreatedAt.Time,
-		UpdatedAt: m.UpdatedAt.Time,
+		ID:           m.ID,
+		Name:         m.Name,
+		Phone:        m.Phone,
+		Gender:       m.Gender,
+		Notes:        m.Notes,
+		Status:       m.Status,
+		TotalBalance: "0",
+		TotalPending: "0",
+		CreatedAt:    m.CreatedAt.Time,
+		UpdatedAt:    m.UpdatedAt.Time,
 	}
 	if m.Birthday.Valid {
 		s := m.Birthday.Time.Format("2006-01-02")
+		dto.Birthday = &s
+	}
+	return dto
+}
+
+func toListDTO(r sqlc.ListMembersRow) MemberDTO {
+	dto := MemberDTO{
+		ID:           r.ID,
+		Name:         r.Name,
+		Phone:        r.Phone,
+		Gender:       r.Gender,
+		Notes:        r.Notes,
+		Status:       r.Status,
+		TotalBalance: r.TotalBalance.String(),
+		TotalPending: r.TotalPending.String(),
+		CardCount:    r.CardCount,
+		CreatedAt:    r.CreatedAt.Time,
+		UpdatedAt:    r.UpdatedAt.Time,
+	}
+	if r.Birthday.Valid {
+		s := r.Birthday.Time.Format("2006-01-02")
 		dto.Birthday = &s
 	}
 	return dto
