@@ -1,0 +1,30 @@
+# gitleaks 配置：扫描 git 历史 + 工作区，禁止泄露密钥
+# https://github.com/gitleaks/gitleaks
+#
+# 本地手动扫描：
+#   docker run --rm -v $(pwd):/repo zricethezav/gitleaks:latest detect --source /repo --config /repo/.gitleaks.toml --verbose
+#
+# CI 集成在 .github/workflows/gitleaks.yml
+
+title = "MMS Gitleaks Config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "项目级例外（确认安全的字符串）"
+paths = [
+    '''\.env\.example$''',                          # 模板，无真值
+    '''docs/.*\.md$''',                             # 文档示例
+    '''migration/legacy/sql/.*\.sql$''',            # 老数据迁移 SQL（含老 hash 等历史）
+    '''migration/legacy/ingest/.*''',               # 一次性迁移工具
+]
+
+regexes = [
+    # 老 demo 用户名（看似邮箱但不是）
+    '''demo@example.com''',
+    # bootstrap 占位密码（首次运行后会强制改）
+    '''change_me_on_first_login''',
+    # 测试密码
+    '''iso-pwd123''',
+]

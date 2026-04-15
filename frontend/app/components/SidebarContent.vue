@@ -71,7 +71,7 @@ const navGroups = [
   {
     label: '工作',
     items: [
-      { to: '/',             label: '工作台', icon: 'i-lucide-layout-dashboard' },
+      { to: '/',             label: '收银',   icon: 'i-lucide-calculator' },
       { to: '/members',      label: '会员',   icon: 'i-lucide-users' },
       { to: '/appointments', label: '预约',   icon: 'i-lucide-calendar-days' },
       { to: '/reports',      label: '报表',   icon: 'i-lucide-bar-chart-3' },

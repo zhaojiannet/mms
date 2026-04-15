@@ -20,6 +20,22 @@ WHERE id = $1;
 
 -- name: ListUsersByTenant :many
 SELECT * FROM users
-WHERE status = 'active'
+WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2;
+
+-- name: UpdateUser :one
+UPDATE users
+SET name   = COALESCE(sqlc.narg('name')::text,   name),
+    phone  = COALESCE(sqlc.narg('phone')::text,  phone),
+    role   = COALESCE(sqlc.narg('role')::text,   role),
+    status = COALESCE(sqlc.narg('status')::text, status),
+    updated_at = now()
+WHERE id = $1
+RETURNING *;
+
+-- name: UpdateUserPassword :exec
+UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1;
+
+-- name: DeleteUser :exec
+DELETE FROM users WHERE id = $1;

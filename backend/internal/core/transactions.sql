@@ -1,0 +1,61 @@
+-- name: GetTransactionByID :one
+SELECT * FROM transactions WHERE id = $1;
+
+-- name: CreateTransaction :one
+-- 统一入口：消费 / 办卡 / 清挂账 都走这里，kind 区分
+-- discount_amount 可空默认 0；transaction_time 可空默认 now()
+INSERT INTO transactions (
+  tenant_id, kind, status,
+  member_id, customer_name, staff_id,
+  payment_method_id, card_id,
+  total_amount, actual_paid_amount, discount_amount,
+  transaction_time, summary, notes
+) VALUES (
+  $1, $2, 'completed',
+  sqlc.narg('member_id')::uuid,
+  sqlc.narg('customer_name')::text,
+  sqlc.narg('staff_id')::uuid,
+  $3,
+  sqlc.narg('card_id')::uuid,
+  $4, $5,
+  COALESCE(sqlc.narg('discount_amount')::numeric, 0),
+  COALESCE(sqlc.narg('transaction_time')::timestamptz, now()),
+  sqlc.narg('summary')::text,
+  sqlc.narg('notes')::text
+) RETURNING *;
+
+-- name: ListTransactions :many
+-- 列出交易，附带会员名 / 卡类型名 / 项目数 (POS 收银底部 / 流水页展示)
+SELECT
+  sqlc.embed(t),
+  m.name  AS member_name,
+  ct.name AS card_type_name,
+  COALESCE((SELECT SUM(quantity)::int FROM transaction_items WHERE transaction_id = t.id), 0)::int AS item_qty
+FROM transactions t
+LEFT JOIN members m     ON m.id = t.member_id
+LEFT JOIN cards c       ON c.id = t.card_id
+LEFT JOIN card_types ct ON ct.id = c.card_type_id
+WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR t.transaction_time >= sqlc.narg('start_date')::timestamptz)
+  AND (sqlc.narg('end_date')::timestamptz   IS NULL OR t.transaction_time <  sqlc.narg('end_date')::timestamptz)
+  AND (sqlc.narg('kind')::text              IS NULL OR t.kind             =  sqlc.narg('kind')::text)
+  AND (sqlc.narg('include_voided')::bool    IS TRUE OR t.status           =  'completed')
+ORDER BY t.transaction_time DESC, t.id DESC
+LIMIT $1 OFFSET $2;
+
+-- name: CountTransactionsBy :one
+SELECT count(*) FROM transactions
+WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.narg('start_date')::timestamptz)
+  AND (sqlc.narg('end_date')::timestamptz   IS NULL OR transaction_time <  sqlc.narg('end_date')::timestamptz)
+  AND (sqlc.narg('kind')::text              IS NULL OR kind              =  sqlc.narg('kind')::text)
+  AND (sqlc.narg('include_voided')::bool    IS TRUE OR status            =  'completed');
+
+-- name: VoidTransaction :exec
+-- 软撤单（A4 实现完整逻辑；此 query 仅负责更新状态 + 审计字段）
+UPDATE transactions
+SET status            = 'voided',
+    voided_at         = now(),
+    voided_by_user_id = $2,
+    voided_by_name    = $3,
+    void_reason       = sqlc.narg('reason')::text,
+    updated_at        = now()
+WHERE id = $1 AND status = 'completed';

@@ -12,6 +12,29 @@ import (
 	"github.com/shopspring/decimal"
 )
 
+type Appointment struct {
+	ID              uuid.UUID          `json:"id"`
+	TenantID        uuid.UUID          `json:"tenant_id"`
+	MemberID        pgtype.UUID        `json:"member_id"`
+	CustomerName    string             `json:"customer_name"`
+	CustomerPhone   string             `json:"customer_phone"`
+	AppointmentTime pgtype.Timestamptz `json:"appointment_time"`
+	AssignedStaffID pgtype.UUID        `json:"assigned_staff_id"`
+	Status          string             `json:"status"`
+	TransactionID   pgtype.UUID        `json:"transaction_id"`
+	Source          string             `json:"source"`
+	Notes           *string            `json:"notes"`
+	LegacyID        *string            `json:"legacy_id"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+}
+
+type AppointmentService struct {
+	TenantID      uuid.UUID `json:"tenant_id"`
+	AppointmentID uuid.UUID `json:"appointment_id"`
+	ServiceID     uuid.UUID `json:"service_id"`
+}
+
 type AuditLog struct {
 	ID         int64              `json:"id"`
 	TenantID   pgtype.UUID        `json:"tenant_id"`
@@ -24,6 +47,73 @@ type AuditLog struct {
 	IpAddress  *netip.Addr        `json:"ip_address"`
 	UserAgent  *string            `json:"user_agent"`
 	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+}
+
+type Card struct {
+	ID         uuid.UUID `json:"id"`
+	TenantID   uuid.UUID `json:"tenant_id"`
+	MemberID   uuid.UUID `json:"member_id"`
+	CardTypeID uuid.UUID `json:"card_type_id"`
+	// 开卡实际金额（塌缩老 customAmount/cardType.initialPrice）
+	FinalPrice decimal.Decimal `json:"final_price"`
+	// 实际折扣率（塌缩老 customDiscountRate/cardType.discountRate）
+	FinalDiscountRate decimal.Decimal `json:"final_discount_rate"`
+	// 当前可用余额；变化流水在 card_balance_logs
+	Balance   decimal.Decimal    `json:"balance"`
+	IssuedAt  pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt pgtype.Timestamptz `json:"expires_at"`
+	Status    string             `json:"status"`
+	Notes     *string            `json:"notes"`
+	LegacyID  *string            `json:"legacy_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CardBalanceLog struct {
+	ID            uuid.UUID   `json:"id"`
+	TenantID      uuid.UUID   `json:"tenant_id"`
+	CardID        uuid.UUID   `json:"card_id"`
+	TransactionID pgtype.UUID `json:"transaction_id"`
+	// issue=办卡, consume=消费, void_restore=撤单还原, manual_adjust=手动调整, expire=过期归零, freeze=冻结, unfreeze=解冻
+	ChangeType string `json:"change_type"`
+	// 变化量，正为增加余额，负为减少
+	Delta          decimal.Decimal    `json:"delta"`
+	BalanceBefore  decimal.Decimal    `json:"balance_before"`
+	BalanceAfter   decimal.Decimal    `json:"balance_after"`
+	OperatorUserID pgtype.UUID        `json:"operator_user_id"`
+	Note           *string            `json:"note"`
+	OccurredAt     pgtype.Timestamptz `json:"occurred_at"`
+	CreatedAt      pgtype.Timestamptz `json:"created_at"`
+}
+
+type CardType struct {
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	Name     string    `json:"name"`
+	// 模板默认售价（cards.final_price 可覆盖）
+	Price decimal.Decimal `json:"price"`
+	// 模板默认折扣率，例 0.700=7折（cards.final_discount_rate 可覆盖）
+	DiscountRate decimal.Decimal    `json:"discount_rate"`
+	SortOrder    int32              `json:"sort_order"`
+	Status       string             `json:"status"`
+	LegacyID     *string            `json:"legacy_id"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+}
+
+type CommissionRule struct {
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	StaffID  uuid.UUID `json:"staff_id"`
+	// NULL = 该员工所有服务的通用规则
+	ServiceID pgtype.UUID `json:"service_id"`
+	// 提成率 [0,1]，与 fixed_amount 二选一
+	Rate decimal.NullDecimal `json:"rate"`
+	// 固定金额，与 rate 二选一
+	FixedAmount decimal.NullDecimal `json:"fixed_amount"`
+	Note        *string             `json:"note"`
+	CreatedAt   pgtype.Timestamptz  `json:"created_at"`
+	UpdatedAt   pgtype.Timestamptz  `json:"updated_at"`
 }
 
 type Edition struct {
@@ -53,6 +143,37 @@ type Member struct {
 	Status    string             `json:"status"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+	// 老 demo Member.id（nanoid），迁移溯源用，新系统不参与业务
+	LegacyID *string `json:"legacy_id"`
+}
+
+type MemberCredit struct {
+	ID             uuid.UUID          `json:"id"`
+	TenantID       uuid.UUID          `json:"tenant_id"`
+	MemberID       uuid.UUID          `json:"member_id"`
+	Amount         decimal.Decimal    `json:"amount"`
+	Summary        *string            `json:"summary"`
+	ChargedAt      pgtype.Timestamptz `json:"charged_at"`
+	ChargedTxID    pgtype.UUID        `json:"charged_tx_id"`
+	SettledAt      pgtype.Timestamptz `json:"settled_at"`
+	SettlementTxID pgtype.UUID        `json:"settlement_tx_id"`
+	// 老 demo PENDING Transaction.id 溯源
+	LegacyID  *string            `json:"legacy_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+// 商户自定义的支付方式分类（非支付通道集成）
+type PaymentMethod struct {
+	ID        uuid.UUID `json:"id"`
+	TenantID  uuid.UUID `json:"tenant_id"`
+	Name      string    `json:"name"`
+	SortOrder int32     `json:"sort_order"`
+	IsActive  bool      `json:"is_active"`
+	// 老 demo PaymentMethod 枚举名（CASH/WECHAT_PAY/...），迁移溯源用
+	LegacyID  *string            `json:"legacy_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
 type RefreshToken struct {
@@ -65,6 +186,43 @@ type RefreshToken struct {
 	UserAgent *string            `json:"user_agent"`
 	IpAddress *netip.Addr        `json:"ip_address"`
 	CreatedAt pgtype.Timestamptz `json:"created_at"`
+}
+
+type Service struct {
+	ID          uuid.UUID       `json:"id"`
+	TenantID    uuid.UUID       `json:"tenant_id"`
+	Name        string          `json:"name"`
+	Price       decimal.Decimal `json:"price"`
+	DurationMin *int32          `json:"duration_min"`
+	Category    *string         `json:"category"`
+	Description *string         `json:"description"`
+	// 不参与会员卡折扣（商品/耗材类项目，按原价扣卡）
+	NoDiscount bool   `json:"no_discount"`
+	SortOrder  int32  `json:"sort_order"`
+	Status     string `json:"status"`
+	// 老 demo Service.id 溯源
+	LegacyID  *string            `json:"legacy_id"`
+	CreatedAt pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Staff struct {
+	ID       uuid.UUID   `json:"id"`
+	TenantID uuid.UUID   `json:"tenant_id"`
+	UserID   pgtype.UUID `json:"user_id"`
+	Name     string      `json:"name"`
+	Position string      `json:"position"`
+	Phone    *string     `json:"phone"`
+	HireDate pgtype.Date `json:"hire_date"`
+	// 是否参与提成核算（老板/前台可关闭）
+	CountsCommission bool `json:"counts_commission"`
+	// 默认提成率 [0,1]，commission_rules 无匹配时兜底
+	DefaultCommissionRate decimal.Decimal    `json:"default_commission_rate"`
+	SortOrder             int32              `json:"sort_order"`
+	Status                string             `json:"status"`
+	LegacyID              *string            `json:"legacy_id"`
+	CreatedAt             pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt             pgtype.Timestamptz `json:"updated_at"`
 }
 
 type Subscription struct {
@@ -94,6 +252,59 @@ type Tenant struct {
 	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
 }
 
+// 每租户 KV 配置表，替代老 SystemConfig 单行宽表
+type TenantSetting struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	Key      string    `json:"key"`
+	// JSONB，支持任意结构（bool/string/number/object/null）
+	Value     []byte             `json:"value"`
+	UpdatedAt pgtype.Timestamptz `json:"updated_at"`
+}
+
+type Transaction struct {
+	ID       uuid.UUID `json:"id"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	// sale=消费, recharge=办卡/充值, credit_settlement=清挂账
+	Kind string `json:"kind"`
+	// completed/voided；撤单不删数据，改状态
+	Status          string      `json:"status"`
+	MemberID        pgtype.UUID `json:"member_id"`
+	CustomerName    *string     `json:"customer_name"`
+	StaffID         pgtype.UUID `json:"staff_id"`
+	PaymentMethodID uuid.UUID   `json:"payment_method_id"`
+	// 非空即走扣会员卡（与 payment_method 解耦）
+	CardID      pgtype.UUID     `json:"card_id"`
+	TotalAmount decimal.Decimal `json:"total_amount"`
+	// 实收；<total 时差额入 member_credits（挂账）
+	ActualPaidAmount decimal.Decimal    `json:"actual_paid_amount"`
+	DiscountAmount   decimal.Decimal    `json:"discount_amount"`
+	TransactionTime  pgtype.Timestamptz `json:"transaction_time"`
+	VoidedAt         pgtype.Timestamptz `json:"voided_at"`
+	VoidedByUserID   pgtype.UUID        `json:"voided_by_user_id"`
+	VoidedByName     *string            `json:"voided_by_name"`
+	VoidReason       *string            `json:"void_reason"`
+	Summary          *string            `json:"summary"`
+	Notes            *string            `json:"notes"`
+	LegacyID         *string            `json:"legacy_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt        pgtype.Timestamptz `json:"updated_at"`
+}
+
+type TransactionItem struct {
+	ID            uuid.UUID   `json:"id"`
+	TenantID      uuid.UUID   `json:"tenant_id"`
+	TransactionID uuid.UUID   `json:"transaction_id"`
+	ServiceID     pgtype.UUID `json:"service_id"`
+	// 项目名快照，service 改名或删除后报表仍可读
+	ServiceNameSnapshot string          `json:"service_name_snapshot"`
+	Price               decimal.Decimal `json:"price"`
+	Quantity            int32           `json:"quantity"`
+	// 下单时按 commission_rules + staff.default 算定的提成（快照，规则变化不影响历史）
+	CommissionAmount decimal.Decimal    `json:"commission_amount"`
+	LegacyID         *string            `json:"legacy_id"`
+	CreatedAt        pgtype.Timestamptz `json:"created_at"`
+}
+
 type User struct {
 	ID           uuid.UUID          `json:"id"`
 	TenantID     uuid.UUID          `json:"tenant_id"`
@@ -106,4 +317,6 @@ type User struct {
 	LastLoginAt  pgtype.Timestamptz `json:"last_login_at"`
 	CreatedAt    pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
+	// 老 demo User.id（cuid），迁移溯源用
+	LegacyID *string `json:"legacy_id"`
 }

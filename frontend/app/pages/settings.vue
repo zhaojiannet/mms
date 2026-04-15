@@ -33,12 +33,15 @@
 
 <script setup lang="ts">
 const tabs = [
-  { to: '/settings/services', label: '服务项目',   icon: 'i-lucide-scissors' },
-  { to: '/settings/cards',    label: '会员卡类型', icon: 'i-lucide-credit-card' },
-  { to: '/settings/staff',    label: '员工',       icon: 'i-lucide-user-round' },
-  { to: '/settings/account',  label: '账户',       icon: 'i-lucide-key-round' },
-  { to: '/settings/general',  label: '通用',       icon: 'i-lucide-sliders-horizontal' },
-  { to: '/settings/void',     label: '交易撤销',   icon: 'i-lucide-undo-2' },
-  { to: '/settings/booking',  label: '预约配置',   icon: 'i-lucide-calendar-check' },
+  { to: '/settings/services',        label: '服务项目',   icon: 'i-lucide-scissors' },
+  { to: '/settings/cards',           label: '会员卡类型', icon: 'i-lucide-credit-card' },
+  { to: '/settings/staff',           label: '员工',       icon: 'i-lucide-user-round' },
+  { to: '/settings/commissions',     label: '提成规则',   icon: 'i-lucide-percent' },
+  { to: '/settings/payment-methods', label: '支付方式',   icon: 'i-lucide-wallet' },
+  { to: '/settings/users',           label: '用户',       icon: 'i-lucide-shield' },
+  { to: '/settings/account',         label: '账户',       icon: 'i-lucide-key-round' },
+  { to: '/settings/void',            label: '交易撤销',   icon: 'i-lucide-undo-2' },
+  { to: '/settings/booking',         label: '预约配置',   icon: 'i-lucide-calendar-check' },
+  { to: '/settings/audit',           label: '操作日志',   icon: 'i-lucide-history' },
 ]
 </script>
