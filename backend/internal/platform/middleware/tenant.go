@@ -1,9 +1,9 @@
 package middleware
 
 import (
-	"context"
 	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -15,6 +15,13 @@ import (
 
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
+
+// allowSlugHeaderFallback：是否允许 X-Tenant-Slug header 作为 Host 解析失败后的兜底
+// 仅 self-hosted / dev 开发方便；hosted 和 enterprise 模式禁用，防运维漏配反代
+var allowSlugHeaderFallback = func() bool {
+	mode := os.Getenv("DEPLOYMENT_MODE")
+	return mode == "" || mode == "self-hosted" || mode == "dev"
+}()
 
 // Context keys（不直接导出字符串，避免跨包字面量冲突）
 type ctxKey string
@@ -46,11 +53,12 @@ var reservedSubdomains = map[string]struct{}{
 }
 
 // TenantResolver 从 Host 头（或 X-Tenant-Slug）解析 slug，查 tenants 公开目录，注入 Tenant 到 context
-//   - 进程内 LRU+TTL 缓存减少数据库压力（500 商户 ×60s TTL ≈ 8.3 QPS 回表峰值）
+//   - 进程内 LRU+TTL 缓存减少数据库压力；5s TTL 权衡"status 变更响应速度"与"回表压力"
+//     （500 商户 × 5s TTL ≈ 100 QPS 回表峰值，PG 轻松扛）
 //   - 非 active 状态的 tenant 直接 403
 //   - tenants 表不启用 RLS（公开目录设计，参考 Supabase/PostgREST），此查询无需 SET app.current_tenant
 func TenantResolver(pool *pgxpool.Pool) echo.MiddlewareFunc {
-	cache := newTenantCache(60 * time.Second)
+	cache := newTenantCache(5 * time.Second)
 	queries := sqlc.New(pool)
 
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
@@ -96,7 +104,7 @@ func TenantFrom(c *echo.Context) Tenant {
 
 // extractSlug 解析 Host 子域名作为 tenant slug
 //   - 生产：<slug>.<app_public_domain> → slug
-//   - 开发/测试 fallback：X-Tenant-Slug 请求头（生产由反代层剥离该头）
+//   - 开发/自建 fallback：X-Tenant-Slug 请求头；hosted/enterprise 禁用以防反代漏配
 func extractSlug(r *http.Request) string {
 	host := r.Host
 	if idx := strings.Index(host, ":"); idx >= 0 {
@@ -108,7 +116,10 @@ func extractSlug(r *http.Request) string {
 			return candidate
 		}
 	}
-	return r.Header.Get("X-Tenant-Slug")
+	if allowSlugHeaderFallback {
+		return r.Header.Get("X-Tenant-Slug")
+	}
+	return ""
 }
 
 // ---- 进程内 LRU+TTL 缓存（最简实现，500 商户容量足够） ----
@@ -147,5 +158,3 @@ func (c *tenantCache) set(slug string, t Tenant) {
 	c.mu.Unlock()
 }
 
-// compile-time check：context 包不是每次都会用到，但保留引用
-var _ = context.Background

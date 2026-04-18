@@ -20,6 +20,7 @@
     "@vueuse/nuxt": "latest",
     "nuxt": "^4.0.0",
     "pinia": "latest",
+    "qrcode": "^1.5.4",
     "tailwindcss": "latest",
     "vue": "latest",
     "vue-router": "latest"

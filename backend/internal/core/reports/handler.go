@@ -38,13 +38,13 @@ func Business(c *echo.Context) error {
 		TransactionTime: start, TransactionTime_2: end,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "business: "+err.Error())
+		return mw.InternalError(c, "business: ", err)
 	}
 	credit, err := q.ReportCreditsCharged(ctx, sqlc.ReportCreditsChargedParams{
 		ChargedAt: start, ChargedAt_2: end,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "credits: "+err.Error())
+		return mw.InternalError(c, "credits: ", err)
 	}
 
 	total := row.SaleRevenue.Add(credit)
@@ -77,7 +77,7 @@ func ServiceRanking(c *echo.Context) error {
 		TransactionTime: start, TransactionTime_2: end, Limit: limit, Offset: offset,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "ranking: "+err.Error())
+		return mw.InternalError(c, "ranking: ", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"data":  rows,
@@ -97,7 +97,7 @@ func SleepingMembers(c *echo.Context) error {
 		Offset:          offset,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "sleeping: "+err.Error())
+		return mw.InternalError(c, "sleeping: ", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"data": rows, "page": page, "limit": limit})
 }
@@ -114,7 +114,7 @@ func MemberRanking(c *echo.Context) error {
 		TransactionTime: start, TransactionTime_2: end, Limit: limit, Offset: offset,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "member rank: "+err.Error())
+		return mw.InternalError(c, "member rank: ", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"data": rows, "page": page, "limit": limit})
 }
@@ -124,7 +124,7 @@ func MemberRanking(c *echo.Context) error {
 func BirthdayReminders(c *echo.Context) error {
 	rows, err := sqlc.New(mw.TxFrom(c)).ReportBirthdayReminders(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "birthday: "+err.Error())
+		return mw.InternalError(c, "birthday: ", err)
 	}
 	if rows == nil {
 		rows = []sqlc.ReportBirthdayRemindersRow{}
@@ -143,7 +143,7 @@ func PaymentSummary(c *echo.Context) error {
 		TransactionTime: start, TransactionTime_2: end,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "payment: "+err.Error())
+		return mw.InternalError(c, "payment: ", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
 }
@@ -159,7 +159,7 @@ func CardSalesSummary(c *echo.Context) error {
 		IssuedAt: start, IssuedAt_2: end,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "card sales: "+err.Error())
+		return mw.InternalError(c, "card sales: ", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"data": rows})
 }
@@ -187,11 +187,11 @@ func PendingStats(c *echo.Context) error {
 
 	stats, err := q.ReportPendingStats(ctx)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "stats: "+err.Error())
+		return mw.InternalError(c, "stats: ", err)
 	}
 	rows, err := q.ReportPendingByMember(ctx, sqlc.ReportPendingByMemberParams{Limit: limit, Offset: offset})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "by member: "+err.Error())
+		return mw.InternalError(c, "by member: ", err)
 	}
 
 	avg := decimal.Zero

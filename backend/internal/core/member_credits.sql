@@ -4,12 +4,6 @@ SELECT * FROM member_credits
 WHERE member_id = $1 AND settled_at IS NULL
 ORDER BY charged_at DESC;
 
--- name: ListCreditsByMember :many
-SELECT * FROM member_credits
-WHERE member_id = $1
-ORDER BY charged_at DESC
-LIMIT $2 OFFSET $3;
-
 -- name: CreateCredit :one
 -- 新增挂账（消费后没付款）
 INSERT INTO member_credits (
@@ -25,6 +19,17 @@ RETURNING *;
 
 -- name: GetCreditByID :one
 SELECT * FROM member_credits WHERE id = $1;
+
+-- name: LockCreditForUpdate :one
+-- 单笔清账路径：防双击重复创建 settlement 交易
+SELECT * FROM member_credits WHERE id = $1 FOR UPDATE;
+
+-- name: LockPendingCreditsByMember :many
+-- 批量清账路径：一次锁定该会员所有未清挂账；再有并发请求会阻塞到本 tx commit
+SELECT * FROM member_credits
+WHERE member_id = $1 AND settled_at IS NULL
+ORDER BY charged_at DESC
+FOR UPDATE;
 
 -- name: MarkCreditSettled :one
 -- 标记单笔挂账已清（由 handler 先建 credit_settlement 交易，再调此函数）

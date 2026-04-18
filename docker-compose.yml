@@ -15,6 +15,7 @@ services:
       - ./backend:/app
       - mms-go-mod-cache:/home/app/go/pkg/mod
       - mms-go-build-cache:/home/app/.cache/go-build
+      - mms-uploads:/app/uploads   # 店铺 logo 等上传资产：独立 volume 持久化
     ports:
       - "8081:8080"   # 宿主机 8081 → 容器 8080（避开 anydeli-api 占用的 8080）
     env_file:
@@ -75,3 +76,4 @@ volumes:
   mms-pnpm-store:
   mms-nuxt-cache:
   mms-nuxt-output:
+  mms-uploads:

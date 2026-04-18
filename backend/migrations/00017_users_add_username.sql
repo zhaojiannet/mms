@@ -4,12 +4,10 @@
 -- ============================================================
 -- users 表补 username 列：登录支持 username 或 email
 --
--- 老 demo 用 username（非邮箱格式，如 'demo@example.com'）登录
--- 新 MMS 原设计只有 email，但老数据迁入时 username 不一定是合法邮箱
+-- 历史原因：部分导入数据的登录名不符合邮箱格式
 -- 方案：users 同时保留 username（可空）+ email（主）
 --   - 登录查询：WHERE email = $1 OR username = $1
---   - 迁移老 demo@example.com：填 username，email 留空（NULL）
---   - 应用层创建新用户：填 email，username 留空（或同步填 email 前缀）
+--   - 应用层创建新用户：填 email，username 留空
 -- ============================================================
 ALTER TABLE users ADD COLUMN username CITEXT;
 

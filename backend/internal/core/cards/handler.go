@@ -61,7 +61,7 @@ func ListByMember(c *echo.Context) error {
 	q := sqlc.New(tx)
 	rows, err := q.ListCardsByMember(c.Request().Context(), memberID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 
 	items := make([]DTO, 0, len(rows))
@@ -84,7 +84,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	return c.JSON(http.StatusOK, fromGetRow(r))
 }
@@ -113,7 +113,7 @@ func Issue(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card_type not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get card_type: "+err.Error())
+		return mw.InternalError(c, "get card_type: ", err)
 	}
 
 	finalPrice := ct.Price
@@ -149,7 +149,7 @@ func Issue(c *echo.Context) error {
 		Notes:             req.Notes,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "issue card: "+err.Error())
+		return mw.InternalError(c, "issue card: ", err)
 	}
 
 	return c.JSON(http.StatusCreated, fromCard(m, ct))
@@ -192,7 +192,7 @@ func Update(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update: "+err.Error())
+		return mw.InternalError(c, "update: ", err)
 	}
 	// 回查 card_type 拼 DTO
 	ct, _ := q.GetCardTypeByID(c.Request().Context(), m.CardTypeID)
@@ -210,13 +210,13 @@ func Delete(c *echo.Context) error {
 	q := sqlc.New(tx)
 	usage, err := q.CountCardUsage(c.Request().Context(), pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "check usage: "+err.Error())
+		return mw.InternalError(c, "check usage: ", err)
 	}
 	if usage > 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "该卡已有交易引用，不能删除，建议冻结（status=frozen）")
 	}
 	if err := q.DeleteCard(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

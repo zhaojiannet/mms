@@ -1,10 +1,12 @@
 package members
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"time"
+	"unicode/utf8"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,18 +20,19 @@ import (
 // MemberDTO 对外的会员视图，隐藏 tenant_id（前端无需知道）
 // 列表场景会附带聚合字段（TotalBalance/TotalPending/CardCount），单查/创建/更新时保持 0
 type MemberDTO struct {
-	ID           uuid.UUID `json:"id"`
-	Name         string    `json:"name"`
-	Phone        *string   `json:"phone"`
-	Gender       string    `json:"gender"`
-	Birthday     *string   `json:"birthday"`
-	Notes        *string   `json:"notes"`
-	Status       string    `json:"status"`
-	TotalBalance string    `json:"total_balance"`
-	TotalPending string    `json:"total_pending"`
-	CardCount    int64     `json:"card_count"`
-	CreatedAt    time.Time `json:"created_at"`
-	UpdatedAt    time.Time `json:"updated_at"`
+	ID              uuid.UUID `json:"id"`
+	Name            string    `json:"name"`
+	Phone           *string   `json:"phone"`
+	Gender          string    `json:"gender"`
+	Birthday        *string   `json:"birthday"`
+	Notes           *string   `json:"notes"`
+	Status          string    `json:"status"`
+	TotalBalance    string    `json:"total_balance"`
+	TotalPending    string    `json:"total_pending"`
+	CardCount       int64     `json:"card_count"`
+	ActiveCardCount int64     `json:"active_card_count"`
+	CreatedAt       time.Time `json:"created_at"`
+	UpdatedAt       time.Time `json:"updated_at"`
 }
 
 type ListResponse struct {
@@ -70,15 +73,28 @@ func List(c *echo.Context) error {
 		search = &s
 	}
 
+	// staff 角色的查询限制：防止批量盗取会员信息
+	//   - 必须提供 search 参数且长度 >= 3
+	//   - limit 硬上限 20
+	claims := mw.ClaimsFrom(c)
+	if claims.Role == mw.RoleStaff {
+		if search == nil || utf8.RuneCountInString(*search) < 3 {
+			return echo.NewHTTPError(http.StatusBadRequest, "请输入至少 3 个字符进行搜索")
+		}
+		if limit > 20 {
+			limit = 20
+		}
+	}
+
 	rows, err := q.ListMembers(ctx, sqlc.ListMembersParams{
 		Limit: limit, Offset: offset, Status: status, Search: search,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list members: "+err.Error())
+		return mw.InternalError(c, "list members: ", err)
 	}
 	total, err := q.CountMembers(ctx, sqlc.CountMembersParams{Status: status, Search: search})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "count members: "+err.Error())
+		return mw.InternalError(c, "count members: ", err)
 	}
 
 	items := make([]MemberDTO, 0, len(rows))
@@ -97,6 +113,9 @@ func Create(c *echo.Context) error {
 	if req.Name == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name is required")
 	}
+	if req.Phone == nil || *req.Phone == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, "phone is required")
+	}
 
 	tenant := mw.TenantFrom(c)
 	tx := mw.TxFrom(c)
@@ -105,6 +124,10 @@ func Create(c *echo.Context) error {
 	birthday, err := parseDate(req.Birthday)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid birthday: "+err.Error())
+	}
+
+	if err := checkPhoneUnique(c.Request().Context(), q, *req.Phone, nil); err != nil {
+		return err
 	}
 
 	m, err := q.CreateMember(c.Request().Context(), sqlc.CreateMemberParams{
@@ -116,7 +139,7 @@ func Create(c *echo.Context) error {
 		Notes:    req.Notes,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create member: "+err.Error())
+		return mw.InternalError(c, "create member: ", err)
 	}
 	return c.JSON(http.StatusCreated, toDTO(m))
 }
@@ -134,7 +157,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "member not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get member: "+err.Error())
+		return mw.InternalError(c, "get member: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -158,6 +181,11 @@ func Update(c *echo.Context) error {
 
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
+	if req.Phone != nil && *req.Phone != "" {
+		if err := checkPhoneUnique(c.Request().Context(), q, *req.Phone, &id); err != nil {
+			return err
+		}
+	}
 	m, err := q.UpdateMember(c.Request().Context(), sqlc.UpdateMemberParams{
 		ID:       id,
 		Name:     req.Name,
@@ -171,7 +199,7 @@ func Update(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "member not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update member: "+err.Error())
+		return mw.InternalError(c, "update member: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -186,7 +214,7 @@ func Delete(c *echo.Context) error {
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
 	if err := q.DeleteMember(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete member: "+err.Error())
+		return mw.InternalError(c, "delete member: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -213,17 +241,18 @@ func toDTO(m sqlc.Member) MemberDTO {
 
 func toListDTO(r sqlc.ListMembersRow) MemberDTO {
 	dto := MemberDTO{
-		ID:           r.ID,
-		Name:         r.Name,
-		Phone:        r.Phone,
-		Gender:       r.Gender,
-		Notes:        r.Notes,
-		Status:       r.Status,
-		TotalBalance: r.TotalBalance.String(),
-		TotalPending: r.TotalPending.String(),
-		CardCount:    r.CardCount,
-		CreatedAt:    r.CreatedAt.Time,
-		UpdatedAt:    r.UpdatedAt.Time,
+		ID:              r.ID,
+		Name:            r.Name,
+		Phone:           r.Phone,
+		Gender:          r.Gender,
+		Notes:           r.Notes,
+		Status:          r.Status,
+		TotalBalance:    r.TotalBalance.String(),
+		TotalPending:    r.TotalPending.String(),
+		CardCount:       r.CardCount,
+		ActiveCardCount: r.ActiveCardCount,
+		CreatedAt:       r.CreatedAt.Time,
+		UpdatedAt:       r.UpdatedAt.Time,
 	}
 	if r.Birthday.Valid {
 		s := r.Birthday.Time.Format("2006-01-02")
@@ -241,6 +270,30 @@ func parseDate(s *string) (pgtype.Date, error) {
 		return pgtype.Date{}, err
 	}
 	return pgtype.Date{Time: t, Valid: true}, nil
+}
+
+// checkPhoneUnique
+//   - 占位号 '00000000000' 跳过校验（业务允许重复，如"旅行社"）
+//   - excludeID：编辑时传当前会员 ID，排除自己
+func checkPhoneUnique(ctx context.Context, q *sqlc.Queries, phone string, excludeID *uuid.UUID) error {
+	if phone == "00000000000" {
+		return nil
+	}
+	var ex pgtype.UUID
+	if excludeID != nil {
+		ex = pgtype.UUID{Bytes: *excludeID, Valid: true}
+	}
+	exists, err := q.ExistsMemberByPhone(ctx, sqlc.ExistsMemberByPhoneParams{
+		Phone:     phone,
+		ExcludeID: ex,
+	})
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "check phone failed")
+	}
+	if exists {
+		return echo.NewHTTPError(http.StatusBadRequest, "该手机号已被其他会员使用")
+	}
+	return nil
 }
 
 func paginationFrom(limitStr, offsetStr string) (int32, int32) {

@@ -89,6 +89,7 @@ type CreateRequest struct {
 	ManualPrice      *decimal.Decimal `json:"manual_price"`     // 手动定价，覆盖标准折扣
 	TransactionTime  *string          `json:"transaction_time"` // 可手动补录历史时间（ISO）
 	Notes            *string          `json:"notes"`
+	PendingMode      *string          `json:"pending_mode"`     // "full"=全额挂账 "use_balance"=利用余额+差额挂账
 }
 
 func Create(c *echo.Context) error {
@@ -98,6 +99,12 @@ func Create(c *echo.Context) error {
 	}
 	if len(req.Items) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "items is required")
+	}
+	if len(req.Items) > 50 {
+		return echo.NewHTTPError(http.StatusBadRequest, "最多支持 50 个商品项")
+	}
+	if len(req.CardAllocations) > 10 {
+		return echo.NewHTTPError(http.StatusBadRequest, "最多支持 10 张卡组合支付")
 	}
 	if req.PaymentMethodID == uuid.Nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "payment_method_id is required")
@@ -124,7 +131,7 @@ func Create(c *echo.Context) error {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return echo.NewHTTPError(http.StatusNotFound, "service not found: "+it.ServiceID.String())
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "get service: "+err.Error())
+			return mw.InternalError(c, "get service: ", err)
 		}
 		total = total.Add(svc.Price.Mul(decimal.NewFromInt32(it.Quantity)))
 		itemRows = append(itemRows, struct {
@@ -139,8 +146,26 @@ func Create(c *echo.Context) error {
 	}
 
 	// 2. 计算 actual_paid
+	pendingMode := ""
+	if req.PendingMode != nil {
+		pendingMode = *req.PendingMode
+	}
+	if pendingMode != "" && req.MemberID == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "挂账必须指定会员")
+	}
+
 	actualPaid := total
-	if req.ManualPrice != nil {
+	if pendingMode == "full" {
+		actualPaid = decimal.Zero
+		req.CardAllocations = nil
+	} else if req.ManualPrice != nil {
+		// 防恶意洗账：ManualPrice 必须 >= 0（不允许负数）且 <= total（不允许加价）
+		if req.ManualPrice.IsNegative() {
+			return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能为负数")
+		}
+		if req.ManualPrice.GreaterThan(total) {
+			return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能超过应收金额")
+		}
 		actualPaid = *req.ManualPrice
 	} else if len(req.CardAllocations) > 0 {
 		actualPaid = decimal.Zero
@@ -157,9 +182,10 @@ func Create(c *echo.Context) error {
 	discount := total.Sub(actualPaid)
 
 	// 3. 扣卡前置校验
+	// FOR UPDATE 锁卡行：防并发双扣（POS 双击 / 同一卡在多终端同时开单）
 	var primaryCardID *uuid.UUID
 	type allocLine struct {
-		card   sqlc.GetCardByIDRow
+		card   sqlc.LockCardForUpdateRow
 		deduct decimal.Decimal
 	}
 	allocs := make([]allocLine, 0, len(req.CardAllocations))
@@ -168,12 +194,12 @@ func Create(c *echo.Context) error {
 		memberIDForCardCheck = *req.MemberID
 	}
 	for i, a := range req.CardAllocations {
-		card, err := q.GetCardByID(ctx, a.CardID)
+		card, err := q.LockCardForUpdate(ctx, a.CardID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return echo.NewHTTPError(http.StatusNotFound, "card not found: "+a.CardID.String())
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "get card: "+err.Error())
+			return mw.InternalError(c, "get card: ", err)
 		}
 		if memberIDForCardCheck != uuid.Nil && card.MemberID != memberIDForCardCheck {
 			return echo.NewHTTPError(http.StatusBadRequest, "card does not belong to this member")
@@ -230,7 +256,7 @@ func Create(c *echo.Context) error {
 		Notes:            notes,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create transaction: "+err.Error())
+		return mw.InternalError(c, "create transaction: ", err)
 	}
 
 	// 6. 建 transaction_items
@@ -244,7 +270,7 @@ func Create(c *echo.Context) error {
 			Quantity:            ir.qty,
 			CommissionAmount:    decimal.NullDecimal{Decimal: decimal.Zero, Valid: true},
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "create item: "+err.Error())
+			return mw.InternalError(c, "create item: ", err)
 		}
 	}
 
@@ -257,7 +283,7 @@ func Create(c *echo.Context) error {
 			Balance: negDelta,
 		})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "adjust balance: "+err.Error())
+			return mw.InternalError(c, "adjust balance: ", err)
 		}
 		if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
 			TenantID:      t.ID,
@@ -268,7 +294,30 @@ func Create(c *echo.Context) error {
 			BalanceAfter:  updated.Balance,
 			TransactionID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "log balance: "+err.Error())
+			return mw.InternalError(c, "log balance: ", err)
+		}
+	}
+
+	// 8. 挂账模式：创建 member_credits 记录
+	if pendingMode != "" && req.MemberID != nil {
+		pendingAmount := total.Sub(actualPaid)
+		if pendingAmount.GreaterThan(decimal.Zero) {
+			if _, err := q.CreateCredit(ctx, sqlc.CreateCreditParams{
+				TenantID:    t.ID,
+				MemberID:    *req.MemberID,
+				Amount:      pendingAmount,
+				Summary:     strPtr(summary),
+				ChargedAt:   txTime,
+				ChargedTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
+			}); err != nil {
+				return mw.InternalError(c, "create pending: ", err)
+			}
+			slog.Info("pending credit created",
+				"member_id", req.MemberID,
+				"amount", pendingAmount,
+				"tx_id", trx.ID,
+				"mode", pendingMode,
+			)
 		}
 	}
 
@@ -316,11 +365,21 @@ func IssueCard(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card_type not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get card_type: "+err.Error())
+		return mw.InternalError(c, "get card_type: ", err)
 	}
 
 	finalPrice := ct.Price
 	if req.FinalPrice != nil {
+		// 防篡改：final_price 必须 > 0；非 super_admin 不能低于模板 5 折（防 0.01 办 6999 卡）
+		if !req.FinalPrice.IsPositive() {
+			return echo.NewHTTPError(http.StatusBadRequest, "final_price 必须大于 0")
+		}
+		minFloor := ct.Price.Mul(decimal.NewFromFloat(0.5))
+		claims := mw.ClaimsFrom(c)
+		if claims.Role != mw.RoleSuperAdmin && req.FinalPrice.LessThan(minFloor) {
+			return echo.NewHTTPError(http.StatusBadRequest,
+				"final_price 不能低于模板价的 50%（如需更低折扣，请联系超级管理员）")
+		}
 		finalPrice = *req.FinalPrice
 	}
 	finalRate := ct.DiscountRate
@@ -348,7 +407,7 @@ func IssueCard(c *echo.Context) error {
 		Notes:             req.Notes,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "issue card: "+err.Error())
+		return mw.InternalError(c, "issue card: ", err)
 	}
 
 	// 2. 办卡交易
@@ -371,7 +430,7 @@ func IssueCard(c *echo.Context) error {
 		Summary:          strPtr(summary),
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create recharge tx: "+err.Error())
+		return mw.InternalError(c, "create recharge tx: ", err)
 	}
 
 	// 3. 余额流水：issue
@@ -384,7 +443,7 @@ func IssueCard(c *echo.Context) error {
 		BalanceAfter:  finalPrice,
 		TransactionID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "log balance: "+err.Error())
+		return mw.InternalError(c, "log balance: ", err)
 	}
 
 	return c.JSON(http.StatusCreated, IssueCardResponse{
@@ -423,12 +482,13 @@ func SettleCredit(c *echo.Context) error {
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
 
-	credit, err := q.GetCreditByID(ctx, pendingID)
+	// FOR UPDATE 锁定本条挂账：防并发双清
+	credit, err := q.LockCreditForUpdate(ctx, pendingID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "pending credit not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get credit: "+err.Error())
+		return mw.InternalError(c, "get credit: ", err)
 	}
 	if credit.MemberID != memberID {
 		return echo.NewHTTPError(http.StatusBadRequest, "credit does not belong to this member")
@@ -437,17 +497,17 @@ func SettleCredit(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "credit already settled")
 	}
 
-	// 若走会员卡：扣卡
+	// 若走会员卡：扣卡（同样 FOR UPDATE 锁）
 	var primaryCardID pgtype.UUID
 	var cardBefore, cardAfter decimal.Decimal
-	var card sqlc.GetCardByIDRow
+	var card sqlc.LockCardForUpdateRow
 	if req.CardID != nil {
-		card, err = q.GetCardByID(ctx, *req.CardID)
+		card, err = q.LockCardForUpdate(ctx, *req.CardID)
 		if err != nil {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return echo.NewHTTPError(http.StatusNotFound, "card not found")
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "get card: "+err.Error())
+			return mw.InternalError(c, "get card: ", err)
 		}
 		if card.MemberID != memberID {
 			return echo.NewHTTPError(http.StatusBadRequest, "card does not belong to member")
@@ -484,7 +544,7 @@ func SettleCredit(c *echo.Context) error {
 		Summary:          strPtr(summary),
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create settle tx: "+err.Error())
+		return mw.InternalError(c, "create settle tx: ", err)
 	}
 
 	// 走卡 → 扣款 + 流水
@@ -494,7 +554,7 @@ func SettleCredit(c *echo.Context) error {
 			Balance: credit.Amount.Neg(),
 		})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "adjust balance: "+err.Error())
+			return mw.InternalError(c, "adjust balance: ", err)
 		}
 		cardAfter = updated.Balance
 		if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
@@ -507,7 +567,7 @@ func SettleCredit(c *echo.Context) error {
 			TransactionID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 			Note:          strPtr("clear pending credit"),
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "log balance: "+err.Error())
+			return mw.InternalError(c, "log balance: ", err)
 		}
 	}
 
@@ -517,7 +577,7 @@ func SettleCredit(c *echo.Context) error {
 		SettledAt:        pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		SettlementTxID:   pgtype.UUID{Bytes: trx.ID, Valid: true},
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "mark settled: "+err.Error())
+		return mw.InternalError(c, "mark settled: ", err)
 	}
 
 	return c.JSON(http.StatusCreated, toDTO(trx))
@@ -548,6 +608,7 @@ func List(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid end_date")
 	}
+
 	var kind *string
 	if v := c.QueryParam("kind"); v != "" {
 		kind = &v
@@ -557,6 +618,27 @@ func List(c *echo.Context) error {
 		tr := true
 		includeVoided = &tr
 	}
+	var status *string
+	if v := c.QueryParam("status"); v != "" {
+		status = &v
+	}
+
+	// staff 强制仅今日 + 强制 status=completed：忽略客户端 start_date/end_date/status/include_voided
+	// 不让员工看撤销记录（敏感操作，admin 通过操作日志查）
+	claims := mw.ClaimsFrom(c)
+	if claims.Role == mw.RoleStaff {
+		now := time.Now()
+		todayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+		todayEnd := todayStart.Add(24 * time.Hour)
+		start = pgtype.Timestamptz{Time: todayStart, Valid: true}
+		end = pgtype.Timestamptz{Time: todayEnd, Valid: true}
+		completedStatus := "completed"
+		status = &completedStatus
+		includeVoided = nil
+		if limit > 50 {
+			limit = 50
+		}
+	}
 
 	rows, err := q.ListTransactions(ctx, sqlc.ListTransactionsParams{
 		Limit:         limit,
@@ -565,18 +647,20 @@ func List(c *echo.Context) error {
 		EndDate:       end,
 		Kind:          kind,
 		IncludeVoided: includeVoided,
+		Status:        status,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 	total, err := q.CountTransactionsBy(ctx, sqlc.CountTransactionsByParams{
 		StartDate:     start,
 		EndDate:       end,
 		Kind:          kind,
 		IncludeVoided: includeVoided,
+		Status:        status,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "count: "+err.Error())
+		return mw.InternalError(c, "count: ", err)
 	}
 
 	items := make([]DTO, 0, len(rows))
@@ -644,11 +728,11 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "transaction not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	itemRows, err := q.ListTransactionItems(ctx, id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "items: "+err.Error())
+		return mw.InternalError(c, "items: ", err)
 	}
 	items := make([]ItemDTO, 0, len(itemRows))
 	for _, it := range itemRows {

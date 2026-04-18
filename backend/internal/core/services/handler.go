@@ -19,7 +19,6 @@ type DTO struct {
 	ID          uuid.UUID       `json:"id"`
 	Name        string          `json:"name"`
 	Price       decimal.Decimal `json:"price"`
-	DurationMin *int32          `json:"duration_min"`
 	Category    *string         `json:"category"`
 	Description *string         `json:"description"`
 	NoDiscount  bool            `json:"no_discount"`
@@ -37,7 +36,6 @@ type ListResponse struct {
 type CreateRequest struct {
 	Name        string           `json:"name"`
 	Price       *decimal.Decimal `json:"price"`
-	DurationMin *int32           `json:"duration_min"`
 	Category    *string          `json:"category"`
 	Description *string          `json:"description"`
 	NoDiscount  *bool            `json:"no_discount"`
@@ -47,7 +45,6 @@ type CreateRequest struct {
 type UpdateRequest struct {
 	Name        *string          `json:"name"`
 	Price       *decimal.Decimal `json:"price"`
-	DurationMin *int32           `json:"duration_min"`
 	Category    *string          `json:"category"`
 	Description *string          `json:"description"`
 	NoDiscount  *bool            `json:"no_discount"`
@@ -67,11 +64,11 @@ func List(c *echo.Context) error {
 
 	rows, err := q.ListServices(c.Request().Context(), status)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list services: "+err.Error())
+		return mw.InternalError(c, "list services: ", err)
 	}
 	total, err := q.CountServices(c.Request().Context())
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "count: "+err.Error())
+		return mw.InternalError(c, "count: ", err)
 	}
 
 	items := make([]DTO, 0, len(rows))
@@ -94,7 +91,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "service not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -123,14 +120,13 @@ func Create(c *echo.Context) error {
 		TenantID:    t.ID,
 		Name:        req.Name,
 		Price:       *req.Price,
-		DurationMin: req.DurationMin,
 		Category:    req.Category,
 		Description: req.Description,
 		NoDiscount:  req.NoDiscount,
 		SortOrder:   req.SortOrder,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "create: ", err)
 	}
 	return c.JSON(http.StatusCreated, toDTO(m))
 }
@@ -157,7 +153,6 @@ func Update(c *echo.Context) error {
 		ID:          id,
 		Name:        req.Name,
 		Price:       priceNull,
-		DurationMin: req.DurationMin,
 		Category:    req.Category,
 		Description: req.Description,
 		NoDiscount:  req.NoDiscount,
@@ -168,7 +163,7 @@ func Update(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "service not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update: "+err.Error())
+		return mw.InternalError(c, "update: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -190,7 +185,7 @@ func Delete(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "service not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	if m.Status != "inactive" {
 		return echo.NewHTTPError(http.StatusBadRequest, "必须先将服务项目下架（status=inactive）再删除")
@@ -198,14 +193,14 @@ func Delete(c *echo.Context) error {
 
 	usage, err := q.CountServiceUsage(c.Request().Context(), pgtype.UUID{Bytes: id, Valid: true})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "check usage: "+err.Error())
+		return mw.InternalError(c, "check usage: ", err)
 	}
 	if usage.TxItemCount > 0 || usage.ApptCount > 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "该服务项目已被交易或预约引用，不能删除，建议只下架")
 	}
 
 	if err := q.DeleteService(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -215,7 +210,6 @@ func toDTO(m sqlc.Service) DTO {
 		ID:          m.ID,
 		Name:        m.Name,
 		Price:       m.Price,
-		DurationMin: m.DurationMin,
 		Category:    m.Category,
 		Description: m.Description,
 		NoDiscount:  m.NoDiscount,

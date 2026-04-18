@@ -4,12 +4,10 @@ package tenantsettings
 import (
 	"context"
 	"crypto/rand"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
-	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +32,7 @@ func List(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
 	rows, err := q.ListTenantSettings(c.Request().Context(), t.ID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 	items := make([]SettingDTO, 0, len(rows))
 	for _, r := range rows {
@@ -54,7 +52,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "setting not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	return c.JSON(http.StatusOK, SettingDTO{Key: row.Key, Value: row.Value, UpdatedAt: row.UpdatedAt.Time})
 }
@@ -78,7 +76,7 @@ func Upsert(c *echo.Context) error {
 		TenantID: t.ID, Key: key, Value: body.Value,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "upsert: "+err.Error())
+		return mw.InternalError(c, "upsert: ", err)
 	}
 	return c.JSON(http.StatusOK, SettingDTO{Key: row.Key, Value: row.Value, UpdatedAt: row.UpdatedAt.Time})
 }
@@ -90,16 +88,67 @@ func Delete(c *echo.Context) error {
 	if err := q.DeleteTenantSetting(c.Request().Context(), sqlc.DeleteTenantSettingParams{
 		TenantID: t.ID, Key: c.Param("key"),
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
 
+// ================ 公开店铺展示信息 ================
+
+// StoreInfoDTO 登录页等未登录场景使用的店铺展示信息
+type StoreInfoDTO struct {
+	Slug    string `json:"slug"`
+	Name    string `json:"name"`     // 展示名：优先 store_name 覆盖，否则 tenants.name
+	LoginBg string `json:"login_bg"` // 背景主题 key，前端映射到样式
+	LogoURL string `json:"logo_url"` // 店铺 logo 相对路径（前端拼 apiBase）
+}
+
+// StoreInfo GET /api/store/info
+// 公开接口：返回当前租户的展示名 + 登录背景主题 + logo URL
+func StoreInfo(c *echo.Context) error {
+	ctx := c.Request().Context()
+	t := mw.TenantFrom(c)
+	q := sqlc.New(mw.TxFrom(c))
+
+	dto := StoreInfoDTO{Slug: t.Slug, Name: t.Name, LoginBg: "beauty"}
+	if s, err := getStringSetting(ctx, q, t.ID, "store_name"); err == nil && s != "" {
+		dto.Name = s
+	}
+	if s, err := getStringSetting(ctx, q, t.ID, "login_bg_theme"); err == nil && s != "" {
+		dto.LoginBg = s
+	}
+	if s, err := getStringSetting(ctx, q, t.ID, "store_logo_url"); err == nil && s != "" {
+		dto.LogoURL = s
+	}
+	return c.JSON(http.StatusOK, dto)
+}
+
+func getStringSetting(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, key string) (string, error) {
+	row, err := q.GetTenantSetting(ctx, sqlc.GetTenantSettingParams{TenantID: tenantID, Key: key})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	var s string
+	if len(row.Value) > 0 {
+		_ = json.Unmarshal(row.Value, &s)
+	}
+	return s, nil
+}
+
 // ================ 特殊接口 ================
 
-// EnableVoidRequest：开启撤单功能需要输入"验证密码"（用户密码 + "!!!" 后缀）
+// EnableVoidRequest：开启撤单功能需要输入"超级密码"（管理员在"个人设置"中单独设置）
 type EnableVoidRequest struct {
 	Password string `json:"password"`
+}
+
+// SetSuperPasswordRequest：设置/修改超级密码（需要当前登录密码确认）
+type SetSuperPasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
 }
 
 // 内存中的错误次数限制（每 user 3 次，锁 5 分钟）
@@ -147,26 +196,25 @@ func EnableVoid(c *echo.Context) error {
 	}
 	voidAttemptsMu.Unlock()
 
-	// 必须以 !!! 结尾
-	if !strings.HasSuffix(req.Password, "!!!") {
-		recordAttempt(key)
-		return echo.NewHTTPError(http.StatusBadRequest, "验证密码错误")
-	}
-	actualPwd := strings.TrimSuffix(req.Password, "!!!")
-
-	// 查用户密码 hash
-	user, err := q.GetUserByID(ctx, claims.UserID)
+	// 超级密码必须已设置
+	superHash, err := getSuperPasswordHash(ctx, q, t.ID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "get user: "+err.Error())
+		return mw.InternalError(c, "get super password: ", err)
 	}
-	ok, verr := auth.VerifyPassword(actualPwd, user.PasswordHash)
+	if superHash == "" {
+		return echo.NewHTTPError(http.StatusPreconditionRequired, "尚未设置超级密码，请在个人设置中先设置")
+	}
+
+	ok, verr := auth.VerifyPassword(req.Password, superHash)
 	if verr != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "verify password: "+verr.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "verify: "+verr.Error())
 	}
 	if !ok {
 		recordAttempt(key)
-		return echo.NewHTTPError(http.StatusBadRequest, "验证密码错误")
+		return echo.NewHTTPError(http.StatusBadRequest, "超级密码错误")
 	}
+	// claims 与 t 已在前面校验使用
+	_ = claims
 
 	// 成功：清计数 + upsert 两条配置
 	clearAttempts(key)
@@ -176,6 +224,12 @@ func EnableVoid(c *echo.Context) error {
 	}
 	nowISO := time.Now().UTC().Format(time.RFC3339)
 	if err := setString(ctx, q, t.ID, "void_enabled_at", &nowISO); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	// 记录开启者 ID：多超管租户时，Void handler 校验 claims.UserID == enabler
+	// 防止 "A 开了 B 趁窗口撤单" 的攻击
+	enablerID := claims.UserID.String()
+	if err := setString(ctx, q, t.ID, "void_enabled_by", &enablerID); err != nil {
 		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
 	}
 
@@ -201,7 +255,7 @@ func DisableVoid(c *echo.Context) error {
 }
 
 // RegenerateBookingCode POST /api/tenant-settings/booking-code  body: {"code":"optional"}
-// 若不传 code：自动生成 8 位 hex
+// 若不传 code：自动生成 4 位数字
 // 传 code：必须 2-20 位 字母数字下划线
 type BookingCodeRequest struct {
 	Code *string `json:"code"`
@@ -217,11 +271,8 @@ func RegenerateBookingCode(c *echo.Context) error {
 		}
 		newCode = *req.Code
 	} else {
-		b := make([]byte, 4)
-		if _, err := rand.Read(b); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "gen code: "+err.Error())
-		}
-		newCode = hex.EncodeToString(b)
+		// 8 位字母+数字（无易混淆字符），约 2.8 * 10^12 种 — 防暴力枚举
+		newCode = randomBookingCode(8)
 	}
 
 	t := mw.TenantFrom(c)
@@ -240,7 +291,71 @@ func RegenerateBookingCode(c *echo.Context) error {
 	})
 }
 
+// SetSuperPassword POST /api/tenant-settings/super-password
+// body: { current_password, new_password }
+// 要求当前登录用户确认本人登录密码，然后设置 tenant 级超级密码
+func SetSuperPassword(c *echo.Context) error {
+	var req SetSuperPasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid: "+err.Error())
+	}
+	if len(req.NewPassword) < 8 {
+		return echo.NewHTTPError(http.StatusBadRequest, "新超级密码至少 8 位")
+	}
+	ctx := c.Request().Context()
+	t := mw.TenantFrom(c)
+	claims := mw.ClaimsFrom(c)
+	q := sqlc.New(mw.TxFrom(c))
+
+	user, err := q.GetUserByID(ctx, claims.UserID)
+	if err != nil {
+		return mw.InternalError(c, "get user: ", err)
+	}
+	ok, verr := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
+	if verr != nil || !ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "当前登录密码不正确")
+	}
+
+	hash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		return mw.InternalError(c, "hash: ", err)
+	}
+	if err := setString(ctx, q, t.ID, "super_password_hash", &hash); err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.NoContent(http.StatusNoContent)
+}
+
+// SuperPasswordStatus GET /api/tenant-settings/super-password/status
+func SuperPasswordStatus(c *echo.Context) error {
+	ctx := c.Request().Context()
+	t := mw.TenantFrom(c)
+	q := sqlc.New(mw.TxFrom(c))
+	hash, err := getSuperPasswordHash(ctx, q, t.ID)
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"is_set": hash != ""})
+}
+
 // --- helpers ---
+
+func getSuperPasswordHash(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID) (string, error) {
+	row, err := q.GetTenantSetting(ctx, sqlc.GetTenantSettingParams{
+		TenantID: tenantID, Key: "super_password_hash",
+	})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	var s string
+	if len(row.Value) > 0 {
+		_ = json.Unmarshal(row.Value, &s)
+	}
+	return s, nil
+}
 
 func setBool(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, key string, v bool) error {
 	raw, _ := json.Marshal(v)
@@ -276,6 +391,22 @@ func clearAttempts(key string) {
 	voidAttemptsMu.Lock()
 	defer voidAttemptsMu.Unlock()
 	delete(voidAttempts, key)
+}
+
+// randomBookingCode 生成 n 位 booking_code（字母+数字，去掉 O/0/I/l 等易混淆字符）
+// 约 52^8 ≈ 5.3 万亿种组合，防暴力枚举
+func randomBookingCode(n int) string {
+	const charset = "ABCDEFGHJKMNPQRSTUVWXYZ23456789abcdefghjkmnpqrstuvwxyz"
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		// 极不可能：fallback 用时间戳避免空串
+		return fmt.Sprintf("%x", time.Now().UnixNano())
+	}
+	out := make([]byte, n)
+	for i, v := range b {
+		out[i] = charset[int(v)%len(charset)]
+	}
+	return string(out)
 }
 
 func isValidBookingCode(s string) bool {

@@ -44,3 +44,9 @@ docker-compose.override.yml
 .claude/
 CLAUDE.md
 docs/
+
+# 真实商户迁移 / 生产部署配置（含私域信息，不上传公共仓库）
+/migration/legacy/
+/ops/cutover.md
+/ops/cutover.sh
+/ops/openresty/demo.conf

@@ -15,14 +15,17 @@ import (
 )
 
 type DTO struct {
-	ID        int64     `json:"id"`
-	ActorID   *string   `json:"actor_id"`
-	ActorType string    `json:"actor_type"`
-	Action    string    `json:"action"`
-	Payload   any       `json:"payload"`
-	IpAddress *string   `json:"ip_address"`
-	UserAgent *string   `json:"user_agent"`
-	CreatedAt time.Time `json:"created_at"`
+	ID         int64     `json:"id"`
+	ActorID    *string   `json:"actor_id"`
+	ActorName  *string   `json:"actor_name"`
+	ActorType  string    `json:"actor_type"`
+	Action     string    `json:"action"`
+	TargetType *string   `json:"target_type"`
+	TargetID   *string   `json:"target_id"`
+	Payload    any       `json:"payload"`
+	IpAddress  *string   `json:"ip_address"`
+	UserAgent  *string   `json:"user_agent"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 func List(c *echo.Context) error {
@@ -48,17 +51,20 @@ func List(c *echo.Context) error {
 		TenantID: pgtype.UUID{Bytes: t.ID, Valid: true},
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 
 	items := make([]DTO, 0, len(rows))
 	for _, r := range rows {
 		dto := DTO{
-			ID:        r.ID,
-			ActorType: r.ActorType,
-			Action:    r.Action,
-			UserAgent: r.UserAgent,
-			CreatedAt: r.CreatedAt.Time,
+			ID:         r.ID,
+			ActorName:  r.ActorName,
+			ActorType:  r.ActorType,
+			Action:     r.Action,
+			TargetType: r.TargetType,
+			TargetID:   r.TargetID,
+			UserAgent:  r.UserAgent,
+			CreatedAt:  r.CreatedAt.Time,
 		}
 		if r.ActorID.Valid {
 			s := uuid.UUID(r.ActorID.Bytes).String()
@@ -68,7 +74,6 @@ func List(c *echo.Context) error {
 			s := r.IpAddress.String()
 			dto.IpAddress = &s
 		}
-		// payload 是 jsonb（[]byte），直接传给前端反序列化
 		dto.Payload = r.Payload
 		items = append(items, dto)
 	}

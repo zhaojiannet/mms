@@ -101,14 +101,22 @@ func (q *Queries) ReportBusiness(ctx context.Context, arg ReportBusinessParams) 
 
 const reportCardSalesSummary = `-- name: ReportCardSalesSummary :many
 SELECT
-  ct.id   AS card_type_id,
-  ct.name AS card_type_name,
-  COUNT(c.id)::bigint        AS card_count,
+  (CASE
+    WHEN c.final_price <> ct.price OR c.final_discount_rate <> ct.discount_rate
+      THEN '00000000-0000-0000-0000-000000000000'::uuid
+    ELSE ct.id
+  END)::uuid AS card_type_id,
+  (CASE
+    WHEN c.final_price <> ct.price OR c.final_discount_rate <> ct.discount_rate
+      THEN '自定义面值卡'
+    ELSE ct.name
+  END)::text AS card_type_name,
+  COUNT(c.id)::bigint         AS card_count,
   SUM(c.final_price)::numeric AS total
 FROM cards c
 JOIN card_types ct ON ct.id = c.card_type_id
 WHERE c.issued_at >= $1 AND c.issued_at < $2
-GROUP BY ct.id, ct.name
+GROUP BY 1, 2
 ORDER BY total DESC
 `
 
@@ -124,6 +132,8 @@ type ReportCardSalesSummaryRow struct {
 	Total        decimal.Decimal `json:"total"`
 }
 
+// 自定义面值卡（final_price/折扣率偏离模板）聚为一行"自定义面值卡"，id 返回哨兵零 UUID；
+// 其余按卡型分组。
 func (q *Queries) ReportCardSalesSummary(ctx context.Context, arg ReportCardSalesSummaryParams) ([]ReportCardSalesSummaryRow, error) {
 	rows, err := q.db.Query(ctx, reportCardSalesSummary, arg.IssuedAt, arg.IssuedAt_2)
 	if err != nil {

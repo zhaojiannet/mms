@@ -26,21 +26,22 @@
         </Transition>
       </div>
 
-      <!-- 右：KPI 紧贴通知按钮 -->
+      <!-- 右：KPI 紧贴通知按钮；md 显示今日+挂账，lg 显示全部 4 项 -->
       <div class="flex items-center gap-4 shrink-0">
-        <div class="hidden lg:flex items-center gap-3 text-sm tabular-nums">
+        <div class="hidden md:flex items-center gap-3 text-sm tabular-nums">
           <div class="flex items-baseline gap-1.5">
             <span class="text-xs text-stone-500">今日</span>
-            <span class="font-semibold text-stone-900 dark:text-stone-100">¥{{ kpi.todayRevenue }}</span>
+            <span class="font-semibold text-stone-900 dark:text-stone-100">¥{{ kpi.todaySaleRevenue }}</span>
             <span class="text-xs text-stone-400">/ {{ kpi.todayCount }} 笔</span>
+            <span v-if="parseFloat(kpi.todayCreditCharged) > 0" class="text-xs text-warning-600">+挂{{ kpi.todayCreditCharged }}</span>
           </div>
-          <span class="text-stone-300 dark:text-stone-700">·</span>
-          <div class="flex items-baseline gap-1.5">
+          <span class="hidden lg:inline text-stone-300 dark:text-stone-700">·</span>
+          <div class="hidden lg:flex items-baseline gap-1.5">
             <span class="text-xs text-stone-500">本月</span>
             <span class="font-semibold text-stone-900 dark:text-stone-100">¥{{ kpi.monthRevenue }}</span>
           </div>
-          <span class="text-stone-300 dark:text-stone-700">·</span>
-          <div class="flex items-baseline gap-1.5">
+          <span class="hidden lg:inline text-stone-300 dark:text-stone-700">·</span>
+          <div class="hidden lg:flex items-baseline gap-1.5">
             <span class="text-xs text-stone-500">卡池</span>
             <span class="font-semibold text-primary-600 dark:text-primary-400">¥{{ kpi.cardPool }}</span>
           </div>
@@ -70,19 +71,31 @@
             />
           </div>
           <template #content>
-            <div class="w-96 max-h-[28rem] flex flex-col">
+            <div class="w-96 max-h-112 flex flex-col">
               <div class="flex items-center justify-between px-4 py-3 border-b border-stone-200/70 dark:border-stone-800">
                 <div class="flex items-center gap-2">
                   <span class="text-sm font-semibold">通知</span>
-                  <UBadge v-if="hasUnread" :label="String(unreadCount)" color="error" variant="soft" size="sm" />
+                  <UBadge v-if="hasUnread" :label="unreadCount > 99 ? '99+' : String(unreadCount)" color="error" variant="soft" size="sm" />
                 </div>
-                <UButton v-if="hasUnread" label="全部标记为已读" variant="ghost" color="neutral" size="xs" @click="markAllRead" />
+                <UButton v-if="hasUnread" label="全部已读" variant="ghost" color="neutral" size="xs" @click="markAllRead" />
               </div>
               <div class="flex-1 overflow-y-auto divide-y divide-stone-200/60 dark:divide-stone-800">
                 <div v-if="!notifications.length" class="px-6 py-16 text-center">
                   <UIcon name="i-lucide-bell-off" class="size-8 text-stone-300 dark:text-stone-600 mx-auto" />
                   <p class="mt-3 text-sm text-stone-500 dark:text-stone-400">暂无通知</p>
                 </div>
+                <NuxtLink
+                  v-for="n in notifications" :key="n.type + n.id"
+                  :to="n.link"
+                  class="flex items-start gap-3 px-4 py-3 hover:bg-stone-50/80 dark:hover:bg-stone-800/40 transition-colors cursor-pointer"
+                  @click="onNotiClick(n)"
+                >
+                  <UIcon :name="iconFor(n.type)" :class="['size-4 shrink-0 mt-0.5', colorFor(n.type)]" />
+                  <div class="flex-1 min-w-0">
+                    <div class="text-sm font-medium text-stone-900 dark:text-stone-100 truncate">{{ n.title }}</div>
+                    <div class="text-xs text-stone-500 dark:text-stone-400 mt-0.5 line-clamp-2">{{ n.summary }}</div>
+                  </div>
+                </NuxtLink>
               </div>
             </div>
           </template>
@@ -98,6 +111,8 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '收银' })
+
 const api = useApi()
 
 const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'numeric', weekday: 'long' })
@@ -109,6 +124,8 @@ const today = new Date().toLocaleDateString('zh-CN', { month: 'long', day: 'nume
 //   4. 未结挂账（仅 > 0 时显示，红色提醒）
 const kpi = reactive({
   todayRevenue: '0',
+  todaySaleRevenue: '0',
+  todayCreditCharged: '0',
   todayCount: 0,
   monthRevenue: '0',
   cardPool: '0',
@@ -130,6 +147,8 @@ async function loadKpi() {
 
     if (today) {
       kpi.todayRevenue = today.total_revenue || '0'
+      kpi.todaySaleRevenue = today.sale_revenue || '0'
+      kpi.todayCreditCharged = today.credit_charged || '0'
       kpi.todayCount = today.customer_count || 0
     }
     if (month) {
@@ -155,9 +174,40 @@ onMounted(() => {
 })
 onBeforeUnmount(() => clearInterval(_greetingTimer))
 
-// 通知（mock）
-const notifications = ref<any[]>([])
-const unreadCount = computed(() => notifications.value.filter(n => !n.read).length)
+// 通知：3 类合并（生日 / 预约 / 系统公告）
+interface NotiItem { id: string; type: 'birthday' | 'appointment' | 'announcement'; title: string; summary: string; link: string; occurred_at: string; read: boolean }
+const notifications = ref<NotiItem[]>([])
+const unreadCount = ref(0)
 const hasUnread = computed(() => unreadCount.value > 0)
-function markAllRead() { notifications.value.forEach(n => { n.read = true }) }
+
+async function loadNotifications() {
+  try {
+    const r = await api<{ items: NotiItem[]; unread_count: number }>('/api/notifications')
+    notifications.value = r.items || []
+    unreadCount.value = r.unread_count || 0
+  } catch {}
+}
+async function markAllRead() {
+  try {
+    await api('/api/notifications/read-all', { method: 'POST' })
+    await loadNotifications()
+  } catch {}
+}
+async function onNotiClick(n: NotiItem) {
+  if (n.type === 'announcement') {
+    try { await api(`/api/notifications/${n.id}/read`, { method: 'POST' }) } catch {}
+    await loadNotifications()
+  }
+}
+function iconFor(t: string) {
+  return ({ birthday: 'i-lucide-cake', appointment: 'i-lucide-calendar-clock', announcement: 'i-lucide-megaphone' } as Record<string, string>)[t] || 'i-lucide-bell'
+}
+function colorFor(t: string) {
+  return ({ birthday: 'text-pink-500', appointment: 'text-primary-500', announcement: 'text-warning-500' } as Record<string, string>)[t] || 'text-stone-400'
+}
+onMounted(loadNotifications)
+// 60 秒静默轮询
+let _notiTimer: any
+onMounted(() => { _notiTimer = setInterval(loadNotifications, 60 * 1000) })
+onBeforeUnmount(() => clearInterval(_notiTimer))
 </script>

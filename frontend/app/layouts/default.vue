@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen flex bg-stone-50 dark:bg-stone-950 text-default">
+  <div class="h-screen flex bg-stone-50 dark:bg-stone-950 text-default">
     <!-- Sidebar (PC)  -->
     <aside
       class="hidden lg:flex w-64 shrink-0 flex-col
@@ -23,19 +23,36 @@
           color="neutral"
           @click="drawerOpen = true"
         />
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2 min-w-0">
+          <img
+            v-if="storeInfo.logo_url"
+            :key="storeInfo.logo_url"
+            :src="cfg.apiBase + safeAssetUrl(storeInfo.logo_url)"
+            alt="Logo"
+            class="h-9 w-auto max-w-[2.5rem] object-contain shrink-0"
+          />
           <div
-            class="w-7 h-7 rounded-md flex items-center justify-center
-                   bg-primary-500 text-white font-semibold text-sm"
-          >D</div>
-          <span class="font-semibold">Demo Store</span>
+            v-else
+            class="w-9 h-9 rounded-md flex items-center justify-center
+                   bg-primary-500 text-white font-semibold shrink-0"
+          >{{ (storeInfo.name || 'S').slice(0, 1) }}</div>
+          <span class="font-semibold truncate">{{ storeInfo.name || 'Demo Store' }}</span>
         </div>
-        <div class="ml-auto">
-          <UserMenu />
+        <div class="ml-auto shrink-0">
+          <UserMenu compact />
         </div>
       </header>
 
-      <main class="flex-1 overflow-y-auto">
+      <main
+        class="flex-1 overflow-y-auto
+               [&::-webkit-scrollbar]:w-1.5
+               [&::-webkit-scrollbar-track]:bg-transparent
+               [&::-webkit-scrollbar-thumb]:bg-stone-300/70
+               [&::-webkit-scrollbar-thumb]:rounded-full
+               hover:[&::-webkit-scrollbar-thumb]:bg-stone-400
+               dark:[&::-webkit-scrollbar-thumb]:bg-stone-700/70
+               dark:hover:[&::-webkit-scrollbar-thumb]:bg-stone-600"
+      >
         <slot />
       </main>
     </div>
@@ -51,4 +68,7 @@
 
 <script setup lang="ts">
 const drawerOpen = ref(false)
+const cfg = useRuntimeConfig().public
+const { info: storeInfo, refresh } = useStoreInfo()
+onMounted(refresh)
 </script>

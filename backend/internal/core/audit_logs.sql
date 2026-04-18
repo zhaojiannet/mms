@@ -11,7 +11,11 @@ INSERT INTO audit_logs (
 );
 
 -- name: ListAuditLogs :many
-SELECT * FROM audit_logs
-WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR tenant_id = sqlc.narg('tenant_id')::uuid)
-ORDER BY created_at DESC
+SELECT
+  a.*,
+  u.name AS actor_name
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE (sqlc.narg('tenant_id')::uuid IS NULL OR a.tenant_id = sqlc.narg('tenant_id')::uuid)
+ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2;

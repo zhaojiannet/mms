@@ -2,19 +2,30 @@ package middleware
 
 import (
 	"net/http"
+	"os"
+	"strings"
 
 	"github.com/labstack/echo/v5"
 )
 
-// CORS 最简 CORS 中间件（开发用）
-//   - 回显 Origin + credentials，支持任何携带 token 的前端开发来源
-//   - 响应 OPTIONS 预检请求
-//   - 生产环境应由反代（OpenResty / Cloudflare）统一策略，后端可关闭此中间件
+// CORS 中间件：白名单 origin + credentials
+//   - 允许来源通过环境变量 CORS_ALLOWED_ORIGINS 配置（逗号分隔）
+//   - 未配置时默认放行 http://localhost:3001 和 http://localhost:3000（开发便利）
+//   - 响应 OPTIONS 预检
+//   - 生产环境建议在反代层统一 CORS，后端可关闭此中间件
 func CORS() echo.MiddlewareFunc {
+	allowed := parseAllowedOrigins()
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			origin := c.Request().Header.Get("Origin")
 			if origin == "" {
+				return next(c)
+			}
+			if !isAllowed(origin, allowed) {
+				// 不在白名单：不设 Allow-Origin（浏览器会拦截跨域请求）
+				if c.Request().Method == http.MethodOptions {
+					return c.NoContent(http.StatusForbidden)
+				}
 				return next(c)
 			}
 			h := c.Response().Header()
@@ -31,4 +42,39 @@ func CORS() echo.MiddlewareFunc {
 			return next(c)
 		}
 	}
+}
+
+func parseAllowedOrigins() []string {
+	v := strings.TrimSpace(os.Getenv("CORS_ALLOWED_ORIGINS"))
+	if v == "" {
+		return []string{
+			"http://localhost:3001",
+			"http://localhost:3000",
+		}
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// isAllowed 支持精确匹配，以及 "*.example.com" 通配匹配顶级子域
+func isAllowed(origin string, allowed []string) bool {
+	for _, a := range allowed {
+		if a == origin {
+			return true
+		}
+		if strings.HasPrefix(a, "*.") {
+			suffix := a[1:] // ".example.com"
+			if strings.HasSuffix(origin, suffix) && len(origin) > len(suffix) {
+				return true
+			}
+		}
+	}
+	return false
 }

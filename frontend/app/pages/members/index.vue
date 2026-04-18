@@ -1,26 +1,40 @@
 <template>
-  <div class="p-6 lg:p-8 max-w-7xl mx-auto space-y-6">
+  <div class="p-6 lg:p-8 max-w-7xl mx-auto space-y-5">
     <!-- Head -->
-    <header class="flex items-center justify-between gap-4 flex-wrap">
+    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
       <div>
-        <h1 class="text-3xl font-semibold tracking-tight">会员</h1>
-        <p class="mt-1 text-sm text-stone-500">共 {{ total }} 位会员</p>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">会员</h1>
+        <p class="mt-1 text-sm text-stone-500">
+          共 {{ total }} 位会员<span v-if="loaded.length < total"> · 已加载 {{ loaded.length }}</span>
+        </p>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-2 w-full sm:w-auto">
         <UInput
           v-model="search"
           icon="i-lucide-search"
           placeholder="按姓名或手机搜索"
           size="md"
-          class="w-56"
-        />
+          class="flex-1 sm:flex-none sm:w-64"
+          :ui="{ trailing: 'pe-1' }"
+        >
+          <template v-if="search?.length" #trailing>
+            <UButton
+              color="neutral"
+              variant="link"
+              size="sm"
+              icon="i-lucide-circle-x"
+              aria-label="清空搜索"
+              @click="search = ''"
+            />
+          </template>
+        </UInput>
         <UButton icon="i-lucide-user-plus" @click="openCreate">
           新建会员
         </UButton>
       </div>
     </header>
 
-    <!-- Filters -->
+    <!-- Status filter -->
     <div class="flex items-center gap-2 flex-wrap">
       <UBadge
         v-for="f in filters"
@@ -34,80 +48,173 @@
       </UBadge>
     </div>
 
-    <!-- Desktop table -->
+    <!-- Desktop: UTable -->
     <div
-      v-if="!loading && filtered.length > 0"
+      v-if="loaded.length > 0"
       class="hidden md:block rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-hidden"
     >
-      <table class="w-full text-base">
-        <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
-          <tr>
-            <th class="text-left px-4 py-3 font-medium">会员</th>
-            <th class="text-left px-4 py-3 font-medium">手机</th>
-            <th class="text-right px-4 py-3 font-medium">卡余额</th>
-            <th class="text-right px-4 py-3 font-medium">挂账</th>
-            <th class="text-left px-4 py-3 font-medium">状态</th>
-            <th class="text-right px-4 py-3 font-medium">操作</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
-          <tr
-            v-for="m in filtered"
-            :key="m.id"
-            class="hover:bg-stone-50/60 dark:hover:bg-stone-800/40 transition-colors"
+      <UTable
+        :data="loaded"
+        :columns="columns"
+        :ui="{
+          thead: 'bg-stone-50/60 dark:bg-stone-950/40',
+          th: 'px-3.5 py-2.5 text-xs text-stone-500 font-medium tracking-wide',
+          td: 'px-3.5 py-3 text-sm whitespace-nowrap',
+          tr: 'even:bg-stone-50 dark:even:bg-stone-800/30 hover:bg-stone-100/60 dark:hover:bg-stone-800/40 transition-colors',
+        }"
+      >
+        <template #name-cell="{ row }">
+          <button type="button" class="flex items-center gap-1.5 min-w-0 text-stone-900 dark:text-stone-100 hover:text-primary-600 transition-colors cursor-pointer" @click="openDetail(row.original)">
+            <span class="font-medium truncate">{{ row.original.name }}</span>
+            <UIcon
+              v-if="row.original.gender === 'female'"
+              name="i-lucide-venus"
+              class="size-3.5 text-pink-500 shrink-0"
+            />
+            <UIcon
+              v-else-if="row.original.gender === 'male'"
+              name="i-lucide-mars"
+              class="size-3.5 text-sky-500 shrink-0"
+            />
+          </button>
+        </template>
+
+        <template #phone-cell="{ row }">
+          <span class="text-stone-600 dark:text-stone-400 tabular-nums">{{ row.original.phone || '—' }}</span>
+        </template>
+
+        <template #card_count-cell="{ row }">
+          <div
+            v-if="row.original.card_count > 0"
+            class="group relative cursor-pointer"
+            @mouseenter="row.original.card_count > 1 && prefetchCards(row.original.id)"
+            @click="openDetail(row.original)"
           >
-            <td class="px-4 py-3">
-              <NuxtLink :to="`/members/${m.id}`" class="flex items-center gap-2.5 hover:text-primary-600 transition-colors">
-                <UAvatar :alt="m.name" size="sm" />
-                <span class="font-medium">{{ m.name }}</span>
-              </NuxtLink>
-            </td>
-            <td class="px-4 py-3 text-stone-600 dark:text-stone-400 tabular-nums">
-              {{ m.phone || '—' }}
-            </td>
-            <td class="px-4 py-3 text-right tabular-nums">
-              <span v-if="parseFloat(m.total_balance) > 0" class="font-medium">¥{{ m.total_balance }}</span>
-              <span v-else class="text-stone-400">—</span>
-              <span v-if="m.card_count > 0" class="text-xs text-stone-400 ml-1">({{ m.card_count }})</span>
-            </td>
-            <td class="px-4 py-3 text-right tabular-nums">
-              <span v-if="parseFloat(m.total_pending) > 0" class="text-warning-600 font-medium">¥{{ m.total_pending }}</span>
-              <span v-else class="text-stone-400">—</span>
-            </td>
-            <td class="px-4 py-3">
-              <UBadge
-                :label="m.status === 'active' ? '正常' : '停用'"
-                :color="m.status === 'active' ? 'success' : 'neutral'"
-                variant="soft"
-                size="sm"
-              />
-            </td>
-            <td class="px-4 py-3 text-right">
-              <div class="flex justify-end gap-1">
-                <UButton size="xs" variant="ghost" color="neutral" @click="openEdit(m)">编辑</UButton>
-                <UButton size="xs" variant="ghost" color="neutral" @click="toggleStatus(m)">
-                  {{ m.status === 'active' ? '停用' : '启用' }}
-                </UButton>
-                <UButton size="xs" variant="ghost" color="error" @click="confirmDelete(m)">删除</UButton>
+            <span
+              class="inline-flex items-center gap-1.5"
+              :class="row.original.active_card_count > 0 ? (row.original.active_card_count === row.original.card_count ? 'text-primary-600 dark:text-primary-400' : 'text-warning-600 dark:text-warning-400') : 'text-stone-400'"
+            >
+              <UIcon name="i-lucide-credit-card" class="size-4" />
+              <span class="tabular-nums">有卡 {{ row.original.active_card_count }}/{{ row.original.card_count }}</span>
+            </span>
+            <div
+              v-if="row.original.card_count > 1 && cardsCache.has(row.original.id)"
+              class="pointer-events-none absolute left-0 top-full mt-1 z-30 min-w-72 px-3 py-2.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal"
+            >
+              <div class="text-xs text-stone-400 dark:text-stone-500 mb-1.5">会员卡详情</div>
+              <div v-for="c in cardsCache.get(row.original.id)" :key="c.id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+                <span class="truncate">{{ c.card_type_name }}</span>
+                <span class="tabular-nums shrink-0">
+                  <span v-if="parseFloat(c.final_discount_rate) < 1" class="text-xs text-stone-400 mr-2">{{ (parseFloat(c.final_discount_rate) * 10).toFixed(1) }}折</span>
+                  <span class="font-semibold" :class="parseFloat(c.balance) > 0 ? '' : 'text-stone-500'">¥{{ c.balance }}</span>
+                </span>
               </div>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+            </div>
+          </div>
+          <span v-else class="text-stone-400">无卡</span>
+        </template>
+
+        <template #total_balance-cell="{ row }">
+          <div class="text-right">
+            <span
+              v-if="parseFloat(row.original.total_balance) > 0"
+              class="font-semibold tabular-nums text-primary-600 dark:text-primary-400"
+            >¥{{ row.original.total_balance }}</span>
+            <span v-else class="text-stone-400 tabular-nums">—</span>
+          </div>
+        </template>
+
+        <template #total_pending-cell="{ row }">
+          <div class="text-right">
+            <span
+              v-if="parseFloat(row.original.total_pending) > 0"
+              class="font-medium tabular-nums text-error-600"
+            >¥{{ row.original.total_pending }}</span>
+            <span v-else class="text-stone-400 tabular-nums">—</span>
+          </div>
+        </template>
+
+        <template #status-cell="{ row }">
+          <UBadge
+            :label="row.original.status === 'active' ? '正常' : '停用'"
+            :color="row.original.status === 'active' ? 'success' : 'neutral'"
+            variant="soft"
+            size="md"
+          />
+        </template>
+
+        <template #created_at-cell="{ row }">
+          <span class="text-stone-500 text-sm tabular-nums">{{ formatDate(row.original.created_at) }}</span>
+        </template>
+
+        <template #notes-cell="{ row }">
+          <UTooltip v-if="row.original.notes" :text="row.original.notes" :delay-duration="200" :ui="{ content: 'max-w-xs whitespace-normal' }">
+            <span class="text-stone-500 text-sm truncate block max-w-28 cursor-help">{{ row.original.notes }}</span>
+          </UTooltip>
+          <span v-else class="text-stone-400 dark:text-stone-600">—</span>
+        </template>
+
+        <template #actions-header>
+          <div class="text-center">操作</div>
+        </template>
+        <template #actions-cell="{ row }">
+          <div class="flex items-center justify-center gap-1.5">
+            <UButton
+              size="xs" variant="soft" color="primary"
+              icon="i-lucide-pencil"
+              class="active:scale-95 transition-transform"
+              @click="openEdit(row.original)"
+            >编辑</UButton>
+            <UDropdownMenu
+              :items="rowMenuItems(row.original)"
+              :content="{ align: 'end', sideOffset: 4 }"
+              :ui="{ content: 'w-36' }"
+            >
+              <UButton
+                size="xs" variant="soft" color="neutral"
+                icon="i-lucide-more-horizontal"
+                square
+                aria-label="更多操作"
+                class="active:scale-95 transition-transform"
+              />
+            </UDropdownMenu>
+          </div>
+        </template>
+      </UTable>
+
+      <!-- 加载更多 / 已显示全部 -->
+      <div class="px-4 py-3 border-t border-stone-200/60 dark:border-stone-800 flex items-center justify-center text-xs">
+        <button
+          v-if="hasMore"
+          type="button"
+          :disabled="loadingMore"
+          class="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          @click="loadMore"
+        >
+          <UIcon :name="loadingMore ? 'i-lucide-loader-circle' : 'i-lucide-chevron-down'" :class="['size-3.5', loadingMore && 'animate-spin']" />
+          {{ loadingMore ? '加载中…' : `加载更多（剩余 ${total - loaded.length} 条）` }}
+        </button>
+        <span v-else class="text-stone-400">已显示全部 {{ total }} 条</span>
+      </div>
     </div>
 
     <!-- Mobile cards -->
-    <div v-if="!loading && filtered.length > 0" class="md:hidden space-y-2.5">
-      <div
-        v-for="m in filtered"
+    <div v-if="loaded.length > 0" class="md:hidden space-y-2.5">
+      <button
+        v-for="m in loaded"
         :key="m.id"
-        class="p-4 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs"
+        type="button"
+        class="block w-full text-left p-4 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs active:scale-[0.99] transition-transform cursor-pointer"
+        @click="openDetail(m)"
       >
         <div class="flex items-center gap-3">
-          <UAvatar :alt="m.name" />
           <div class="flex-1 min-w-0">
-            <div class="font-medium">{{ m.name }}</div>
-            <div class="text-sm text-stone-500">{{ m.phone || '未留手机' }}</div>
+            <div class="flex items-center gap-1.5">
+              <span class="font-medium truncate">{{ m.name }}</span>
+              <UIcon v-if="m.gender === 'female'" name="i-lucide-venus" class="size-3.5 text-pink-500 shrink-0" />
+              <UIcon v-else-if="m.gender === 'male'" name="i-lucide-mars" class="size-3.5 text-sky-500 shrink-0" />
+            </div>
+            <div class="text-sm text-stone-500 tabular-nums">{{ m.phone || '未留手机' }}</div>
           </div>
           <UBadge
             :label="m.status === 'active' ? '正常' : '停用'"
@@ -116,72 +223,417 @@
             size="sm"
           />
         </div>
-        <div class="mt-3 flex items-center justify-end gap-1 pt-3 border-t border-stone-200/60 dark:border-stone-800">
-          <UButton size="xs" variant="ghost" color="neutral" @click="openEdit(m)">编辑</UButton>
-          <UButton size="xs" variant="ghost" color="neutral" @click="toggleStatus(m)">
-            {{ m.status === 'active' ? '停用' : '启用' }}
-          </UButton>
-          <UButton size="xs" variant="ghost" color="error" @click="confirmDelete(m)">删除</UButton>
+        <div class="mt-3 pt-3 border-t border-stone-200/60 dark:border-stone-800 grid grid-cols-3 gap-2 text-sm">
+          <div>
+            <div class="text-xs text-stone-400">余额</div>
+            <div class="font-semibold tabular-nums" :class="parseFloat(m.total_balance) > 0 ? 'text-primary-600 dark:text-primary-400' : 'text-stone-400'">
+              {{ parseFloat(m.total_balance) > 0 ? `¥${m.total_balance}` : '—' }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-stone-400">挂账</div>
+            <div class="font-medium tabular-nums" :class="parseFloat(m.total_pending) > 0 ? 'text-error-600' : 'text-stone-400'">
+              {{ parseFloat(m.total_pending) > 0 ? `¥${m.total_pending}` : '—' }}
+            </div>
+          </div>
+          <div>
+            <div class="text-xs text-stone-400">会员卡</div>
+            <div class="text-stone-600 dark:text-stone-300 tabular-nums text-sm truncate">
+              {{ m.card_count > 0 ? `${m.active_card_count}/${m.card_count} 张` : '无卡' }}
+            </div>
+          </div>
         </div>
+        <div class="mt-2 flex items-center justify-between gap-2 text-xs text-stone-500">
+          <span v-if="m.notes" class="truncate" :title="m.notes">备注：{{ m.notes }}</span>
+          <span v-else />
+          <span class="tabular-nums text-stone-400 shrink-0">注册 {{ formatDate(m.created_at) }}</span>
+        </div>
+      </button>
+
+      <div class="pt-2 flex items-center justify-center text-xs">
+        <button
+          v-if="hasMore"
+          type="button"
+          :disabled="loadingMore"
+          class="inline-flex items-center gap-1 px-3 py-1.5 rounded-md text-stone-600 dark:text-stone-300 hover:bg-stone-100 dark:hover:bg-stone-800 transition cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+          @click.stop="loadMore"
+        >
+          <UIcon :name="loadingMore ? 'i-lucide-loader-circle' : 'i-lucide-chevron-down'" :class="['size-3.5', loadingMore && 'animate-spin']" />
+          {{ loadingMore ? '加载中…' : `加载更多（剩余 ${total - loaded.length} 条）` }}
+        </button>
+        <span v-else class="text-stone-400">已显示全部 {{ total }} 条</span>
       </div>
     </div>
 
     <!-- Empty state -->
-    <div
-      v-if="!loading && filtered.length === 0"
-      class="py-20 text-center rounded-2xl border border-dashed border-stone-300/70 dark:border-stone-700 bg-stone-100/40 dark:bg-stone-900/40"
-    >
-      <UIcon name="i-lucide-users-round" class="size-10 text-stone-400 mx-auto" />
-      <p class="mt-3 text-base text-stone-500">
-        {{ search ? '没有匹配的会员' : '还没有会员，点击右上角"新建会员"开始' }}
-      </p>
-    </div>
+    <EmptyState
+      v-if="!loading && loaded.length === 0"
+      :icon="isStaff && !hasFilter ? 'i-lucide-search' : (hasFilter ? 'i-lucide-search-x' : 'i-lucide-users-round')"
+      :text="isStaff && !hasFilter ? '请先搜索' : (hasFilter ? '暂无匹配会员' : '暂无会员')"
+      :hint="isStaff && !hasFilter ? '输入手机号或姓名（≥3 个字符）查询' : (hasFilter ? '换个关键词或筛选条件试试' : '点击右上角“新建会员”开始')"
+    />
 
     <!-- Loading skeleton -->
-    <div v-if="loading" class="space-y-2">
-      <USkeleton v-for="i in 5" :key="i" class="h-14 w-full rounded-2xl" />
+    <div v-if="loading && loaded.length === 0" class="space-y-2">
+      <USkeleton v-for="i in 8" :key="i" class="h-14 w-full rounded-2xl" />
     </div>
 
-    <!-- Form drawer -->
-    <USlideover v-model:open="formOpen" :title="editingId ? '编辑会员' : '新建会员'" :ui="{ content: 'w-full sm:max-w-md' }">
+    <!-- ===== 会员详情 Modal ===== -->
+    <UModal v-model:open="detailOpen" :title="detailMember?.name ?? ''" :ui="{ content: 'sm:max-w-2xl' }">
       <template #body>
-        <UForm :state="form" class="space-y-4" @submit="onSubmit">
-          <UFormField label="姓名" name="name" required>
-            <UInput v-model="form.name" placeholder="王小花" size="md" class="w-full" />
-          </UFormField>
-          <UFormField label="手机" name="phone">
-            <UInput v-model="form.phone" placeholder="13800138000" size="md" class="w-full" />
-          </UFormField>
-          <UFormField label="性别" name="gender">
-            <URadioGroup v-model="form.gender" :items="genderOptions" orientation="horizontal" />
-          </UFormField>
-          <UFormField label="生日" name="birthday">
-            <UInput v-model="form.birthday" type="date" size="md" class="w-full" />
-          </UFormField>
+        <div v-if="detailLoading" class="py-10 text-center text-stone-400">加载中…</div>
+        <div v-else-if="detailMember" class="space-y-4">
+          <!-- Section 1: Header + 基本信息 -->
+          <div class="p-4 rounded-xl bg-stone-50/60 dark:bg-stone-900/60 ring-1 ring-stone-200/40 dark:ring-stone-800">
+            <div class="flex items-start justify-between gap-4">
+              <div>
+                <div class="flex items-center gap-2">
+                  <h2 class="text-xl font-semibold">{{ detailMember.name }}</h2>
+                  <UIcon v-if="detailMember.gender === 'female'" name="i-lucide-venus" class="size-4 text-pink-500" />
+                  <UIcon v-else-if="detailMember.gender === 'male'" name="i-lucide-mars" class="size-4 text-sky-500" />
+                  <UBadge
+                    :label="detailMember.status === 'active' ? '正常' : '停用'"
+                    :color="detailMember.status === 'active' ? 'success' : 'neutral'"
+                    variant="soft" size="sm"
+                  />
+                </div>
+                <div class="mt-1 text-sm text-stone-500 tabular-nums">{{ detailMember.phone || '未留手机' }}</div>
+              </div>
+              <div class="flex gap-2 shrink-0">
+                <UButton variant="soft" color="neutral" size="sm" icon="i-lucide-pencil" @click="openEditFromDetail">编辑</UButton>
+                <UButton variant="soft" size="sm" icon="i-lucide-calculator" @click="goPos(detailMember!.id)">去收银</UButton>
+              </div>
+            </div>
+            <div class="mt-3 pt-3 border-t border-stone-200/60 dark:border-stone-800 grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-1.5 text-sm">
+              <div class="flex gap-2"><span class="text-stone-400 w-10 shrink-0">性别</span><span>{{ genderLabel(detailMember.gender) }}</span></div>
+              <div class="flex gap-2"><span class="text-stone-400 w-10 shrink-0">生日</span><span>{{ detailMember.birthday || '无记录' }}</span></div>
+              <div class="flex gap-2"><span class="text-stone-400 w-10 shrink-0">注册</span><span class="tabular-nums">{{ formatDate(detailMember.created_at) }}</span></div>
+              <div class="flex gap-2"><span class="text-stone-400 w-10 shrink-0">备注</span><span class="truncate" :title="detailMember.notes || ''">{{ detailMember.notes || '无' }}</span></div>
+            </div>
+          </div>
+
+          <!-- Section 2: KPI 双卡 -->
+          <div class="grid grid-cols-2 gap-3">
+            <div class="px-4 py-3 rounded-xl bg-primary-50/80 dark:bg-primary-950/30 ring-1 ring-primary-200/60 dark:ring-primary-800">
+              <div class="text-xs text-primary-700/60 dark:text-primary-300/60">卡余额</div>
+              <div class="text-2xl font-semibold tabular-nums text-primary-600 dark:text-primary-400 mt-0.5">¥{{ activeCardsBalance }}</div>
+            </div>
+            <div class="px-4 py-3 rounded-xl" :class="parseFloat(detailMember.total_pending) > 0 ? 'bg-error-50/80 dark:bg-error-950/30 ring-1 ring-error-200/60 dark:ring-error-800' : 'bg-stone-100/80 dark:bg-stone-800/40 ring-1 ring-stone-200/60 dark:ring-stone-700'">
+              <div class="text-xs" :class="parseFloat(detailMember.total_pending) > 0 ? 'text-error-700/60 dark:text-error-300/60' : 'text-stone-500'">未清挂账</div>
+              <div class="text-2xl font-semibold tabular-nums mt-0.5" :class="parseFloat(detailMember.total_pending) > 0 ? 'text-error-600' : 'text-stone-400'">
+                ¥{{ detailMember.total_pending }}
+              </div>
+            </div>
+          </div>
+
+          <!-- Section 3: 名下会员卡 -->
+          <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
+                <h3 class="text-base font-medium">名下会员卡</h3>
+                <span class="text-xs text-stone-400">{{ detailCards.length }} 张</span>
+              </div>
+              <UButton size="xs" variant="soft" color="primary" icon="i-lucide-plus" @click="openIssueCard">办卡</UButton>
+            </div>
+
+            <div v-if="detailCards.length > 0" class="space-y-2">
+              <div
+                v-for="c in visibleCards" :key="c.id"
+                class="px-4 py-3 rounded-lg bg-gradient-to-r from-primary-50/50 to-stone-50/30 dark:from-primary-950/30 dark:to-stone-800/20 ring-1 ring-primary-200/30 dark:ring-primary-900/40"
+              >
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2">
+                    <UIcon name="i-lucide-credit-card" class="size-4 text-primary-500" />
+                    <span class="font-medium">{{ c.card_type_name }}</span>
+                    <span class="text-xs text-primary-600 dark:text-primary-400">{{ displayRate(c.final_discount_rate) }}</span>
+                    <UBadge
+                      :label="cardStatusLabel(c.status)"
+                      :color="c.status === 'active' ? 'success' : 'neutral'"
+                      variant="soft" size="sm"
+                    />
+                  </div>
+                  <span class="text-xl font-semibold tabular-nums" :class="parseFloat(c.balance) > 0 ? 'text-primary-600 dark:text-primary-400' : 'text-stone-400'">¥{{ c.balance }}</span>
+                </div>
+                <div class="mt-1 text-xs text-stone-400">面值 ¥{{ c.final_price }} · 办卡 {{ formatDate(c.issued_at) }}</div>
+              </div>
+              <button
+                v-if="detailCards.length > CARD_PREVIEW_COUNT"
+                type="button"
+                class="w-full inline-flex items-center justify-center gap-1 px-3 py-2 rounded-md text-xs text-stone-500 hover:bg-stone-100 dark:hover:bg-stone-800 transition cursor-pointer"
+                @click="cardsExpanded = !cardsExpanded"
+              >
+                <UIcon :name="cardsExpanded ? 'i-lucide-chevron-up' : 'i-lucide-chevron-down'" class="size-3.5" />
+                {{ cardsExpanded ? '收起' : `展开剩余 ${detailCards.length - CARD_PREVIEW_COUNT} 张` }}
+              </button>
+            </div>
+            <div v-else class="py-8 text-center text-stone-400 text-sm">暂无会员卡</div>
+          </div>
+
+          <!-- Section 4: 挂账/未结清款项 -->
+          <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
+            <div class="flex items-center justify-between mb-3">
+              <div class="flex items-center gap-2">
+                <span class="inline-block w-1 h-4 rounded-full bg-warning-500" />
+                <h3 class="text-base font-medium">挂账/未结清款项</h3>
+              </div>
+              <UButton size="xs" variant="soft" color="neutral" icon="i-lucide-plus" @click="openAddPending">新建挂账</UButton>
+            </div>
+
+            <div v-if="detailPendings.length > 0" class="space-y-2">
+              <div
+                v-for="p in detailPendings" :key="p.id"
+                class="flex items-center justify-between px-4 py-2.5 rounded-lg bg-stone-50/60 dark:bg-stone-800/30 ring-1 ring-stone-200/40 dark:ring-stone-700"
+              >
+                <div class="flex-1 min-w-0">
+                  <span class="text-sm">{{ p.summary || '未注明' }}</span>
+                  <span class="ml-2 text-xs text-stone-400 tabular-nums">{{ formatDate(p.charged_at) }}</span>
+                </div>
+                <div class="flex items-center gap-2 shrink-0">
+                  <span class="font-semibold tabular-nums text-error-600">¥{{ p.amount }}</span>
+                  <UButton
+                    size="xs" variant="soft" color="primary"
+                    icon="i-lucide-circle-check"
+                    class="active:scale-95 transition-transform"
+                    @click="openSettle(p)"
+                  >清账</UButton>
+                  <UButton
+                    v-if="canVoid"
+                    size="xs" variant="soft" color="error"
+                    icon="i-lucide-rotate-ccw"
+                    class="active:scale-95 transition-transform"
+                    @click="removePending(p)"
+                  >撤消</UButton>
+                </div>
+              </div>
+              <div v-if="detailPendings.length > 1" class="flex justify-end">
+                <UButton size="xs" variant="soft" @click="openSettleAll">全部清账</UButton>
+              </div>
+            </div>
+            <div v-else class="py-6 text-center text-stone-400 text-sm">无挂账</div>
+          </div>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- ===== 编辑/新建 Modal ===== -->
+    <UModal v-model:open="formOpen" :title="editingId ? '编辑会员' : '新建会员'" :ui="{ content: 'sm:max-w-md' }">
+      <template #body>
+        <UForm :state="form" :validate="validateForm" class="space-y-4" @submit="onSubmit">
+          <div class="p-4 rounded-xl bg-stone-50/60 dark:bg-stone-900/60 ring-1 ring-stone-200/40 dark:ring-stone-800 space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <UFormField label="姓名" name="name" required>
+                <UInput v-model="form.name" placeholder="王小花" size="md" class="w-full" />
+              </UFormField>
+              <UFormField label="手机" name="phone" required>
+                <UInput v-model="form.phone" placeholder="13800138000，无手机号请填 0" size="md" class="w-full" @blur="normalizePhone" />
+              </UFormField>
+            </div>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <UFormField label="性别" name="gender">
+                <URadioGroup v-model="form.gender" :items="genderOptions" orientation="horizontal" />
+              </UFormField>
+              <UFormField label="生日" name="birthday">
+                <UPopover v-model:open="birthdayPopoverOpen" :ui="{ content: 'p-3 w-auto' }">
+                  <button type="button" class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md text-base bg-default ring-1 ring-stone-200 dark:ring-stone-700 hover:ring-primary-500/40 transition cursor-pointer">
+                    <span class="flex items-center gap-2">
+                      <UIcon name="i-lucide-cake" class="size-4 text-stone-400" />
+                      <span class="tabular-nums">{{ form.birthday || '未设置' }}</span>
+                    </span>
+                    <UIcon v-if="form.birthday" name="i-lucide-x" class="size-3.5 text-stone-400 hover:text-stone-600" @click.stop="form.birthday = ''" />
+                  </button>
+                  <template #content>
+                    <UCalendar v-model="birthdayCalendar" @update:model-value="onBirthdaySelect" />
+                  </template>
+                </UPopover>
+              </UFormField>
+            </div>
+          </div>
+
+          <div v-if="editingId" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
+              <h3 class="text-base font-medium">会员状态</h3>
+            </div>
+            <UFormField name="status">
+              <URadioGroup v-model="form.status" :items="statusOptions" orientation="horizontal" />
+              <template #help>
+                <span v-if="form.status === 'inactive'" class="text-warning-600">冻结后该会员的卡余额暂停使用</span>
+                <span v-else>正常状态可以正常消费扣卡</span>
+              </template>
+            </UFormField>
+          </div>
+
           <UFormField label="备注" name="notes">
-            <UTextarea v-model="form.notes" placeholder="过敏 / 偏好 / 其他" :rows="3" class="w-full" />
+            <UTextarea v-model="form.notes" placeholder="过敏 / 偏好 / 其他" :rows="2" class="w-full" />
           </UFormField>
           <UAlert v-if="formError" :description="formError" color="error" variant="soft" icon="i-lucide-alert-circle" />
-          <div class="flex justify-end gap-2 pt-2">
-            <UButton variant="ghost" color="neutral" @click="formOpen = false">取消</UButton>
-            <UButton type="submit" :loading="submitting">保存</UButton>
+
+          <div class="flex items-center justify-between pt-2">
+            <div>
+              <UButton v-if="editingId && !deactivateConfirming" type="button" variant="ghost" color="error" size="sm" icon="i-lucide-user-x" @click="deactivateConfirming = true">注销会员</UButton>
+            </div>
+            <div class="flex gap-2">
+              <UButton type="button" variant="ghost" color="neutral" @click="formOpen = false">取消</UButton>
+              <UButton type="submit" :loading="submitting">保存</UButton>
+            </div>
+          </div>
+
+          <div v-if="editingId && deactivateConfirming" class="p-3 rounded-lg bg-error-50/60 dark:bg-error-950/20 ring-1 ring-error-200 dark:ring-error-800 space-y-3">
+            <p class="text-sm text-error-700 dark:text-error-300">
+              注销「<strong>{{ form.name }}</strong>」？该会员将<strong>从列表移除</strong>，但<strong>会员卡、消费记录、挂账数据全部保留</strong>，可在「停用」筛选中查看。
+            </p>
+            <UFormField :label="`请输入「${form.name}」确认`">
+              <UInput v-model="deactivateInput" :placeholder="form.name" size="md" class="w-full" />
+            </UFormField>
+            <div class="flex gap-2">
+              <UButton type="button" variant="ghost" color="neutral" size="sm" @click="deactivateConfirming = false; deactivateInput = ''">取消</UButton>
+              <UButton
+                color="error"
+                size="sm"
+                :disabled="deactivateInput !== form.name"
+                :loading="deactivateLoading"
+                @click="onDeactivate"
+              >确认注销</UButton>
+            </div>
           </div>
         </UForm>
       </template>
-    </USlideover>
+    </UModal>
 
-    <!-- Delete confirm -->
-    <UModal v-model:open="deleteOpen" title="删除会员" :ui="{ content: 'sm:max-w-md' }">
+    <!-- ===== 添加挂账 Modal ===== -->
+    <UModal v-model:open="addPendingOpen" title="添加挂账" :ui="{ content: 'sm:max-w-sm' }">
       <template #body>
-        <p class="text-base leading-relaxed">
-          确认删除「<strong class="font-medium">{{ deleting?.name }}</strong>」？
-          <br /><span class="text-stone-500 text-sm">此操作不可撤销，该会员的历史消费记录将保留。</span>
-        </p>
+        <div class="space-y-3">
+          <UFormField label="金额（元）" required>
+            <UInput v-model="pendingForm.amount" type="number" step="0.01" placeholder="38.00" size="md" class="w-full" />
+          </UFormField>
+          <UFormField label="事由">
+            <UInput v-model="pendingForm.summary" placeholder="如：剪发+洗面" size="md" class="w-full" />
+          </UFormField>
+          <UAlert v-if="pendingError" :description="pendingError" color="error" variant="soft" icon="i-lucide-alert-circle" />
+        </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
-          <UButton variant="ghost" color="neutral" @click="deleteOpen = false">取消</UButton>
-          <UButton color="error" :loading="deletingLoading" @click="onDelete">确认删除</UButton>
+          <UButton variant="ghost" color="neutral" @click="addPendingOpen = false">取消</UButton>
+          <UButton :loading="pendingSaving" @click="submitAddPending">保存</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- ===== 清账 Modal ===== -->
+    <UModal v-model:open="settleOpen" title="清账" :ui="{ content: 'sm:max-w-sm' }">
+      <template #body>
+        <div class="space-y-3">
+          <p v-if="settleAll" class="text-sm">
+            将一次性结清 {{ detailPendings.length }} 笔挂账，总额 <strong class="text-error-600 tabular-nums">¥{{ pendingTotal }}</strong>
+          </p>
+          <p v-else class="text-sm">
+            事由：{{ settleTarget?.summary || '未注明' }}<br />
+            金额：<strong class="text-error-600 tabular-nums">¥{{ settleTarget?.amount }}</strong>
+          </p>
+
+          <!-- 默认会员卡扣款 -->
+          <div v-if="!settleUseOther">
+            <UFormField label="会员卡扣款" required>
+              <USelect v-model="settleForm.cardId" :items="settleCardOptions" placeholder="选择会员卡" class="w-full" />
+            </UFormField>
+            <div class="mt-2.5">
+              <UButton size="xs" variant="soft" color="neutral" icon="i-lucide-arrow-left-right" @click="settleUseOther = true">改用其他支付方式</UButton>
+            </div>
+          </div>
+
+          <!-- 其他支付方式 -->
+          <div v-else>
+            <UFormField label="支付方式" required>
+              <USelect v-model="settleForm.paymentMethodId" :items="nonCardPaymentOptions" placeholder="请选择" class="w-full" />
+            </UFormField>
+            <div class="mt-2.5">
+              <UButton size="xs" variant="soft" color="neutral" icon="i-lucide-credit-card" @click="settleUseOther = false">改用会员卡扣款</UButton>
+            </div>
+          </div>
+
+          <UAlert v-if="settleError" :description="settleError" color="error" variant="soft" icon="i-lucide-alert-circle" />
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton variant="ghost" color="neutral" @click="settleOpen = false">取消</UButton>
+          <UButton :loading="settleSaving" @click="submitSettle">确认清账</UButton>
+        </div>
+      </template>
+    </UModal>
+
+    <!-- ===== 办卡 Modal ===== -->
+    <UModal v-model:open="issueOpen" title="办理新卡" :ui="{ content: 'sm:max-w-lg' }">
+      <template #body>
+        <div class="space-y-4">
+          <!-- 办卡类型 -->
+          <div>
+            <div class="text-xs text-stone-500 mb-1.5">办卡类型</div>
+            <div class="inline-flex items-center h-9 rounded-md ring-1 ring-stone-200 dark:ring-stone-700 bg-white dark:bg-stone-900 overflow-hidden w-full">
+              <button
+                v-for="(m, i) in issueModes" :key="m.key"
+                type="button"
+                :class="[
+                  'flex-1 h-full px-4 text-sm transition-colors cursor-pointer',
+                  issueMode === m.key
+                    ? 'bg-primary-500 text-white dark:bg-primary-400 dark:text-stone-900'
+                    : 'text-stone-600 hover:bg-stone-50 dark:text-stone-300 dark:hover:bg-stone-800',
+                  i > 0 ? 'border-l border-stone-200 dark:border-stone-700' : '',
+                ]"
+                @click="issueMode = m.key"
+              >{{ m.label }}</button>
+            </div>
+          </div>
+
+          <!-- 标准：只选卡型 -->
+          <div v-if="issueMode === 'standard'" class="p-4 rounded-xl bg-stone-50/60 dark:bg-stone-900/60 ring-1 ring-stone-200/40 dark:ring-stone-800">
+            <UFormField label="选择卡类型" required>
+              <USelect v-model="issueForm.cardTypeId" :items="cardTypeOptions" placeholder="选择要办理的卡类型" class="w-full" />
+            </UFormField>
+          </div>
+
+          <!-- 自定义面值 -->
+          <div v-else class="p-4 rounded-xl bg-stone-50/60 dark:bg-stone-900/60 ring-1 ring-stone-200/40 dark:ring-stone-800 border-l-4 border-primary-500 space-y-3">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <UFormField label="自定义金额（元）" required>
+                <UInput v-model="issueForm.finalPrice" type="number" step="0.01" min="0.01" placeholder="卡片面值" class="w-full" />
+              </UFormField>
+              <UFormField label="折扣模式" required>
+                <USelect v-model="issueForm.discountMode" :items="discountModes" placeholder="选择折扣模式" class="w-full" />
+              </UFormField>
+            </div>
+
+            <UFormField v-if="issueForm.discountMode === 'inherit'" label="参照卡类型" required>
+              <USelect v-model="issueForm.cardTypeId" :items="cardTypeOptions" placeholder="选择折扣率参照" class="w-full" />
+            </UFormField>
+
+            <UFormField v-else-if="issueForm.discountMode === 'custom'" label="自定义折扣率" required>
+              <UInput v-model="issueForm.discountRate" type="number" step="0.01" min="0.01" max="1" placeholder="如:0.8 表示 8 折" class="w-full" />
+            </UFormField>
+          </div>
+
+          <!-- 常驻：服务员工 + 支付方式 -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <UFormField label="服务员工">
+              <USelect v-model="issueForm.staffId" :items="staffOptions" placeholder="选择服务员工" class="w-full" />
+            </UFormField>
+            <UFormField label="支付方式" required>
+              <USelect v-model="issueForm.paymentMethodId" :items="nonCardPaymentOptions" placeholder="现金 / 微信…" class="w-full" />
+            </UFormField>
+          </div>
+
+          <UAlert v-if="issueError" :description="issueError" color="error" variant="soft" icon="i-lucide-alert-circle" />
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton variant="ghost" color="neutral" @click="issueOpen = false">取消</UButton>
+          <UButton :loading="issueSaving" @click="submitIssue">
+            确认办理 {{ issueMode === 'custom' ? '自定义面值卡' : '标准会员卡' }}
+          </UButton>
         </div>
       </template>
     </UModal>
@@ -189,6 +641,9 @@
 </template>
 
 <script setup lang="ts">
+import type { TableColumn, DropdownMenuItem } from '@nuxt/ui'
+import { useAuthStore } from '~/stores/auth'
+
 interface Member {
   id: string
   name: string
@@ -200,18 +655,41 @@ interface Member {
   total_balance: string
   total_pending: string
   card_count: number
+  active_card_count: number
   created_at: string
   updated_at: string
 }
 interface ListResponse { items: Member[]; total: number }
 
+interface CardInfo {
+  id: string
+  card_type_name: string
+  final_discount_rate: string
+  final_price: string
+  balance: string
+  status: string
+  issued_at: string
+  is_custom: boolean
+}
+
+interface PendingInfo {
+  id: string
+  amount: string
+  summary: string | null
+  charged_at: string
+}
+
+const PAGE_SIZE = 50
+
 const api = useApi()
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 
-const items = ref<Member[]>([])
+const loaded = ref<Member[]>([])
 const total = ref(0)
 const loading = ref(true)
+const loadingMore = ref(false)
 
 const search = ref('')
 const filter = ref<'all' | 'active' | 'inactive'>('all')
@@ -221,16 +699,399 @@ const filters = [
   { key: 'inactive', label: '停用' },
 ]
 
-const filtered = computed(() => {
-  const q = search.value.trim().toLowerCase()
-  return items.value.filter(m => {
-    if (filter.value === 'active' && m.status !== 'active') return false
-    if (filter.value === 'inactive' && m.status !== 'inactive') return false
-    if (!q) return true
-    return m.name.toLowerCase().includes(q) || (m.phone || '').includes(q)
-  })
+const hasFilter = computed(() => search.value.trim().length > 0 || filter.value !== 'all')
+const hasMore = computed(() => loaded.value.length < total.value)
+
+const auth = useAuthStore()
+auth.hydrate()
+const isStaff = computed(() => auth.user?.role === 'staff')
+
+const columns: TableColumn<Member>[] = [
+  { accessorKey: 'name',          header: '会员' },
+  { accessorKey: 'phone',         header: '手机' },
+  { accessorKey: 'card_count',    header: '会员卡' },
+  { accessorKey: 'total_balance', header: '余额',   meta: { class: { td: 'text-right', th: 'text-right' } } },
+  { accessorKey: 'total_pending', header: '挂账',   meta: { class: { td: 'text-right', th: 'text-right' } } },
+  { accessorKey: 'status',        header: '状态' },
+  { accessorKey: 'created_at',    header: '注册日' },
+  { accessorKey: 'notes',         header: '备注',   size: 120, meta: { class: { td: 'max-w-48' } } },
+  { id: 'actions',                header: '操作',   size: 70, meta: { class: { td: 'text-center w-32', th: 'text-center w-32' } } },
+]
+
+function buildQuery(offset: number) {
+  const params = new URLSearchParams()
+  params.set('limit', String(PAGE_SIZE))
+  params.set('offset', String(offset))
+  if (filter.value !== 'all') params.set('status', filter.value)
+  const q = search.value.trim()
+  if (q) params.set('search', q)
+  return params.toString()
+}
+
+async function fetchFirst() {
+  // staff 角色 + 未输入 ≥3 字符搜索时，不发请求，避免 400 噪音
+  if (isStaff.value && search.value.trim().length < 3) {
+    loaded.value = []
+    total.value = 0
+    loading.value = false
+    return
+  }
+  loading.value = true
+  try {
+    const data = await api<ListResponse>(`/api/members?${buildQuery(0)}`)
+    loaded.value = data.items
+    total.value = data.total
+  } finally {
+    loading.value = false
+  }
+}
+
+async function loadMore() {
+  if (loadingMore.value || !hasMore.value) return
+  loadingMore.value = true
+  try {
+    const data = await api<ListResponse>(`/api/members?${buildQuery(loaded.value.length)}`)
+    loaded.value = loaded.value.concat(data.items)
+    total.value = data.total
+  } finally {
+    loadingMore.value = false
+  }
+}
+
+watchDebounced(search, () => { fetchFirst() }, { debounce: 300 })
+watch(filter, () => { fetchFirst() })
+
+// ---- 会员卡 hover 预览缓存 ----
+const cardsCache = reactive(new Map<string, CardInfo[]>())
+
+async function prefetchCards(memberId: string) {
+  if (cardsCache.has(memberId)) return
+  try {
+    const data = await api<{ items: CardInfo[] }>(`/api/members/${memberId}/cards`)
+    cardsCache.set(memberId, data.items)
+  } catch {}
+}
+
+// ---- 会员详情 Modal ----
+const detailOpen = ref(false)
+const detailMember = ref<Member | null>(null)
+const detailCards = ref<CardInfo[]>([])
+const detailPendings = ref<PendingInfo[]>([])
+const detailLoading = ref(false)
+
+const CARD_PREVIEW_COUNT = 3
+const cardsExpanded = ref(false)
+const visibleCards = computed(() =>
+  cardsExpanded.value ? detailCards.value : detailCards.value.slice(0, CARD_PREVIEW_COUNT)
+)
+
+const activeCardsBalance = computed(() => {
+  return detailCards.value
+    .filter(c => c.status === 'active')
+    .reduce((s, c) => s + parseFloat(c.balance), 0)
+    .toFixed(2)
 })
 
+const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
+
+async function openDetail(m: Member) {
+  detailMember.value = m
+  detailOpen.value = true
+  detailLoading.value = true
+  cardsExpanded.value = false
+  ensureVoidFetched()
+  try {
+    const [cards, pendings] = await Promise.all([
+      api<{ items: CardInfo[] }>(`/api/members/${m.id}/cards`),
+      api<{ items: PendingInfo[] }>(`/api/members/${m.id}/pending`).catch(() => ({ items: [] })),
+    ])
+    detailCards.value = cards.items
+    detailPendings.value = pendings.items
+    cardsCache.set(m.id, cards.items)
+  } catch {
+    detailCards.value = []
+    detailPendings.value = []
+  } finally {
+    detailLoading.value = false
+  }
+}
+
+function openEditFromDetail() {
+  if (!detailMember.value) return
+  detailOpen.value = false
+  openEdit(detailMember.value)
+}
+
+function goPos(memberId: string) {
+  detailOpen.value = false
+  router.push(`/?member=${memberId}`)
+}
+
+async function refreshDetail() {
+  if (!detailMember.value) return
+  const [cards, pendings] = await Promise.all([
+    api<{ items: CardInfo[] }>(`/api/members/${detailMember.value.id}/cards`),
+    api<{ items: PendingInfo[] }>(`/api/members/${detailMember.value.id}/pending`).catch(() => ({ items: [] })),
+  ])
+  detailCards.value = cards.items
+  detailPendings.value = pendings.items
+  cardsCache.set(detailMember.value.id, cards.items)
+}
+
+// ---- 添加挂账 ----
+const addPendingOpen = ref(false)
+const pendingSaving = ref(false)
+const pendingError = ref('')
+const pendingForm = reactive({ amount: '', summary: '' })
+
+function openAddPending() {
+  pendingForm.amount = ''
+  pendingForm.summary = ''
+  pendingError.value = ''
+  addPendingOpen.value = true
+}
+
+async function submitAddPending() {
+  if (!detailMember.value) return
+  if (!pendingForm.amount || parseFloat(pendingForm.amount) <= 0) {
+    pendingError.value = '请输入有效金额'
+    return
+  }
+  pendingSaving.value = true
+  pendingError.value = ''
+  try {
+    await api(`/api/members/${detailMember.value.id}/pending`, {
+      method: 'POST',
+      body: { amount: pendingForm.amount, summary: pendingForm.summary || null },
+    })
+    addPendingOpen.value = false
+    await refreshDetail()
+    await fetchFirst()
+  } catch (e: any) {
+    pendingError.value = e?.data?.message || e?.message || '添加失败'
+  } finally {
+    pendingSaving.value = false
+  }
+}
+
+async function removePending(p: PendingInfo) {
+  if (!detailMember.value || !confirm(`确认撤消这笔 ¥${p.amount} 的挂账？`)) return
+  try {
+    await api(`/api/members/${detailMember.value.id}/pending/${p.id}`, { method: 'DELETE' })
+    await refreshDetail()
+    await fetchFirst()
+  } catch {}
+}
+
+// ---- 清账 ----
+const settleOpen = ref(false)
+const settleSaving = ref(false)
+const settleError = ref('')
+const settleAll = ref(false)
+const settleTarget = ref<PendingInfo | null>(null)
+const settleForm = reactive({ paymentMethodId: '', cardId: '' })
+const paymentMethods = ref<{ id: string; name: string }[]>([])
+
+const pendingTotal = computed(() =>
+  detailPendings.value.reduce((s, p) => s + parseFloat(p.amount), 0).toFixed(2)
+)
+
+const settleUseOther = ref(false)
+
+const nonCardPaymentOptions = computed(() =>
+  paymentMethods.value
+    .filter(p => p.name !== '会员卡')
+    .map(p => ({ label: p.name, value: p.id }))
+)
+
+const settleCardOptions = computed(() =>
+  detailCards.value
+    .filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
+    .map(c => ({ label: `${c.card_type_name}（余额 ¥${c.balance}）`, value: c.id }))
+)
+
+async function ensurePaymentMethods() {
+  if (paymentMethods.value.length > 0) return
+  try {
+    const data = await api<{ items: { id: string; name: string }[] }>('/api/payment-methods?active=1')
+    paymentMethods.value = data.items
+  } catch {}
+}
+
+function openSettle(p: PendingInfo) {
+  settleAll.value = false
+  settleTarget.value = p
+  settleUseOther.value = false
+  settleForm.paymentMethodId = ''
+  settleForm.cardId = ''
+  settleError.value = ''
+  ensurePaymentMethods()
+  settleOpen.value = true
+}
+
+function openSettleAll() {
+  settleAll.value = true
+  settleTarget.value = null
+  settleUseOther.value = false
+  settleForm.paymentMethodId = ''
+  settleForm.cardId = ''
+  settleError.value = ''
+  ensurePaymentMethods()
+  settleOpen.value = true
+}
+
+async function submitSettle() {
+  if (!detailMember.value) return
+
+  if (settleUseOther.value) {
+    if (!settleForm.paymentMethodId) { settleError.value = '请选择支付方式'; return }
+  } else {
+    if (!settleForm.cardId) { settleError.value = '请选择会员卡'; return }
+  }
+
+  settleSaving.value = true
+  settleError.value = ''
+  try {
+    const body: any = {}
+    if (settleUseOther.value) {
+      body.payment_method_id = settleForm.paymentMethodId
+    } else {
+      const mcPm = paymentMethods.value.find(p => p.name === '会员卡')
+      if (!mcPm) { settleError.value = '未找到会员卡支付方式'; return }
+      body.payment_method_id = mcPm.id
+      body.card_id = settleForm.cardId
+    }
+    const path = settleAll.value
+      ? `/api/members/${detailMember.value.id}/pending/settle-all`
+      : `/api/members/${detailMember.value.id}/pending/${settleTarget.value!.id}/settle`
+    await api(path, { method: 'POST', body })
+    settleOpen.value = false
+    await refreshDetail()
+    await fetchFirst()
+  } catch (e: any) {
+    settleError.value = e?.data?.message || e?.message || '清账失败'
+  } finally {
+    settleSaving.value = false
+  }
+}
+
+// ---- 办卡（标准 / 自定义面值）----
+const issueOpen = ref(false)
+const issueSaving = ref(false)
+const issueError = ref('')
+const issueMode = ref<'standard' | 'custom'>('standard')
+const issueModes = [
+  { key: 'standard' as const, label: '标准会员卡' },
+  { key: 'custom' as const,   label: '自定义面值卡' },
+]
+const discountModes = [
+  { label: '参照现有卡类型', value: 'inherit' },
+  { label: '自定义折扣率',   value: 'custom' },
+]
+const issueForm = reactive({
+  cardTypeId: '',
+  finalPrice: '',
+  discountMode: 'inherit' as 'inherit' | 'custom',
+  discountRate: '',
+  staffId: '',
+  paymentMethodId: '',
+})
+const cardTypes = ref<{ id: string; name: string; price: string; discount_rate: string }[]>([])
+const cardTypeOptions = computed(() =>
+  cardTypes.value.map(c => ({
+    label: `${c.name}  ¥${c.price}  ${displayRate(c.discount_rate)}`,
+    value: c.id,
+  }))
+)
+
+const staffList = ref<{ id: string; name: string; position: string | null }[]>([])
+const staffOptions = computed(() =>
+  staffList.value.map(s => ({
+    label: s.position ? `${s.name}（${s.position}）` : s.name,
+    value: s.id,
+  }))
+)
+
+async function ensureCardTypes() {
+  if (cardTypes.value.length > 0) return
+  try {
+    const data = await api<{ items: { id: string; name: string; price: string; discount_rate: string }[] }>('/api/card-types?status=active')
+    cardTypes.value = data.items
+  } catch {}
+}
+
+async function ensureStaff() {
+  if (staffList.value.length > 0) return
+  try {
+    const data = await api<{ items: { id: string; name: string; position: string | null }[] }>('/api/staff?status=active')
+    staffList.value = data.items
+  } catch {}
+}
+
+function openIssueCard() {
+  issueMode.value = 'standard'
+  issueForm.cardTypeId = ''
+  issueForm.finalPrice = ''
+  issueForm.discountMode = 'inherit'
+  issueForm.discountRate = ''
+  issueForm.staffId = ''
+  issueForm.paymentMethodId = ''
+  issueError.value = ''
+  ensureCardTypes()
+  ensurePaymentMethods()
+  ensureStaff()
+  issueOpen.value = true
+}
+
+async function submitIssue() {
+  if (!detailMember.value) return
+  if (!issueForm.paymentMethodId) { issueError.value = '请选择支付方式'; return }
+
+  if (issueMode.value === 'standard') {
+    if (!issueForm.cardTypeId) { issueError.value = '请选择卡类型'; return }
+  } else {
+    // 自定义面值
+    const p = parseFloat(issueForm.finalPrice)
+    if (!p || p <= 0) { issueError.value = '请输入自定义金额'; return }
+    if (issueForm.discountMode === 'inherit') {
+      if (!issueForm.cardTypeId) { issueError.value = '请选择参照卡类型'; return }
+    } else {
+      const r = parseFloat(issueForm.discountRate)
+      if (!r || r <= 0 || r > 1) { issueError.value = '折扣率需在 0-1 之间（如 0.8 = 8 折）'; return }
+    }
+  }
+
+  issueSaving.value = true
+  issueError.value = ''
+  try {
+    const body: any = { payment_method_id: issueForm.paymentMethodId }
+    if (issueForm.staffId) body.staff_id = issueForm.staffId
+
+    if (issueMode.value === 'standard') {
+      body.card_type_id = issueForm.cardTypeId
+    } else {
+      body.final_price = issueForm.finalPrice
+      if (issueForm.discountMode === 'inherit') {
+        body.card_type_id = issueForm.cardTypeId
+      } else {
+        // 自定义折扣率：挂到任意一个 card_type 模板上（后端必需），折扣率覆盖
+        body.card_type_id = issueForm.cardTypeId || cardTypes.value[0]?.id
+        body.final_discount_rate = issueForm.discountRate
+      }
+    }
+
+    await api(`/api/members/${detailMember.value.id}/cards/with-transaction`, { method: 'POST', body })
+    issueOpen.value = false
+    await refreshDetail()
+    await fetchFirst()
+  } catch (e: any) {
+    issueError.value = e?.data?.message || e?.message || '办卡失败'
+  } finally {
+    issueSaving.value = false
+  }
+}
+
+// ---- 编辑/新建 Modal ----
 const formOpen = ref(false)
 const submitting = ref(false)
 const formError = ref('')
@@ -241,35 +1102,48 @@ const form = reactive({
   gender: 'unknown' as 'male' | 'female' | 'unknown',
   birthday: '',
   notes: '',
+  status: 'active' as 'active' | 'inactive',
 })
 const genderOptions = [
   { label: '未知', value: 'unknown' },
-  { label: '男', value: 'male' },
-  { label: '女', value: 'female' },
+  { label: '男',   value: 'male' },
+  { label: '女',   value: 'female' },
+]
+const statusOptions = [
+  { label: '正常', value: 'active' },
+  { label: '冻结', value: 'inactive' },
 ]
 
-const deleteOpen = ref(false)
-const deleting = ref<Member | null>(null)
-const deletingLoading = ref(false)
+const birthdayPopoverOpen = ref(false)
+const birthdayCalendar = ref<any>(null)
 
-function genderLabel(g: string) {
-  return { male: '男', female: '女', unknown: '—' }[g] ?? g
-}
-function formatDate(s: string) {
-  if (!s) return ''
-  return new Date(s).toLocaleString('zh-CN', { hour12: false })
+function onBirthdaySelect(d: any) {
+  if (!d) return
+  // CalendarDate 转 YYYY-MM-DD
+  const s = typeof d.toString === 'function' ? d.toString() : `${d.year}-${String(d.month).padStart(2, '0')}-${String(d.day).padStart(2, '0')}`
+  form.birthday = s
+  birthdayPopoverOpen.value = false
 }
 
-async function fetchList() {
-  loading.value = true
-  try {
-    const data = await api<ListResponse>('/api/members')
-    items.value = data.items
-    total.value = data.total
-  } finally {
-    loading.value = false
+function normalizePhone() {
+  const v = (form.phone || '').trim()
+  if (v === '0') form.phone = '00000000000'
+}
+
+function validateForm(state: typeof form) {
+  const errors: { name: string; message: string }[] = []
+  if (!state.name?.trim()) errors.push({ name: 'name', message: '请填写姓名' })
+  const phone = (state.phone || '').trim()
+  if (!phone) errors.push({ name: 'phone', message: '请填写手机号（无手机号请填 0）' })
+  else if (phone !== '00000000000' && !/^1[3-9]\d{9}$/.test(phone)) {
+    errors.push({ name: 'phone', message: '手机号格式不正确（11 位 1 开头；无手机号请填 0）' })
   }
+  return errors
 }
+
+const deactivateConfirming = ref(false)
+const deactivateInput = ref('')
+const deactivateLoading = ref(false)
 
 function resetForm() {
   form.name = ''
@@ -277,7 +1151,10 @@ function resetForm() {
   form.gender = 'unknown'
   form.birthday = ''
   form.notes = ''
+  form.status = 'active'
   formError.value = ''
+  deactivateConfirming.value = false
+  deactivateInput.value = ''
 }
 
 function openCreate() {
@@ -293,28 +1170,67 @@ function openEdit(m: Member) {
   form.gender = m.gender
   form.birthday = m.birthday ?? ''
   form.notes = m.notes ?? ''
+  form.status = m.status
   formError.value = ''
+  deactivateConfirming.value = false
+  deactivateInput.value = ''
   formOpen.value = true
 }
 
+function rowMenuItems(m: Member): DropdownMenuItem[][] {
+  return [[
+    { label: '办卡',    icon: 'i-lucide-credit-card',  onSelect: () => actOnMember(m, 'issue') },
+    { label: '添加挂账', icon: 'i-lucide-file-plus-2',  onSelect: () => actOnMember(m, 'credit') },
+    { label: '清账',    icon: 'i-lucide-circle-check', onSelect: () => actOnMember(m, 'settle') },
+  ]]
+}
+
+async function actOnMember(m: Member, action: 'issue' | 'credit' | 'settle') {
+  detailMember.value = m
+  if (action === 'issue') {
+    detailCards.value = []
+    openIssueCard()
+    return
+  }
+  if (action === 'credit') {
+    openAddPending()
+    return
+  }
+  try {
+    const res = await api<{ items: PendingInfo[] }>(`/api/members/${m.id}/pending`).catch(() => ({ items: [] as PendingInfo[] }))
+    detailPendings.value = res.items
+    if (res.items.length === 0) {
+      toast.add({ title: '该会员暂无待清挂账', color: 'neutral', icon: 'i-lucide-info' })
+    } else if (res.items.length === 1) {
+      openSettle(res.items[0]!)
+    } else {
+      openSettleAll()
+    }
+  } catch (e: any) {
+    toast.add({ title: '加载挂账失败', description: e?.data?.message || e?.message, color: 'error' })
+  }
+}
+
 async function onSubmit() {
+  normalizePhone()
   submitting.value = true
   formError.value = ''
   try {
-    const body = {
+    const body: any = {
       name: form.name,
       phone: form.phone || null,
       gender: form.gender,
       birthday: form.birthday || null,
       notes: form.notes || null,
     }
+    if (editingId.value) body.status = form.status
     if (editingId.value) {
       await api(`/api/members/${editingId.value}`, { method: 'PUT', body })
     } else {
       await api('/api/members', { method: 'POST', body })
     }
     formOpen.value = false
-    await fetchList()
+    await fetchFirst()
   } catch (e: any) {
     formError.value = e?.data?.message || e?.message || '保存失败'
   } finally {
@@ -322,34 +1238,46 @@ async function onSubmit() {
   }
 }
 
-async function toggleStatus(m: Member) {
-  const next = m.status === 'active' ? 'inactive' : 'active'
+async function onDeactivate() {
+  if (!editingId.value || deactivateInput.value !== form.name) return
+  deactivateLoading.value = true
   try {
-    await api(`/api/members/${m.id}`, { method: 'PUT', body: { status: next } })
-    await fetchList()
-  } catch {}
-}
-
-function confirmDelete(m: Member) {
-  deleting.value = m
-  deleteOpen.value = true
-}
-
-async function onDelete() {
-  if (!deleting.value) return
-  deletingLoading.value = true
-  try {
-    await api(`/api/members/${deleting.value.id}`, { method: 'DELETE' })
-    deleteOpen.value = false
-    deleting.value = null
-    await fetchList()
+    // 软删除：设为 inactive，保留卡和挂账数据
+    await api(`/api/members/${editingId.value}`, { method: 'PUT', body: { status: 'inactive' } })
+    formOpen.value = false
+    await fetchFirst()
+  } catch (e: any) {
+    formError.value = e?.data?.message || e?.message || '注销失败'
   } finally {
-    deletingLoading.value = false
+    deactivateLoading.value = false
   }
 }
 
+// ---- 工具函数 ----
+function genderLabel(g: string) {
+  return { male: '男', female: '女', unknown: '未知' }[g] ?? '—'
+}
+
+function formatDate(s: string) {
+  if (!s) return ''
+  const d = new Date(s)
+  const y = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const day = String(d.getDate()).padStart(2, '0')
+  return `${y}/${m}/${day}`
+}
+
+function displayRate(r: string) {
+  const n = parseFloat(r)
+  return (Math.round(n * 100) / 10).toFixed(1) + '折'
+}
+
+function cardStatusLabel(s: string) {
+  return { active: '正常', frozen: '冻结', expired: '过期', depleted: '用尽' }[s] ?? s
+}
+
 onMounted(async () => {
-  await fetchList()
+  await fetchFirst()
   if (route.query.new === '1') {
     openCreate()
     router.replace({ query: {} })

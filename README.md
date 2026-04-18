@@ -12,13 +12,15 @@
 |------|------|
 | 收银台 | 快速结算、多支付方式、会员卡支付、智能多卡组合、价格调整 |
 | 会员管理 | 会员档案、办卡充值、余额查询、挂账管理、消费记录 |
-| 预约管理 | 用户端在线预约、状态追踪、微信通知推送 |
-| 营业报表 | 营业概览、支付统计、项目排行、生日提醒、沉睡会员 |
-| 系统设置 | 服务项目、卡类型、员工管理、交易撤销 |
-| **多租户**（新） | 每个商户独立数据 + 独立子域名 + 独立品牌 |
-| **计费订阅**（新） | 五档套餐 + 微信/支付宝支付 + 自助升级 |
-| **行业模块**（新） | 美业/餐饮/健身等按需开通 |
-| **运营后台**（新） | 超管可查看/管理所有商户 |
+| 预约管理 | 顾客端在线预约（扫码直达）、状态追踪、预约码一键重置 |
+| 营业报表 | 营业概览、支付统计、项目排行、会员卡销售、生日提醒、沉睡会员 |
+| 系统设置 | 店铺品牌 / 服务项目 / 卡类型 / 员工 / 支付方式 / 账号 / 交易撤销 / 预约配置 |
+| 操作日志 | 所有写操作追加审计，append-only 触发器拒绝 UPDATE/DELETE |
+| 多租户 | 每个商户独立数据 + 独立子域名 + 独立品牌（PostgreSQL FORCE RLS 隔离） |
+| 多店员 + 权限 | 超级管理员 / 管理员 / 员工 三级权限 + JWT token 版本吊销 |
+| 通知与公告 | 顶部铃铛实时提醒（生日 / 预约待确认 / 系统公告）+ 侧边栏版本号 + changelog 页 |
+
+**计费订阅、行业模块、运营后台** 规划中，当前版本（V 26.4）未实现。
 
 ## 技术栈
 
@@ -64,9 +66,9 @@ docker compose up -d
 
 ### 4. 访问
 
-- 后端：http://localhost:8080/health
-- 前端：http://localhost:3000
-- 管理员账号：见 `.env` 的 `BOOTSTRAP_ADMIN_*`
+- 后端 health：http://localhost:8081/health（宿主 8081 → 容器 8080）
+- 前端：http://localhost:3001（宿主 3001 → 容器 3000）
+- 管理员账号：`.env` 的 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`（首次启动自动创建）
 
 ## 套餐（仅官方托管）
 
@@ -87,46 +89,22 @@ docker compose up -d
 每个商户访问自己的专属子域：
 
 ```
-demo.demo.zhaojian.net         示例商户
-<slug>.demo.zhaojian.net       其他商户
+<slug>.vip.zhaojian.net         如 qingsi.vip.zhaojian.net
 ```
+
+开发环境：`<slug>.dev.vip.zhaojian.net`。
 
 数据隔离基于 PostgreSQL Row Level Security：数据库强制执行按 `tenant_id` 过滤，即使代码写错也不会跨租户泄露。
 
 ## 品牌定制（每个商户独立）
 
-商户在各自的系统设置里配置：
-- 店铺名称、Logo、主题色
-- 行业类型（决定默认背景图：美业、美容、美发、美甲、按摩、瑜伽、培训、宠物）
-- 自定义字段（扩展会员档案、预约单等）
+商户在"设置 → 店铺"里配置：
+- 店铺名称、Logo（上传 PNG/JPG/WebP，启动时剥离 polyglot payload）
+- 登录背景主题（美业 / 美容 / 美发 / 美甲 / 按摩 / 瑜伽 / 培训 / 宠物 等预设）
 
-## 微信通知推送
+## 微信 / 短信通知推送
 
-支持通过微信公众号推送预约通知。
-
-### 配置步骤
-
-1. 申请微信公众号测试号：https://mp.weixin.qq.com/debug/cgi-bin/sandboxinfo
-
-2. 创建模板消息，内容如下：
-```
-姓名：{{name.DATA}}
-电话：{{phone.DATA}}
-时间：{{time.DATA}}
-项目：{{services.DATA}}
-员工：{{staff.DATA}}
-留言：{{message.DATA}}
-```
-
-> 注意：不要使用 `notes` 或 `remark` 作为字段名，这是微信保留字段，不会显示。
-
-3. 部署 Cloudflare Worker（文件在 `cloudflare-workers/` 目录）
-
-4. 配置环境变量：
-```env
-WXPUSH_URL=https://your-worker.workers.dev/wxsend
-WXPUSH_TOKEN=your-api-token
-```
+**当前版本未实现**，规划中。已有"顶部铃铛 + 站内通知"作为替代。
 
 ## 生产部署（1Panel）
 
@@ -134,10 +112,11 @@ WXPUSH_TOKEN=your-api-token
 
 1. 1Panel 应用商店装 OpenResty
 2. 在 1Panel "网站" 新建反向代理站点：
-   - 域名：`demo.zhaojian.net` → 反代到 `127.0.0.1:3000`（Nuxt）
-   - 域名：`<slug>.demo.zhaojian.net` → 反代到 `127.0.0.1:3000`（Nuxt，前端按 Host 分租户）
-3. 1Panel "证书" 申请 Let's Encrypt，自动续期
-4. 1Panel "容器"里跑 docker-compose（后端 + 前端 + PG）
+   - 域名：`vip.zhaojian.net` → 反代到 `127.0.0.1:3001`（Nuxt 前端）
+   - 通配域名：`*.vip.zhaojian.net` → 同上（前端按 Host 解析 tenant slug）
+   - API 子域：`api.vip.zhaojian.net` → 反代到 `127.0.0.1:8081`（Go 后端）
+3. 1Panel "证书" 申请 Let's Encrypt 通配符证书，自动续期
+4. 1Panel "容器"里跑 docker-compose（backend + frontend，PG 复用全局 `postgres-server`）
 
 ## 开发
 
@@ -158,34 +137,56 @@ docker compose exec postgres psql -U mms -d mms
 
 ```
 mms/
-├── backend/                   Go 后端
-│   ├── cmd/server/main.go     入口
-│   ├── internal/              业务模块
-│   │   ├── core/              tenant/user/role/feature
-│   │   ├── members/           会员
-│   │   ├── cards/             会员卡
-│   │   ├── transactions/      收银
-│   │   ├── appointments/      预约
-│   │   ├── reports/           报表
-│   │   ├── notifications/     通知
-│   │   ├── billing/           订阅/套餐（hosted 模式）
-│   │   ├── signup/            自助注册（hosted 模式）
-│   │   ├── payment/           微信/支付宝（hosted 模式）
-│   │   ├── admin/             运营后台
-│   │   └── industries/        行业模块（美业/餐饮等）
-│   ├── migrations/            goose SQL 迁移
-│   ├── sqlc/                  sqlc 生成代码
+├── backend/                      Go 后端
+│   ├── cmd/server/main.go        入口
+│   ├── internal/
+│   │   ├── core/                 业务模块
+│   │   │   ├── auth/             登录 / captcha / 账号锁定
+│   │   │   ├── members/          会员 CRUD
+│   │   │   ├── cards/            会员卡
+│   │   │   ├── card_types/       卡型
+│   │   │   ├── transactions/     消费 / 办卡 / 清账 / 撤销（FOR UPDATE 锁）
+│   │   │   ├── member_credits/   挂账
+│   │   │   ├── appointments/     预约
+│   │   │   ├── booking/          对外预约页 API（无鉴权）
+│   │   │   ├── staff/            员工
+│   │   │   ├── services/         服务项目
+│   │   │   ├── payment_methods/  支付方式
+│   │   │   ├── reports/          报表
+│   │   │   ├── tenant_settings/  店铺名 / Logo / 登录背景 / 撤单开关
+│   │   │   ├── users/            账号管理（super_admin 专属）
+│   │   │   ├── audit_logs/       操作日志
+│   │   │   ├── notifications/    通知与系统公告（含 announcements.json seed）
+│   │   │   └── uploads/          Logo 上传（重编码剥离 polyglot）
+│   │   └── platform/             基础设施
+│   │       ├── db/               pgxpool + DSN 构造
+│   │       ├── auth/             JWT 签发 / 解析 / 版本吊销
+│   │       ├── middleware/       TenantResolver / TenantTx / RequireAuth / Audit
+│   │       └── bootstrap/        首次启动创建超管
+│   ├── migrations/               goose SQL 迁移（00001-00030）
+│   ├── sqlc/                     sqlc 生成代码
 │   ├── sqlc.yaml
 │   └── Dockerfile
-├── frontend/                  Nuxt 4 前端
+├── frontend/                     Nuxt 4 前端（SPA 模式）
 │   ├── app/
+│   │   ├── pages/                收银 / 会员 / 预约 / 报表 / 设置 / changelog
+│   │   ├── components/           SidebarContent / UserMenu / PosWorkbench / EmptyState
+│   │   ├── composables/          useApi / useStoreInfo / useTheme / useSafeUrl
+│   │   ├── middleware/           auth.global / super-admin / at-least-admin
+│   │   └── stores/               auth (Pinia)
 │   ├── nuxt.config.ts
 │   └── Dockerfile
-├── cloudflare-workers/        微信推送 Workers
+├── ops/                          运维脚本
+├── docs/                         设计文档
+│   ├── DESIGN.md
+│   ├── decisions.md              关键决策记录
+│   └── RELEASING.md              发版流程
 ├── docker-compose.yml
 ├── .env.example
 └── README.md
 ```
+
+> 阶段 4+ 按需添加：计费订阅 / 自助注册 / 支付 / 运营后台 / 行业扩展。当前不预留空目录。
 
 ## 许可证
 

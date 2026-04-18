@@ -11,12 +11,11 @@ SELECT * FROM services WHERE id = $1;
 
 -- name: CreateService :one
 INSERT INTO services (
-  tenant_id, name, price, duration_min, category, description,
+  tenant_id, name, price, category, description,
   no_discount, sort_order
 )
 VALUES (
   $1, $2, $3,
-  sqlc.narg('duration_min')::int,
   sqlc.narg('category')::text,
   sqlc.narg('description')::text,
   COALESCE(sqlc.narg('no_discount')::bool, FALSE),
@@ -28,7 +27,6 @@ RETURNING *;
 UPDATE services
 SET name         = COALESCE(sqlc.narg('name')::text,         name),
     price        = COALESCE(sqlc.narg('price')::numeric,     price),
-    duration_min = COALESCE(sqlc.narg('duration_min')::int,  duration_min),
     category     = COALESCE(sqlc.narg('category')::text,     category),
     description  = COALESCE(sqlc.narg('description')::text,  description),
     no_discount  = COALESCE(sqlc.narg('no_discount')::bool,  no_discount),

@@ -44,11 +44,11 @@ func ListPending(c *echo.Context) error {
 	q := sqlc.New(tx)
 	rows, err := q.ListPendingCreditsByMember(c.Request().Context(), memberID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 	total, err := q.SumUnsettledByMember(c.Request().Context(), memberID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "sum: "+err.Error())
+		return mw.InternalError(c, "sum: ", err)
 	}
 
 	items := make([]DTO, 0, len(rows))
@@ -92,7 +92,7 @@ func Create(c *echo.Context) error {
 		ChargedTxID: pgtype.UUID{Valid: false},
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "create: ", err)
 	}
 	return c.JSON(http.StatusCreated, toDTO(m))
 }
@@ -113,14 +113,14 @@ func Delete(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "credit not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	if m.SettledAt.Valid {
 		return echo.NewHTTPError(http.StatusBadRequest, "已清挂账不能直接删除，请走撤单流程")
 	}
 
 	if err := q.DeleteCredit(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

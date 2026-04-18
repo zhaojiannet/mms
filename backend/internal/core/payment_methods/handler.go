@@ -51,7 +51,7 @@ func List(c *echo.Context) error {
 
 	rows, err := q.ListPaymentMethods(c.Request().Context(), isActive)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list payment_methods: "+err.Error())
+		return mw.InternalError(c, "list payment_methods: ", err)
 	}
 
 	items := make([]DTO, 0, len(rows))
@@ -74,7 +74,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "payment method not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -99,7 +99,7 @@ func Create(c *echo.Context) error {
 		SortOrder: req.SortOrder,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "create: ", err)
 	}
 	return c.JSON(http.StatusCreated, toDTO(m))
 }
@@ -127,7 +127,7 @@ func Update(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "payment method not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update: "+err.Error())
+		return mw.InternalError(c, "update: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -145,14 +145,14 @@ func Delete(c *echo.Context) error {
 
 	usage, err := q.CountPaymentMethodUsage(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "check usage: "+err.Error())
+		return mw.InternalError(c, "check usage: ", err)
 	}
 	if usage > 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "该支付方式已被交易引用，不能删除，请改为停用")
 	}
 
 	if err := q.DeletePaymentMethod(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

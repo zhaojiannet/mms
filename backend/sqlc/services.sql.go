@@ -45,25 +45,23 @@ func (q *Queries) CountServices(ctx context.Context) (int64, error) {
 
 const createService = `-- name: CreateService :one
 INSERT INTO services (
-  tenant_id, name, price, duration_min, category, description,
+  tenant_id, name, price, category, description,
   no_discount, sort_order
 )
 VALUES (
   $1, $2, $3,
-  $4::int,
+  $4::text,
   $5::text,
-  $6::text,
-  COALESCE($7::bool, FALSE),
-  COALESCE($8::int, 99)
+  COALESCE($6::bool, FALSE),
+  COALESCE($7::int, 99)
 )
-RETURNING id, tenant_id, name, price, duration_min, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at
+RETURNING id, tenant_id, name, price, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at
 `
 
 type CreateServiceParams struct {
 	TenantID    uuid.UUID       `json:"tenant_id"`
 	Name        string          `json:"name"`
 	Price       decimal.Decimal `json:"price"`
-	DurationMin *int32          `json:"duration_min"`
 	Category    *string         `json:"category"`
 	Description *string         `json:"description"`
 	NoDiscount  *bool           `json:"no_discount"`
@@ -75,7 +73,6 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		arg.TenantID,
 		arg.Name,
 		arg.Price,
-		arg.DurationMin,
 		arg.Category,
 		arg.Description,
 		arg.NoDiscount,
@@ -87,7 +84,6 @@ func (q *Queries) CreateService(ctx context.Context, arg CreateServiceParams) (S
 		&i.TenantID,
 		&i.Name,
 		&i.Price,
-		&i.DurationMin,
 		&i.Category,
 		&i.Description,
 		&i.NoDiscount,
@@ -110,7 +106,7 @@ func (q *Queries) DeleteService(ctx context.Context, id uuid.UUID) error {
 }
 
 const getServiceByID = `-- name: GetServiceByID :one
-SELECT id, tenant_id, name, price, duration_min, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at FROM services WHERE id = $1
+SELECT id, tenant_id, name, price, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at FROM services WHERE id = $1
 `
 
 func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, error) {
@@ -121,7 +117,6 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 		&i.TenantID,
 		&i.Name,
 		&i.Price,
-		&i.DurationMin,
 		&i.Category,
 		&i.Description,
 		&i.NoDiscount,
@@ -135,7 +130,7 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 }
 
 const listServices = `-- name: ListServices :many
-SELECT id, tenant_id, name, price, duration_min, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at FROM services
+SELECT id, tenant_id, name, price, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at FROM services
 WHERE status = COALESCE($1::text, status)
 ORDER BY sort_order ASC, name ASC
 `
@@ -154,7 +149,6 @@ func (q *Queries) ListServices(ctx context.Context, status *string) ([]Service, 
 			&i.TenantID,
 			&i.Name,
 			&i.Price,
-			&i.DurationMin,
 			&i.Category,
 			&i.Description,
 			&i.NoDiscount,
@@ -178,22 +172,20 @@ const updateService = `-- name: UpdateService :one
 UPDATE services
 SET name         = COALESCE($2::text,         name),
     price        = COALESCE($3::numeric,     price),
-    duration_min = COALESCE($4::int,  duration_min),
-    category     = COALESCE($5::text,     category),
-    description  = COALESCE($6::text,  description),
-    no_discount  = COALESCE($7::bool,  no_discount),
-    sort_order   = COALESCE($8::int,    sort_order),
-    status       = COALESCE($9::text,       status),
+    category     = COALESCE($4::text,     category),
+    description  = COALESCE($5::text,  description),
+    no_discount  = COALESCE($6::bool,  no_discount),
+    sort_order   = COALESCE($7::int,    sort_order),
+    status       = COALESCE($8::text,       status),
     updated_at   = now()
 WHERE id = $1
-RETURNING id, tenant_id, name, price, duration_min, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at
+RETURNING id, tenant_id, name, price, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at
 `
 
 type UpdateServiceParams struct {
 	ID          uuid.UUID           `json:"id"`
 	Name        *string             `json:"name"`
 	Price       decimal.NullDecimal `json:"price"`
-	DurationMin *int32              `json:"duration_min"`
 	Category    *string             `json:"category"`
 	Description *string             `json:"description"`
 	NoDiscount  *bool               `json:"no_discount"`
@@ -206,7 +198,6 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		arg.ID,
 		arg.Name,
 		arg.Price,
-		arg.DurationMin,
 		arg.Category,
 		arg.Description,
 		arg.NoDiscount,
@@ -219,7 +210,6 @@ func (q *Queries) UpdateService(ctx context.Context, arg UpdateServiceParams) (S
 		&i.TenantID,
 		&i.Name,
 		&i.Price,
-		&i.DurationMin,
 		&i.Category,
 		&i.Description,
 		&i.NoDiscount,

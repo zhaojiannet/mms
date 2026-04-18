@@ -101,21 +101,6 @@ type CardType struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 }
 
-type CommissionRule struct {
-	ID       uuid.UUID `json:"id"`
-	TenantID uuid.UUID `json:"tenant_id"`
-	StaffID  uuid.UUID `json:"staff_id"`
-	// NULL = 该员工所有服务的通用规则
-	ServiceID pgtype.UUID `json:"service_id"`
-	// 提成率 [0,1]，与 fixed_amount 二选一
-	Rate decimal.NullDecimal `json:"rate"`
-	// 固定金额，与 rate 二选一
-	FixedAmount decimal.NullDecimal `json:"fixed_amount"`
-	Note        *string             `json:"note"`
-	CreatedAt   pgtype.Timestamptz  `json:"created_at"`
-	UpdatedAt   pgtype.Timestamptz  `json:"updated_at"`
-}
-
 type Edition struct {
 	ID           int16               `json:"id"`
 	Code         string              `json:"code"`
@@ -193,7 +178,6 @@ type Service struct {
 	TenantID    uuid.UUID       `json:"tenant_id"`
 	Name        string          `json:"name"`
 	Price       decimal.Decimal `json:"price"`
-	DurationMin *int32          `json:"duration_min"`
 	Category    *string         `json:"category"`
 	Description *string         `json:"description"`
 	// 不参与会员卡折扣（商品/耗材类项目，按原价扣卡）
@@ -240,6 +224,23 @@ type Subscription struct {
 	Notes              *string            `json:"notes"`
 	CreatedAt          pgtype.Timestamptz `json:"created_at"`
 	UpdatedAt          pgtype.Timestamptz `json:"updated_at"`
+}
+
+type SystemAnnouncement struct {
+	ID           uuid.UUID          `json:"id"`
+	Version      string             `json:"version"`
+	Type         string             `json:"type"`
+	Title        string             `json:"title"`
+	Summary      string             `json:"summary"`
+	BodyMarkdown string             `json:"body_markdown"`
+	PublishedAt  pgtype.Timestamptz `json:"published_at"`
+	CreatedAt    pgtype.Timestamptz `json:"created_at"`
+}
+
+type SystemAnnouncementRead struct {
+	UserID         uuid.UUID          `json:"user_id"`
+	AnnouncementID uuid.UUID          `json:"announcement_id"`
+	ReadAt         pgtype.Timestamptz `json:"read_at"`
 }
 
 type Tenant struct {
@@ -319,4 +320,12 @@ type User struct {
 	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
 	// 老 demo User.id（cuid），迁移溯源用
 	LegacyID *string `json:"legacy_id"`
+	// 连续失败登录次数，成功登录清零
+	FailedLoginAttempts int32 `json:"failed_login_attempts"`
+	// 账号锁定截止时刻（UTC），NULL 表示未锁定
+	LockedUntil pgtype.Timestamptz `json:"locked_until"`
+	// JWT 版本号；改密/重置/role/status 变更时 +1，旧 token 立即失效
+	TokenVersion int32 `json:"token_version"`
+	// 最近一次密码变更时刻；JWT iat 早于此则拒绝
+	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
 }

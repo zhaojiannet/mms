@@ -53,9 +53,13 @@ func (q *Queries) CreateAuditLog(ctx context.Context, arg CreateAuditLogParams) 
 }
 
 const listAuditLogs = `-- name: ListAuditLogs :many
-SELECT id, tenant_id, actor_id, actor_type, action, target_type, target_id, payload, ip_address, user_agent, created_at FROM audit_logs
-WHERE ($3::uuid IS NULL OR tenant_id = $3::uuid)
-ORDER BY created_at DESC
+SELECT
+  a.id, a.tenant_id, a.actor_id, a.actor_type, a.action, a.target_type, a.target_id, a.payload, a.ip_address, a.user_agent, a.created_at,
+  u.name AS actor_name
+FROM audit_logs a
+LEFT JOIN users u ON u.id = a.actor_id
+WHERE ($3::uuid IS NULL OR a.tenant_id = $3::uuid)
+ORDER BY a.created_at DESC
 LIMIT $1 OFFSET $2
 `
 
@@ -65,15 +69,30 @@ type ListAuditLogsParams struct {
 	TenantID pgtype.UUID `json:"tenant_id"`
 }
 
-func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]AuditLog, error) {
+type ListAuditLogsRow struct {
+	ID         int64              `json:"id"`
+	TenantID   pgtype.UUID        `json:"tenant_id"`
+	ActorID    pgtype.UUID        `json:"actor_id"`
+	ActorType  string             `json:"actor_type"`
+	Action     string             `json:"action"`
+	TargetType *string            `json:"target_type"`
+	TargetID   *string            `json:"target_id"`
+	Payload    []byte             `json:"payload"`
+	IpAddress  *netip.Addr        `json:"ip_address"`
+	UserAgent  *string            `json:"user_agent"`
+	CreatedAt  pgtype.Timestamptz `json:"created_at"`
+	ActorName  *string            `json:"actor_name"`
+}
+
+func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([]ListAuditLogsRow, error) {
 	rows, err := q.db.Query(ctx, listAuditLogs, arg.Limit, arg.Offset, arg.TenantID)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var items []AuditLog
+	var items []ListAuditLogsRow
 	for rows.Next() {
-		var i AuditLog
+		var i ListAuditLogsRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.TenantID,
@@ -86,6 +105,7 @@ func (q *Queries) ListAuditLogs(ctx context.Context, arg ListAuditLogsParams) ([
 			&i.IpAddress,
 			&i.UserAgent,
 			&i.CreatedAt,
+			&i.ActorName,
 		); err != nil {
 			return nil, err
 		}
