@@ -26,6 +26,22 @@ FROM cards c
 JOIN card_types ct ON ct.id = c.card_type_id
 WHERE c.id = $1;
 
+-- name: LockCardForUpdate :one
+-- 扣款路径专用：SELECT FOR UPDATE 锁单行，防并发双扣
+-- 注：JOIN 的 card_types 不加锁（只读关联）
+SELECT
+  c.id, c.tenant_id, c.member_id, c.card_type_id,
+  c.final_price, c.final_discount_rate, c.balance,
+  c.issued_at, c.expires_at, c.status, c.notes,
+  c.legacy_id, c.created_at, c.updated_at,
+  ct.name          AS card_type_name,
+  ct.price         AS card_type_price,
+  ct.discount_rate AS card_type_discount_rate
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.id = $1
+FOR UPDATE OF c;
+
 -- name: IssueCard :one
 -- 最小单元：只建 card 不建 transaction（开卡+收款联动由 handler 层组合）
 -- balance 默认 = final_price；调用方也可显式传（比如迁移时保留老余额）
@@ -58,8 +74,3 @@ DELETE FROM cards WHERE id = $1;
 
 -- name: CountCardUsage :one
 SELECT count(*) FROM transactions WHERE card_id = $1;
-
--- name: SumMemberActiveBalance :one
-SELECT COALESCE(SUM(balance), 0)::numeric AS total_balance
-FROM cards
-WHERE member_id = $1 AND status = 'active';

@@ -72,7 +72,7 @@ func List(c *echo.Context) error {
 		StartDate: start, EndDate: end, StaffID: staffID, Status: status,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 	items := make([]DTO, 0, len(rows))
 	for _, r := range rows {
@@ -95,11 +95,11 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "appointment not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	svcs, err := q.ListAppointmentServices(ctx, id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list services: "+err.Error())
+		return mw.InternalError(c, "list services: ", err)
 	}
 	svcIDs := make([]uuid.UUID, 0, len(svcs))
 	for _, s := range svcs {
@@ -119,6 +119,9 @@ func Create(c *echo.Context) error {
 	}
 	if len(req.ServiceIDs) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "service_ids required")
+	}
+	if len(req.ServiceIDs) > 20 {
+		return echo.NewHTTPError(http.StatusBadRequest, "最多选择 20 项服务")
 	}
 	apptTime, err := time.Parse(time.RFC3339, req.AppointmentTime)
 	if err != nil {
@@ -141,7 +144,7 @@ func Create(c *echo.Context) error {
 		Notes:           req.Notes,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "create: ", err)
 	}
 
 	for _, sid := range req.ServiceIDs {
@@ -150,7 +153,7 @@ func Create(c *echo.Context) error {
 			AppointmentID: appt.ID,
 			ServiceID:     sid,
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "add service: "+err.Error())
+			return mw.InternalError(c, "add service: ", err)
 		}
 	}
 
@@ -179,7 +182,7 @@ func UpdateStatus(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "appointment not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update status: "+err.Error())
+		return mw.InternalError(c, "update status: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(appt, nil))
 }
@@ -193,10 +196,10 @@ func Delete(c *echo.Context) error {
 	ctx := c.Request().Context()
 	q := sqlc.New(mw.TxFrom(c))
 	if err := q.ClearAppointmentServices(ctx, id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "clear services: "+err.Error())
+		return mw.InternalError(c, "clear services: ", err)
 	}
 	if err := q.DeleteAppointment(ctx, id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -212,7 +215,7 @@ func CountToday(c *echo.Context) error {
 		AppointmentTime_2: pgtype.Timestamptz{Time: end, Valid: true},
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "count: "+err.Error())
+		return mw.InternalError(c, "count: ", err)
 	}
 	return c.JSON(http.StatusOK, map[string]int64{"count": n})
 }

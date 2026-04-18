@@ -53,18 +53,18 @@ func Void(c *echo.Context) error {
 	claims := mw.ClaimsFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 
-	// 1. 撤单功能开关检查
-	if httpErr := checkVoidEnabled(ctx, q, t.ID); httpErr != nil {
+	// 1. 撤单功能开关检查（同时校验当前操作者是开启者本人）
+	if httpErr := checkVoidEnabled(ctx, q, t.ID, claims.UserID); httpErr != nil {
 		return httpErr
 	}
 
-	// 2. 查交易 + 时效校验
-	trx, err := q.GetTransactionByID(ctx, id)
+	// 2. 查交易 + 时效校验（FOR UPDATE 锁行：防双击并发反向扣款 2 倍余额回补）
+	trx, err := q.LockTransactionForUpdate(ctx, id)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "transaction not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get tx: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "get tx: : "+err.Error())
 	}
 	if trx.Status != "completed" {
 		return echo.NewHTTPError(http.StatusBadRequest, "transaction is not in completed status")
@@ -98,27 +98,42 @@ func Void(c *echo.Context) error {
 		VoidedByName:   strPtr(claims.Email),
 		Reason:         &req.Reason,
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "mark voided: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "mark voided: : "+err.Error())
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{"message": "transaction voided", "id": id})
 }
 
-// checkVoidEnabled 校验 enable_transaction_void=true 且未过期（10 分钟）
-func checkVoidEnabled(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID) error {
+// checkVoidEnabled 校验 enable_transaction_void=true 且未过期（10 分钟）+ 当前操作者 == 开启者
+//
+// 安全模型：
+//   撤单需要先通过超级密码开启 10 分钟窗口，期间只有开启者本人能撤
+//   防止多超管租户时 A 开启后 B 趁窗口期撤任意历史交易（见安全审查报告攻击链 C）
+func checkVoidEnabled(ctx context.Context, q *sqlc.Queries, tenantID, currentUserID uuid.UUID) error {
 	enabled, err := getBoolSetting(ctx, q, tenantID, "enable_transaction_void")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "get setting: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "get setting: : "+err.Error())
 	}
 	if !enabled {
 		return echo.NewHTTPError(http.StatusForbidden, "交易撤销功能未启用")
 	}
 	ts, err := getTimestampSetting(ctx, q, tenantID, "void_enabled_at")
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "get void_enabled_at: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "get void_enabled_at: : "+err.Error())
 	}
 	if ts == nil || time.Since(*ts) > 10*time.Minute {
 		return echo.NewHTTPError(http.StatusForbidden, "撤销功能已过期，请重新开启")
+	}
+	enablerStr, err := getStringSetting(ctx, q, tenantID, "void_enabled_by")
+	if err != nil {
+		return echo.NewHTTPError(http.StatusInternalServerError, "get void_enabled_by: : "+err.Error())
+	}
+	// enablerStr 空视为旧数据，放宽（避免现有租户受影响）；生产强制可改为 Forbidden
+	if enablerStr != "" {
+		enabler, err := uuid.Parse(enablerStr)
+		if err != nil || enabler != currentUserID {
+			return echo.NewHTTPError(http.StatusForbidden, "只有开启撤销窗口的管理员本人可以撤销交易")
+		}
 	}
 	return nil
 }
@@ -127,7 +142,7 @@ func checkVoidEnabled(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID) 
 func reverseSale(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, trx sqlc.Transaction, operatorID uuid.UUID) error {
 	logs, err := q.ListCardBalanceLogsByTx(ctx, pgtype.UUID{Bytes: trx.ID, Valid: true})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list logs: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "list logs: : "+err.Error())
 	}
 	for _, l := range logs {
 		if l.ChangeType != "consume" {
@@ -139,7 +154,7 @@ func reverseSale(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, trx s
 			Balance: restore,
 		})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "restore balance: "+err.Error())
+			return echo.NewHTTPError(http.StatusInternalServerError, "restore balance: : "+err.Error())
 		}
 		if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
 			TenantID:       tenantID,
@@ -152,7 +167,7 @@ func reverseSale(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, trx s
 			OperatorUserID: pgtype.UUID{Bytes: operatorID, Valid: true},
 			Note:           strPtr("void sale"),
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "log restore: "+err.Error())
+			return echo.NewHTTPError(http.StatusInternalServerError, "log restore: : "+err.Error())
 		}
 	}
 	return nil
@@ -165,12 +180,12 @@ func reverseRecharge(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, t
 		return nil // 没关联卡，跳过
 	}
 	cardID := uuid.UUID(trx.CardID.Bytes)
-	card, err := q.GetCardByID(ctx, cardID)
+	card, err := q.LockCardForUpdate(ctx, cardID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // 卡已被删，跳过
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get card: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "get card: : "+err.Error())
 	}
 	if !card.Balance.Equal(trx.TotalAmount) {
 		return echo.NewHTTPError(http.StatusBadRequest, "卡已被使用（余额与办卡金额不符），不能撤销办卡")
@@ -182,7 +197,7 @@ func reverseRecharge(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, t
 		Balance: before.Neg(),
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "zero balance: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "zero balance: : "+err.Error())
 	}
 	// 反向流水
 	if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
@@ -196,7 +211,7 @@ func reverseRecharge(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, t
 		OperatorUserID: pgtype.UUID{Bytes: operatorID, Valid: true},
 		Note:           strPtr("void recharge"),
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "log: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "log: : "+err.Error())
 	}
 	// 冻结卡
 	frozen := "frozen"
@@ -204,7 +219,7 @@ func reverseRecharge(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, t
 		ID:     cardID,
 		Status: &frozen,
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "freeze card: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "freeze card: : "+err.Error())
 	}
 	return nil
 }
@@ -214,11 +229,11 @@ func reverseSettlement(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID,
 	// 恢复所有被这笔 settlement 清掉的挂账
 	credits, err := q.ListCreditsBySettlementTx(ctx, pgtype.UUID{Bytes: trx.ID, Valid: true})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list credits: "+err.Error())
+		return echo.NewHTTPError(http.StatusInternalServerError, "list credits: : "+err.Error())
 	}
 	for _, cr := range credits {
 		if err := q.UnsettleCredit(ctx, cr.ID); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "unsettle: "+err.Error())
+			return echo.NewHTTPError(http.StatusInternalServerError, "unsettle: : "+err.Error())
 		}
 	}
 
@@ -227,7 +242,7 @@ func reverseSettlement(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID,
 		cardID := uuid.UUID(trx.CardID.Bytes)
 		logs, err := q.ListCardBalanceLogsByTx(ctx, pgtype.UUID{Bytes: trx.ID, Valid: true})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "list logs: "+err.Error())
+			return echo.NewHTTPError(http.StatusInternalServerError, "list logs: : "+err.Error())
 		}
 		for _, l := range logs {
 			if l.ChangeType != "consume" {
@@ -239,7 +254,7 @@ func reverseSettlement(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID,
 				Balance: restore,
 			})
 			if err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "restore: "+err.Error())
+				return echo.NewHTTPError(http.StatusInternalServerError, "restore: : "+err.Error())
 			}
 			_ = cardID // 静默未用
 			if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
@@ -253,7 +268,7 @@ func reverseSettlement(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID,
 				OperatorUserID: pgtype.UUID{Bytes: operatorID, Valid: true},
 				Note:           strPtr("void settlement"),
 			}); err != nil {
-				return echo.NewHTTPError(http.StatusInternalServerError, "log: "+err.Error())
+				return echo.NewHTTPError(http.StatusInternalServerError, "log: : "+err.Error())
 			}
 		}
 	}
@@ -261,6 +276,21 @@ func reverseSettlement(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID,
 }
 
 // --- tenant_settings helper ---
+
+func getStringSetting(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, key string) (string, error) {
+	row, err := q.GetTenantSetting(ctx, sqlc.GetTenantSettingParams{TenantID: tenantID, Key: key})
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return "", nil
+		}
+		return "", err
+	}
+	var s *string
+	if err := json.Unmarshal(row.Value, &s); err != nil || s == nil {
+		return "", nil
+	}
+	return *s, nil
+}
 
 func getBoolSetting(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID, key string) (bool, error) {
 	row, err := q.GetTenantSetting(ctx, sqlc.GetTenantSettingParams{TenantID: tenantID, Key: key})

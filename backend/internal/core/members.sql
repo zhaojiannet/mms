@@ -7,10 +7,14 @@ SELECT
   m.created_at, m.updated_at, m.legacy_id,
   COALESCE(cb.total_balance, 0)::numeric AS total_balance,
   COALESCE(pc.total_pending, 0)::numeric AS total_pending,
-  COALESCE(cb.card_count, 0)::bigint     AS card_count
+  COALESCE(cb.card_count, 0)::bigint     AS card_count,
+  COALESCE(cb.active_card_count, 0)::bigint AS active_card_count
 FROM members m
 LEFT JOIN (
-  SELECT member_id, SUM(balance)::numeric AS total_balance, COUNT(*)::bigint AS card_count
+  SELECT member_id,
+         SUM(balance)::numeric AS total_balance,
+         COUNT(*)::bigint AS card_count,
+         COUNT(*) FILTER (WHERE balance > 0)::bigint AS active_card_count
   FROM cards WHERE status = 'active' GROUP BY member_id
 ) cb ON cb.member_id = m.id
 LEFT JOIN (
@@ -50,3 +54,16 @@ RETURNING *;
 
 -- name: DeleteMember :exec
 DELETE FROM members WHERE id = $1;
+
+-- name: LookupMembersByIDs :many
+-- 按一组 ID 批量返回 id→name（用于操作日志对象列人名化）
+SELECT id, name FROM members WHERE id = ANY($1::uuid[]);
+
+-- name: ExistsMemberByPhone :one
+-- 手机号唯一性检查（占位号 '00000000000' 允许重复，由 handler 跳过）
+-- exclude_id：编辑时排除自己
+SELECT EXISTS (
+  SELECT 1 FROM members
+  WHERE phone = sqlc.arg('phone')::text
+    AND (sqlc.narg('exclude_id')::uuid IS NULL OR id <> sqlc.narg('exclude_id')::uuid)
+) AS "exists";

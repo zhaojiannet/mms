@@ -2,23 +2,16 @@
   <div class="min-h-screen grid lg:grid-cols-[2fr_3fr] bg-stone-50 dark:bg-stone-950">
     <!-- Left · Brand + 背景图 -->
     <div
-      class="hidden lg:flex relative flex-col justify-between p-12 text-white overflow-hidden bg-cover bg-center"
-      style="background-image: url('/images/login-bg.jpg')"
+      class="hidden lg:flex relative flex-col justify-between p-12 text-white overflow-hidden transition-[background] duration-500 ease-out motion-reduce:transition-none"
+      :style="{ background: leftBg }"
     >
       <div class="absolute inset-0 bg-stone-900/45" />
       <div class="absolute inset-0 bg-gradient-to-b from-stone-900/10 via-transparent to-stone-900/40" />
 
-      <div class="relative flex items-center gap-3">
-        <div
-          class="w-10 h-10 rounded-xl flex items-center justify-center
-                 bg-white/15 ring-1 ring-white/20 backdrop-blur-sm
-                 font-semibold text-lg"
-        >D</div>
-        <div class="leading-tight">
-          <div class="font-semibold text-base">Demo Store</div>
-          <div class="text-xs text-white/70 tabular-nums">
-            {{ cfg.tenantSlug }}.{{ cfg.appDomain }}
-          </div>
+      <div class="relative leading-tight">
+        <div class="font-semibold text-base">{{ storeInfo.name || 'Demo Store' }}</div>
+        <div class="text-xs text-white/70 tabular-nums">
+          {{ storeInfo.slug || cfg.tenantSlug }}.{{ cfg.appDomain }}
         </div>
       </div>
 
@@ -38,20 +31,32 @@
 
     <!-- Right · Form -->
     <div class="flex items-center justify-center p-6 sm:p-12">
-      <div class="w-full max-w-sm space-y-8">
-        <div class="lg:hidden flex items-center gap-2.5">
+      <div class="w-full max-w-sm space-y-8 -translate-y-10 lg:translate-y-0">
+        <div v-if="!storeInfo.logo_url" class="lg:hidden flex items-center gap-2.5">
           <div
-            class="w-9 h-9 rounded-xl flex items-center justify-center
+            class="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center
                    bg-primary-500 text-white font-semibold shadow-xs"
-          >D</div>
-          <span class="font-semibold text-base">Demo Store</span>
+          >
+            <span>{{ (storeInfo.name || 'S').slice(0, 1) }}</span>
+          </div>
+          <span class="font-semibold text-base">{{ storeInfo.name || 'Demo Store' }}</span>
         </div>
 
-        <div class="space-y-1.5">
-          <h2 class="text-2xl font-semibold tracking-tight">欢迎回来</h2>
-          <p class="text-sm text-stone-500 dark:text-stone-400">
-            请使用账户登录
-          </p>
+        <div class="space-y-4">
+          <div v-if="storeInfo.logo_url" class="flex justify-center pt-2">
+            <img
+              :key="storeInfo.logo_url"
+              :src="cfg.apiBase + safeAssetUrl(storeInfo.logo_url)"
+              alt="Logo"
+              class="h-28 sm:h-32 md:h-40 w-auto max-w-full object-contain"
+            />
+          </div>
+          <div class="space-y-1.5 text-center">
+            <h2 class="text-2xl font-semibold tracking-tight">欢迎回来</h2>
+            <p class="text-sm text-stone-500 dark:text-stone-400">
+              {{ storeInfo.name ? `登录 ${storeInfo.name}` : '请使用账户登录' }}
+            </p>
+          </div>
         </div>
 
         <UForm :state="form" @submit="onSubmit" class="space-y-4">
@@ -79,6 +84,33 @@
             />
           </UFormField>
 
+          <UFormField v-if="captchaNeeded" label="验证码" name="captcha" required>
+            <div class="flex items-stretch gap-2">
+              <UInput
+                v-model="form.captchaAnswer"
+                placeholder="请输入图中数字"
+                icon="i-lucide-shield-check"
+                size="lg"
+                autocomplete="off"
+                class="flex-1"
+              />
+              <button
+                type="button"
+                class="shrink-0 rounded-md ring-1 ring-stone-200 dark:ring-stone-700 overflow-hidden hover:ring-primary-400 transition-[--tw-ring-color] cursor-pointer"
+                title="点击刷新"
+                @click="loadCaptcha"
+              >
+                <img v-if="captchaImage" :src="captchaImage" alt="验证码" class="h-11 w-auto block" />
+                <div v-else class="h-11 w-28 flex items-center justify-center text-xs text-stone-400">加载中…</div>
+              </button>
+            </div>
+          </UFormField>
+
+          <label class="flex items-center gap-2 cursor-pointer select-none">
+            <UCheckbox v-model="form.remember" />
+            <span class="text-sm text-stone-600 dark:text-stone-300">信任此设备（7 天内免登录）</span>
+          </label>
+
           <UAlert
             v-if="errorMsg"
             :description="errorMsg"
@@ -86,6 +118,10 @@
             variant="soft"
             icon="i-lucide-alert-circle"
           />
+
+          <p v-if="captchaNeeded" class="text-xs text-stone-500 dark:text-stone-400 text-center">
+            多次登录失败，请输入验证码继续
+          </p>
 
           <UButton
             type="submit"
@@ -108,25 +144,60 @@
 
 <script setup lang="ts">
 import { useAuthStore } from '~/stores/auth'
+import { getThemeByKey, bgStyle } from '~/composables/useLoginBgThemes'
 
 definePageMeta({ layout: 'public' })
 
 const cfg = useRuntimeConfig().public
 const auth = useAuthStore()
 const router = useRouter()
+const { info: storeInfo, refresh } = useStoreInfo()
 
-const form = reactive({ email: '', password: '' })
+const form = reactive({ email: '', password: '', remember: false, captchaAnswer: '' })
 const loading = ref(false)
 const errorMsg = ref('')
+
+// 验证码：首次失败触发；保证一次一换（captcha 后端一次性校验后销毁）
+const CAPTCHA_TRIGGER_AFTER = 2 // 连续失败 N 次后要求验证码
+const failCount = ref(0)
+const captchaNeeded = ref(false)
+const captchaId = ref('')
+const captchaImage = ref('')
+
+const leftBg = computed(() => bgStyle(getThemeByKey(storeInfo.login_bg)))
+
+onMounted(refresh)
+
+async function loadCaptcha() {
+  try {
+    const r = await $fetch<{ id: string; image: string }>(`${cfg.apiBase}/api/captcha`, {
+      headers: { 'X-Tenant-Slug': cfg.tenantSlug },
+    })
+    captchaId.value = r.id
+    captchaImage.value = r.image
+    form.captchaAnswer = ''
+  } catch (e) {
+    errorMsg.value = '验证码加载失败，请稍后再试'
+  }
+}
 
 async function onSubmit() {
   errorMsg.value = ''
   loading.value = true
   try {
-    await auth.login(form.email, form.password)
+    const captcha = captchaNeeded.value && captchaId.value
+      ? { id: captchaId.value, answer: form.captchaAnswer }
+      : undefined
+    await auth.login(form.email, form.password, form.remember, captcha)
     await router.push('/')
   } catch (e: any) {
+    failCount.value++
     errorMsg.value = e?.data?.message || e?.message || '登录失败，请检查账号密码'
+    // 失败后策略：触发或刷新验证码（captcha 本身一次性，必须换新的）
+    if (captchaNeeded.value || failCount.value >= CAPTCHA_TRIGGER_AFTER) {
+      captchaNeeded.value = true
+      await loadCaptcha()
+    }
   } finally {
     loading.value = false
   }

@@ -49,7 +49,7 @@ func List(c *echo.Context) error {
 	}
 	rows, err := q.ListCardTypes(c.Request().Context(), status)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 	items := make([]DTO, 0, len(rows))
 	for _, m := range rows {
@@ -70,7 +70,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card type not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -102,7 +102,7 @@ func Create(c *echo.Context) error {
 		SortOrder:    req.SortOrder,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "create: ", err)
 	}
 	return c.JSON(http.StatusCreated, toDTO(m))
 }
@@ -142,7 +142,7 @@ func Update(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card type not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update: "+err.Error())
+		return mw.InternalError(c, "update: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(m))
 }
@@ -160,20 +160,20 @@ func Delete(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "card type not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	if m.Status != "inactive" {
 		return echo.NewHTTPError(http.StatusBadRequest, "必须先下架（status=inactive）再删除")
 	}
 	usage, err := q.CountCardTypeUsage(c.Request().Context(), id)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "check usage: "+err.Error())
+		return mw.InternalError(c, "check usage: ", err)
 	}
 	if usage > 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "已有会员办理了该类型的卡，不能删除")
 	}
 	if err := q.DeleteCardType(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

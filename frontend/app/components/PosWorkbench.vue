@@ -6,7 +6,7 @@
 
         <!-- 会员 -->
         <div>
-          <label class="inline-flex items-center gap-2 text-base font-medium text-stone-700 dark:text-stone-300"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />会员</label>
+          <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />会员</label>
           <div class="mt-1.5">
 
             <!-- 已选会员卡片：浅 primary 背景 + 头像 + 完整信息 -->
@@ -16,9 +16,9 @@
               </div>
               <div class="min-w-0 flex-1">
                 <div class="flex items-center gap-2">
-                  <span class="text-base font-semibold truncate">{{ member.name }}</span>
+                  <span class="text-base font-semibold truncate text-stone-900 dark:text-stone-100">{{ member.name }}</span>
                   <UBadge v-if="member.status && member.status !== 'active'" :label="memberStatusLabel(member.status)" color="warning" variant="soft" size="xs" />
-                  <span v-if="member.phone" class="text-sm text-stone-500 tabular-nums">{{ formatPhone(member.phone) }}</span>
+                  <span v-if="member.phone" class="text-sm text-stone-600 dark:text-stone-400 tabular-nums">{{ formatPhone(member.phone) }}</span>
                 </div>
                 <div class="mt-0.5 flex items-center gap-3 text-xs">
                   <span class="inline-flex items-baseline gap-1.5">
@@ -32,6 +32,13 @@
                     <span class="text-stone-500">未结挂账</span>
                     <span class="tabular-nums font-medium text-error-600">¥{{ member.total_pending }}</span>
                   </span>
+                </div>
+                <div
+                  v-if="parseFloat(member.total_pending ?? '0') > 0 && parseFloat(member.total_balance ?? '0') <= parseFloat(member.total_pending ?? '0')"
+                  class="mt-1 text-xs text-error-600 dark:text-error-400 flex items-center gap-1"
+                >
+                  <UIcon name="i-lucide-alert-triangle" class="size-3.5 shrink-0" />
+                  余额不足以覆盖挂账，请提醒充值
                 </div>
               </div>
               <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-x" @click="clearMember" />
@@ -57,9 +64,21 @@
                 placeholder="搜索会员（姓名 / 手机号）"
                 size="lg"
                 class="w-full"
+                :ui="{ trailing: 'pe-1' }"
                 @update:model-value="debouncedSearch"
                 @keydown.enter="handleEnter"
-              />
+              >
+                <template v-if="memberSearch?.length" #trailing>
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-circle-x"
+                    aria-label="清空搜索"
+                    @click="memberSearch = ''; debouncedSearch('')"
+                  />
+                </template>
+              </UInput>
               <div
                 v-if="memberOptions.length > 0"
                 class="absolute left-0 right-0 top-full mt-1 z-20 max-h-80 overflow-y-auto rounded-lg bg-white dark:bg-stone-900 ring-1 ring-stone-200 dark:ring-stone-700 shadow-lg"
@@ -88,6 +107,10 @@
                     <div v-if="parseFloat(m.total_pending ?? '0') > 0" class="text-xs text-error-600 tabular-nums">
                       <span class="text-stone-400 font-normal mr-1.5">挂账</span>¥{{ m.total_pending }}
                     </div>
+                    <div
+                      v-if="parseFloat(m.total_pending ?? '0') > 0 && parseFloat(m.total_balance ?? '0') <= parseFloat(m.total_pending ?? '0')"
+                      class="text-xs text-error-500 mt-0.5"
+                    >请提醒充值</div>
                   </div>
                 </button>
               </div>
@@ -96,7 +119,7 @@
                 class="absolute left-0 right-0 top-full mt-1 z-20 px-3 py-2.5 rounded-lg bg-white dark:bg-stone-900 ring-1 ring-stone-200 dark:ring-stone-700 shadow-lg text-sm text-stone-500"
               >
                 无匹配，按 <kbd class="px-1.5 py-0.5 rounded bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 text-xs">Enter</kbd> 以
-                <span class="font-medium text-stone-700 dark:text-stone-200">「{{ memberSearch }}」</span> 散客开单
+                <span class="font-medium text-stone-700 dark:text-stone-200">「{{ memberSearch }}」</span> 散客消费
               </div>
             </div>
           </div>
@@ -106,7 +129,7 @@
         <div>
           <div class="flex items-center justify-between gap-3 mb-2">
             <div class="flex items-center gap-2">
-              <label class="inline-flex items-center gap-2 text-base font-medium text-stone-700 dark:text-stone-300"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />服务</label>
+              <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />服务</label>
               <span v-if="items.length > 0" class="text-xs text-stone-500">已选 {{ items.length }} 项</span>
             </div>
             <div class="relative">
@@ -116,12 +139,24 @@
                 placeholder="找其他项目"
                 size="sm"
                 class="w-36"
-                :ui="{ base: 'rounded-full' }"
+                :ui="{ base: 'rounded-full', trailing: 'pe-1' }"
                 @keydown.enter="addFirstMatch"
                 @focus="onSvcFocus"
                 @click="onSvcFocus"
                 @blur="onSvcBlur"
-              />
+              >
+                <template v-if="svcSearch?.length" #trailing>
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-circle-x"
+                    aria-label="清空搜索"
+                    @mousedown.prevent
+                    @click="svcSearch = ''"
+                  />
+                </template>
+              </UInput>
               <div
                 v-if="svcDropdownOpen && filteredServices.length > 0"
                 class="absolute right-0 top-full mt-1 w-72 z-20 max-h-72 overflow-y-auto rounded-md bg-white dark:bg-stone-900 ring-1 ring-stone-200 dark:ring-stone-700 shadow-lg"
@@ -153,7 +188,7 @@
               @click="addItem(s)"
             >
               <UBadge v-if="s.no_discount" label="不折" color="warning" variant="soft" size="xs" class="absolute top-1 right-1" />
-              <div class="text-sm font-medium truncate pr-6">{{ s.name }}</div>
+              <div class="text-sm font-medium truncate pr-6 text-stone-900 dark:text-stone-100">{{ s.name }}</div>
               <div class="mt-1 flex items-baseline gap-1.5">
                 <span class="text-base font-semibold tabular-nums text-stone-900 dark:text-stone-100">¥{{ s.price }}</span>
                 <span v-if="previewRate < 1 && !s.no_discount" class="text-xs tabular-nums text-primary-600 dark:text-primary-400">→ ¥{{ (parseFloat(s.price) * previewRate).toFixed(2) }}</span>
@@ -166,7 +201,7 @@
         <div>
           <div class="flex items-center justify-between gap-3 mb-2">
             <div class="flex items-center gap-2">
-              <label class="inline-flex items-center gap-2 text-base font-medium text-stone-700 dark:text-stone-300"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />服务员工</label>
+              <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />服务员工</label>
               <span v-if="selectedStaff" class="text-xs text-stone-500">已选 {{ selectedStaffName }}</span>
             </div>
             <div v-if="staffList.length > 0" class="relative">
@@ -176,11 +211,23 @@
                 placeholder="找其他员工"
                 size="sm"
                 class="w-36"
-                :ui="{ base: 'rounded-full' }"
+                :ui="{ base: 'rounded-full', trailing: 'pe-1' }"
                 @focus="onStaffFocus"
                 @click="onStaffFocus"
                 @blur="onStaffBlur"
-              />
+              >
+                <template v-if="staffSearch?.length" #trailing>
+                  <UButton
+                    color="neutral"
+                    variant="link"
+                    size="sm"
+                    icon="i-lucide-circle-x"
+                    aria-label="清空搜索"
+                    @mousedown.prevent
+                    @click="staffSearch = ''"
+                  />
+                </template>
+              </UInput>
               <div
                 v-if="staffDropdownOpen && filteredStaff.length > 0"
                 class="absolute right-0 top-full mt-1 w-60 z-20 max-h-72 overflow-y-auto rounded-md bg-white dark:bg-stone-900 ring-1 ring-stone-200 dark:ring-stone-700 shadow-lg"
@@ -222,7 +269,7 @@
               >
                 <UIcon name="i-lucide-check" class="size-3" />
               </span>
-              <div class="text-sm font-medium truncate pr-6">{{ s.name }}</div>
+              <div class="text-sm font-medium truncate pr-6 text-stone-900 dark:text-stone-100">{{ s.name }}</div>
               <div class="text-xs text-stone-500 truncate">{{ s.position }}</div>
             </button>
           </div>
@@ -230,7 +277,7 @@
 
         <!-- 支付方式（上下都不显示分割线，间距收紧） -->
         <div class="!border-y-0 !py-3">
-          <label class="inline-flex items-center gap-2 text-base font-medium text-stone-700 dark:text-stone-300"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />支付方式</label>
+          <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />支付方式</label>
           <div class="mt-1.5 flex flex-wrap gap-1.5">
             <button
               v-for="pm in paymentMethods" :key="pm.id"
@@ -289,7 +336,7 @@
         <!-- 交易时间 + 备注：4.5:5.5 横向并列（与上方支付方式之间不显示分割线，间距收紧） -->
         <div class="grid grid-cols-1 sm:[grid-template-columns:9fr_11fr] gap-4 !border-y-0 !pt-3">
           <div>
-            <label class="inline-flex items-center gap-2 text-base font-medium text-stone-700 dark:text-stone-300"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />交易时间</label>
+            <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />交易时间</label>
             <div class="mt-1.5">
               <UPopover v-model:open="timePopoverOpen" :ui="{ content: 'p-4 w-auto' }">
                 <button
@@ -322,7 +369,7 @@
           </div>
 
           <div>
-            <label class="inline-flex items-center gap-2 text-base font-medium text-stone-700 dark:text-stone-300"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />备注</label>
+            <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />备注</label>
             <UInput
               v-model="notes"
               placeholder="请输入备注信息（可选）"
@@ -358,7 +405,7 @@
           </div>
 
           <!-- 项目表格 -->
-          <div class="px-4 py-3 min-h-[140px]">
+          <div class="px-4 py-3 min-h-36">
             <div v-if="items.length === 0" class="text-center text-sm text-stone-400 py-8">
               请从左侧选择服务项目
             </div>
@@ -411,7 +458,7 @@
           <div class="px-4 py-3 border-t border-stone-200/60 dark:border-stone-800 space-y-2">
             <div class="flex justify-between items-baseline text-sm">
               <span class="text-stone-500">应付总额</span>
-              <span class="tabular-nums text-base font-medium text-stone-700 dark:text-stone-300">¥{{ total.toFixed(2) }}</span>
+              <span class="tabular-nums text-base font-medium text-stone-900 dark:text-stone-100">¥{{ total.toFixed(2) }}</span>
             </div>
             <div v-if="discount > 0" class="flex justify-between items-baseline text-sm">
               <span class="text-stone-500">总优惠</span>
@@ -471,8 +518,28 @@
           <div v-else-if="isMemberCardPay && member && memberCards.length === 0" class="px-4 pb-3 text-xs text-warning-600">
             该会员无可用卡，请改其他支付方式
           </div>
-          <div v-else-if="isMemberCardPay && member && allocationPlan.length === 0 && items.length > 0" class="px-4 pb-3 text-xs text-warning-600">
-            余额不足，请改支付方式或减少项目
+          <div v-else-if="isMemberCardPay && member && allocationPlan.length === 0 && items.length > 0" class="px-4 pb-3">
+            <div class="p-3 rounded-lg bg-warning-50/60 dark:bg-warning-950/20 ring-1 ring-warning-200 dark:ring-warning-800 space-y-2.5">
+              <div class="text-sm text-warning-700 dark:text-warning-300">
+                会员卡余额不足（余额 ¥{{ memberTotalBalance }}，应付 ¥{{ discountedTotal.toFixed(2) }}）
+              </div>
+              <div class="flex items-center gap-2">
+                <UButton size="xs" variant="soft" color="neutral" @click="pendingMode = ''; selectOtherPm()">选择其他支付方式</UButton>
+                <UButton size="xs" variant="soft" color="warning" @click="pendingMode = 'full'">挂账</UButton>
+              </div>
+              <div v-if="pendingMode" class="pt-2 border-t border-warning-200/60 dark:border-warning-800 space-y-2">
+                <div class="flex items-center gap-3 text-sm">
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" v-model="pendingMode" value="full" class="accent-primary-500" />
+                    全额挂账 ¥{{ discountedTotal.toFixed(2) }}
+                  </label>
+                  <label class="flex items-center gap-1.5 cursor-pointer">
+                    <input type="radio" v-model="pendingMode" value="use_balance" class="accent-primary-500" />
+                    利用余额（扣卡 ¥{{ memberTotalBalance }} + 挂账 ¥{{ (discountedTotal - parseFloat(memberTotalBalance)).toFixed(2) }}）
+                  </label>
+                </div>
+              </div>
+            </div>
           </div>
 
           <UAlert v-if="err" :description="err" color="error" variant="soft" icon="i-lucide-alert-circle" class="mx-4 mb-3" />
@@ -513,15 +580,17 @@
 
       <div v-if="todayTx.loading && todayTx.items.length === 0" class="px-6 py-10 text-center text-sm text-stone-400">加载中…</div>
       <div v-else-if="todayTx.items.length === 0" class="px-6 py-10 text-center text-sm text-stone-400">今日暂无消费记录</div>
-      <table v-else class="w-full text-base">
-        <thead class="bg-stone-50/60 dark:bg-stone-950/30 text-stone-500 text-xs">
+      <div v-else class="overflow-x-auto">
+      <table class="w-full min-w-[720px] text-sm table-fixed">
+        <thead class="bg-stone-50/60 dark:bg-stone-950/30 text-stone-500 text-xs tracking-wide">
           <tr>
-            <th class="text-left px-4 py-2.5 font-medium">姓名</th>
-            <th class="text-left px-4 py-2.5 font-medium">会员卡</th>
+            <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-32">姓名</th>
+            <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-40">会员卡</th>
             <th class="text-left px-4 py-2.5 font-medium">服务项目</th>
-            <th class="text-center px-4 py-2.5 font-medium w-14">数量</th>
-            <th class="text-right px-4 py-2.5 font-medium">金额</th>
-            <th class="text-left px-4 py-2.5 font-medium">时间</th>
+            <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-14">数量</th>
+            <th class="text-right px-4 py-2.5 font-medium w-40">金额</th>
+            <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-20">时间</th>
+            <th v-if="canVoid" class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-28">操作</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
@@ -529,23 +598,23 @@
             v-for="t in visibleTx" :key="t.id"
             :class="['even:bg-stone-50/40 dark:even:bg-stone-800/20 hover:!bg-stone-100/60 dark:hover:!bg-stone-800/30 transition-colors', t.status === 'voided' ? 'opacity-50' : '']"
           >
-            <td class="px-4 py-1.5">
-              <span v-if="t.member_name" class="inline-flex items-center gap-1.5 text-stone-700 dark:text-stone-300">
-                <UIcon name="i-lucide-user-round" class="size-4 text-primary-500" />
-                {{ t.member_name }}
+            <td class="px-4 py-1.5 whitespace-nowrap truncate">
+              <span v-if="t.member_name" class="inline-flex items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium">
+                <UIcon name="i-lucide-user-round" class="size-4 text-primary-500 shrink-0" />
+                <span class="truncate">{{ t.member_name }}</span>
               </span>
-              <span v-else-if="t.customer_name" class="text-stone-700 dark:text-stone-300">{{ t.customer_name }} <span class="text-xs text-stone-400 ml-1">散客</span></span>
+              <span v-else-if="t.customer_name" class="text-stone-900 dark:text-stone-100 font-medium">{{ t.customer_name }} <span class="text-xs text-stone-400 font-normal ml-1">散客</span></span>
               <span v-else class="text-stone-400">—</span>
             </td>
-            <td class="px-4 py-1.5">
+            <td class="px-4 py-1.5 whitespace-nowrap truncate">
               <span v-if="t.card_type_name" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
-                <UIcon name="i-lucide-credit-card" class="size-4" />
-                {{ t.card_type_name }}
+                <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
+                <span class="truncate">{{ t.card_type_name }}</span>
               </span>
               <span v-else class="text-stone-400">—</span>
             </td>
-            <td class="px-4 py-1.5 max-w-xs truncate text-stone-700 dark:text-stone-300">{{ t.summary || '—' }}</td>
-            <td class="px-4 py-1.5 text-center tabular-nums text-stone-700 dark:text-stone-300">{{ t.item_qty || '—' }}</td>
+            <td class="px-4 py-1.5 text-stone-600 dark:text-stone-400 break-words">{{ t.summary || '—' }}</td>
+            <td class="px-4 py-1.5 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || '—' }}</td>
             <td class="px-4 py-1.5 text-right align-middle">
               <!-- 实付金额：有卡余额变化时下加虚线，hover 展示快照 -->
               <div class="relative inline-block group">
@@ -553,8 +622,8 @@
                   class="flex items-baseline justify-end gap-1.5 leading-tight"
                   :class="t.card_snapshots && t.card_snapshots.length > 0 ? 'cursor-help border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5' : ''"
                 >
-                  <span v-if="parseFloat(t.discount_amount) > 0" class="text-sm tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
-                  <span class="text-lg font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
+                  <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                  <span class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                 </div>
                 <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                   <span v-if="parseFloat(t.discount_amount) > 0" class="text-error-600">省 ¥{{ t.discount_amount }}</span>
@@ -564,7 +633,7 @@
                 <!-- 余额快照 tooltip -->
                 <div
                   v-if="t.card_snapshots && t.card_snapshots.length > 0"
-                  class="pointer-events-none absolute right-0 top-full mt-1 z-30 min-w-[16rem] px-3 py-2.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
+                  class="pointer-events-none absolute right-0 top-full mt-1 z-30 min-w-64 px-3 py-2.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
                 >
                   <div class="text-xs text-stone-400 dark:text-stone-500 mb-1.5">余额快照</div>
                   <div v-for="s in t.card_snapshots" :key="s.card_id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
@@ -582,10 +651,20 @@
                 </div>
               </div>
             </td>
-            <td class="px-4 py-1.5 text-stone-500 text-sm tabular-nums">{{ formatHm(t.transaction_time) }}</td>
+            <td class="px-4 py-1.5 text-stone-500 text-sm tabular-nums whitespace-nowrap">{{ formatHm(t.transaction_time) }}</td>
+            <td v-if="canVoid" class="px-4 py-1.5 text-center whitespace-nowrap">
+              <UButton
+                v-if="t.status !== 'voided'"
+                size="xs" variant="soft" color="error"
+                icon="i-lucide-rotate-ccw"
+                class="active:scale-95 transition-transform"
+                @click="openVoid(t)"
+              >撤销</UButton>
+            </td>
           </tr>
         </tbody>
       </table>
+      </div>
 
       <!-- 分页 footer：加载更多 / 已显示全部 -->
       <div v-if="todayTx.items.length > 0" class="px-4 py-3 border-t border-stone-200/60 dark:border-stone-800 flex items-center justify-center text-xs">
@@ -601,12 +680,32 @@
         <span v-else class="text-stone-400">已显示全部 {{ filteredTx.length }} 条</span>
       </div>
     </section>
+
+    <!-- 撤销弹窗 -->
+    <UModal v-model:open="voidOpen" title="撤销交易" :ui="{ content: 'sm:max-w-md' }">
+      <template #body>
+        <div class="space-y-3">
+          <p class="text-sm text-stone-600">将交易 <strong>{{ voiding?.id.slice(0, 8) }}</strong> 设为已撤销，关联的卡余额 / 挂账会自动恢复。</p>
+          <UFormField label="撤销原因" required>
+            <UTextarea v-model="voidReason" :rows="2" class="w-full" />
+          </UFormField>
+          <UAlert v-if="voidErr" :description="voidErr" color="error" variant="soft" icon="i-lucide-alert-circle" />
+        </div>
+      </template>
+      <template #footer>
+        <div class="flex justify-end gap-2 w-full">
+          <UButton variant="ghost" color="neutral" @click="voidOpen = false">取消</UButton>
+          <UButton color="error" :loading="voidLoading" :disabled="!voidReason" @click="doVoid">确认撤销</UButton>
+        </div>
+      </template>
+    </UModal>
   </div>
 </template>
 
 <script setup lang="ts">
 const api = useApi()
 const route = useRoute()
+const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
 
 interface Service { id: string; name: string; price: string; no_discount: boolean; sort_order: number; status: string }
 interface Member { id: string; name: string; phone: string | null; status?: string; total_balance?: string; total_pending?: string; card_count?: number }
@@ -768,6 +867,37 @@ async function fetchTodayTx() {
   } finally { todayTx.loading = false }
 }
 
+// 撤销交易
+const voidOpen = ref(false)
+const voiding = ref<TodayTx | null>(null)
+const voidReason = ref('')
+const voidLoading = ref(false)
+const voidErr = ref('')
+function openVoid(t: TodayTx) {
+  voiding.value = t
+  voidReason.value = ''
+  voidErr.value = ''
+  voidOpen.value = true
+}
+async function doVoid() {
+  if (!voiding.value) return
+  voidLoading.value = true
+  voidErr.value = ''
+  try {
+    await api(`/api/transactions/${voiding.value.id}/void`, { method: 'POST', body: { reason: voidReason.value } })
+    voiding.value.status = 'voided'
+    todayTx.voidedCount = todayTx.items.filter(t => t.status === 'voided').length
+    todayTx.total = todayTx.items.length - todayTx.voidedCount
+    voidOpen.value = false
+    if (member.value) {
+      const cards = await api<{ items: Card[] }>(`/api/members/${member.value.id}/cards`)
+      memberCards.value = cards.items.filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
+    }
+  } catch (e: any) {
+    voidErr.value = e?.data?.message || '撤销失败（请确认在"设置 → 交易撤销"里开启）'
+  } finally { voidLoading.value = false }
+}
+
 function autoAllocate(): { card_id: string; deduct: string }[] {
   if (!isMemberCardPay.value || !member.value) return []
   const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
@@ -852,10 +982,42 @@ const actualPaid = computed(() => {
   return total.value - discount.value
 })
 
+const pendingMode = ref('')
+
+const discountedTotal = computed(() => {
+  if (!isMemberCardPay.value || previewRate.value >= 1) return total.value
+  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+  const noDiscount = items.value.filter(i => i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+  return noDiscount + discountable * previewRate.value
+})
+
+const memberTotalBalance = computed(() => {
+  return memberCards.value
+    .filter(c => parseFloat(c.balance) > 0)
+    .reduce((s, c) => s + parseFloat(c.balance), 0)
+    .toFixed(2)
+})
+
+const useBalanceAllocations = computed<{ card_id: string; deduct: string }[]>(() => {
+  if (!member.value || memberCards.value.length === 0) return []
+  const result: { card_id: string; deduct: string }[] = []
+  for (const c of memberCards.value) {
+    const bal = parseFloat(c.balance)
+    if (bal > 0) result.push({ card_id: c.id, deduct: bal.toFixed(2) })
+  }
+  return result
+})
+
+function selectOtherPm() {
+  const cash = paymentMethods.value.find(p => p.name === '现金')
+  if (cash) selectedPm.value = cash.id
+}
+
 const canSubmit = computed(() => {
   if (items.value.length === 0 || !selectedPm.value || submitting.value) return false
   if (isMemberCardPay.value) {
-    if (!member.value || allocationPlan.value.length === 0) return false
+    if (!member.value) return false
+    if (allocationPlan.value.length === 0 && !pendingMode.value) return false
   }
   return true
 })
@@ -1078,19 +1240,40 @@ async function submit() {
   }
 
   if (isMemberCardPay.value) {
-    body.card_allocations = allocationPlan.value
+    if (pendingMode.value === 'full') {
+      body.pending_mode = 'full'
+      body.manual_price = '0'
+    } else if (pendingMode.value === 'use_balance') {
+      body.pending_mode = 'use_balance'
+      body.card_allocations = useBalanceAllocations.value
+    } else {
+      body.card_allocations = allocationPlan.value
+    }
   }
 
   submitting.value = true
   const settled = actualPaid.value
+  const isPending = !!pendingMode.value
+  const pendingAmt = isPending
+    ? (pendingMode.value === 'full' ? discountedTotal.value : discountedTotal.value - parseFloat(memberTotalBalance.value))
+    : 0
   try {
     await api('/api/transactions', { method: 'POST', body })
-    toast.add({
-      title: '已记账',
-      description: `本单实收 ¥${settled.toFixed(2)}`,
-      color: 'success',
-      icon: 'i-lucide-check-circle',
-    })
+    if (isPending) {
+      toast.add({
+        title: '已挂账',
+        description: `挂账 ¥${pendingAmt.toFixed(2)}${pendingMode.value === 'use_balance' ? `，扣卡 ¥${memberTotalBalance.value}` : ''}`,
+        color: 'warning',
+        icon: 'i-lucide-clock',
+      })
+    } else {
+      toast.add({
+        title: '已记账',
+        description: `本单实收 ¥${settled.toFixed(2)}`,
+        color: 'success',
+        icon: 'i-lucide-check-circle',
+      })
+    }
     items.value = []
     notes.value = ''
     useManualPrice.value = false
@@ -1098,6 +1281,7 @@ async function submit() {
     manualReason.value = ''
     useCustomTime.value = false
     transactionTime.value = ''
+    pendingMode.value = ''
     // 结账成功 → 换一句祝福语（仪式感 + 正反馈）+ 刷新今日记录
     useGreeting().refresh()
     fetchTodayTx()
@@ -1117,6 +1301,7 @@ let _txPollTimer: any
 onMounted(() => {
   fetchBase()
   fetchTodayTx()
+  ensureVoidFetched()
   _txPollTimer = setInterval(fetchTodayTx, 60_000)
 })
 onBeforeUnmount(() => {

@@ -2,11 +2,11 @@
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-2 flex-wrap">
       <p class="text-sm text-stone-500">共 {{ items.length }} 种方式</p>
-      <UButton icon="i-lucide-plus" @click="openCreate">新增方式</UButton>
+      <UButton icon="i-lucide-plus" @click="openCreate">新建支付方式</UButton>
     </div>
 
-    <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-hidden">
-      <table class="w-full text-base">
+    <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
+      <table class="w-full min-w-[520px] text-base">
         <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
           <tr>
             <th class="text-left px-4 py-3 font-medium">名称</th>
@@ -23,36 +23,56 @@
               <UBadge :label="m.is_active ? '启用' : '停用'" :color="m.is_active ? 'success' : 'neutral'" variant="soft" size="sm" />
             </td>
             <td class="px-4 py-3 text-right">
-              <UButton size="xs" variant="ghost" color="neutral" @click="openEdit(m)">编辑</UButton>
-              <UButton size="xs" variant="ghost" color="error" @click="confirmDelete(m)">删除</UButton>
+              <div class="inline-flex items-center gap-1.5">
+                <UButton
+                  size="xs" variant="soft" color="primary"
+                  icon="i-lucide-pencil"
+                  class="active:scale-95 transition-transform"
+                  @click="openEdit(m)"
+                >编辑</UButton>
+                <UButton
+                  size="xs" variant="soft" color="error"
+                  icon="i-lucide-trash-2"
+                  class="active:scale-95 transition-transform"
+                  @click="confirmDelete(m)"
+                >删除</UButton>
+              </div>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
-    <div v-else-if="!loading" class="py-16 text-center text-stone-500">暂无支付方式</div>
+    <EmptyState v-else-if="!loading" icon="i-lucide-wallet" text="暂无支付方式" hint="点击右上角新建" />
     <div v-if="loading" class="space-y-2"><USkeleton v-for="i in 5" :key="i" class="h-14 rounded-2xl" /></div>
 
-    <USlideover v-model:open="formOpen" :title="editingId ? '编辑方式' : '新增方式'" :ui="{ content: 'w-full sm:max-w-md' }">
+    <UModal v-model:open="formOpen" :title="editingId ? '编辑方式' : '新增方式'" :ui="{ content: 'sm:max-w-md' }">
       <template #body>
         <UForm :state="form" class="space-y-4" @submit="onSubmit">
-          <UFormField label="名称" required>
-            <UInput v-model="form.name" placeholder="如：微信、老婆微信、POS" class="w-full" />
-          </UFormField>
-          <UFormField label="排序（数字越小越靠前）">
-            <UInput v-model="form.sort_order" type="number" class="w-full" />
-          </UFormField>
-          <UFormField v-if="editingId" label="启用状态">
+          <div class="p-4 rounded-xl bg-stone-50/60 dark:bg-stone-900/60 ring-1 ring-stone-200/40 dark:ring-stone-800 space-y-3">
+            <UFormField label="名称" required>
+              <UInput v-model="form.name" placeholder="如：微信、信用卡" size="md" class="w-full" />
+            </UFormField>
+            <UFormField label="排序" help="数字越小越靠前">
+              <UInput v-model="form.sort_order" type="number" size="md" class="w-40" />
+            </UFormField>
+          </div>
+
+          <div v-if="editingId" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
+            <div class="flex items-center gap-2 mb-3">
+              <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
+              <h3 class="text-base font-medium">启用状态</h3>
+            </div>
             <URadioGroup v-model="form.is_active" :items="[{label:'启用', value:true},{label:'停用', value:false}]" orientation="horizontal" />
-          </UFormField>
+          </div>
+
           <UAlert v-if="formError" :description="formError" color="error" variant="soft" icon="i-lucide-alert-circle" />
           <div class="flex justify-end gap-2 pt-2">
-            <UButton variant="ghost" color="neutral" @click="formOpen = false">取消</UButton>
+            <UButton type="button" variant="ghost" color="neutral" @click="formOpen = false">取消</UButton>
             <UButton type="submit" :loading="submitting">保存</UButton>
           </div>
         </UForm>
       </template>
-    </USlideover>
+    </UModal>
 
     <UModal v-model:open="deleteOpen" title="删除支付方式" :ui="{ content: 'sm:max-w-md' }">
       <template #body><p>确认删除「<strong>{{ deleting?.name }}</strong>」？已被交易引用的方式不能删除，可改为停用。</p></template>

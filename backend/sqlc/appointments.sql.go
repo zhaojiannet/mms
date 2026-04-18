@@ -196,7 +196,7 @@ func (q *Queries) GetAppointmentByID(ctx context.Context, id uuid.UUID) (Appoint
 }
 
 const listAppointmentServices = `-- name: ListAppointmentServices :many
-SELECT s.id, s.name, s.price, s.duration_min
+SELECT s.id, s.name, s.price
 FROM appointment_services aps
 JOIN services s ON s.id = aps.service_id
 WHERE aps.appointment_id = $1
@@ -204,10 +204,9 @@ ORDER BY s.sort_order ASC, s.name ASC
 `
 
 type ListAppointmentServicesRow struct {
-	ID          uuid.UUID       `json:"id"`
-	Name        string          `json:"name"`
-	Price       decimal.Decimal `json:"price"`
-	DurationMin *int32          `json:"duration_min"`
+	ID    uuid.UUID       `json:"id"`
+	Name  string          `json:"name"`
+	Price decimal.Decimal `json:"price"`
 }
 
 func (q *Queries) ListAppointmentServices(ctx context.Context, appointmentID uuid.UUID) ([]ListAppointmentServicesRow, error) {
@@ -219,12 +218,7 @@ func (q *Queries) ListAppointmentServices(ctx context.Context, appointmentID uui
 	var items []ListAppointmentServicesRow
 	for rows.Next() {
 		var i ListAppointmentServicesRow
-		if err := rows.Scan(
-			&i.ID,
-			&i.Name,
-			&i.Price,
-			&i.DurationMin,
-		); err != nil {
+		if err := rows.Scan(&i.ID, &i.Name, &i.Price); err != nil {
 			return nil, err
 		}
 		items = append(items, i)
@@ -241,7 +235,16 @@ WHERE ($1::timestamptz IS NULL OR appointment_time >= $1::timestamptz)
   AND ($2::timestamptz   IS NULL OR appointment_time <  $2::timestamptz)
   AND ($3::uuid          IS NULL OR assigned_staff_id = $3::uuid)
   AND ($4::text            IS NULL OR status            = $4::text)
-ORDER BY appointment_time ASC
+ORDER BY
+  CASE status
+    WHEN 'pending'   THEN 0
+    WHEN 'confirmed' THEN 1
+    WHEN 'completed' THEN 2
+    WHEN 'no_show'   THEN 3
+    WHEN 'cancelled' THEN 4
+    ELSE 5
+  END,
+  appointment_time ASC
 `
 
 type ListAppointmentsParams struct {
@@ -281,6 +284,37 @@ func (q *Queries) ListAppointments(ctx context.Context, arg ListAppointmentsPara
 			&i.CreatedAt,
 			&i.UpdatedAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lookupAppointmentsByIDs = `-- name: LookupAppointmentsByIDs :many
+SELECT id, customer_name, appointment_time FROM appointments WHERE id = ANY($1::uuid[])
+`
+
+type LookupAppointmentsByIDsRow struct {
+	ID              uuid.UUID          `json:"id"`
+	CustomerName    string             `json:"customer_name"`
+	AppointmentTime pgtype.Timestamptz `json:"appointment_time"`
+}
+
+// 批量返回 id + 顾客姓名（给操作日志对象列显示用）
+func (q *Queries) LookupAppointmentsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]LookupAppointmentsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, lookupAppointmentsByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LookupAppointmentsByIDsRow
+	for rows.Next() {
+		var i LookupAppointmentsByIDsRow
+		if err := rows.Scan(&i.ID, &i.CustomerName, &i.AppointmentTime); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

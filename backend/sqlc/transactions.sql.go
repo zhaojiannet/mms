@@ -18,13 +18,17 @@ SELECT count(*) FROM transactions
 WHERE ($1::timestamptz IS NULL OR transaction_time >= $1::timestamptz)
   AND ($2::timestamptz   IS NULL OR transaction_time <  $2::timestamptz)
   AND ($3::text              IS NULL OR kind              =  $3::text)
-  AND ($4::bool    IS TRUE OR status            =  'completed')
+  AND (
+    $4::text IS NOT NULL AND status = $4::text
+    OR $4::text IS NULL AND ($5::bool IS TRUE OR status = 'completed')
+  )
 `
 
 type CountTransactionsByParams struct {
 	StartDate     pgtype.Timestamptz `json:"start_date"`
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
+	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
 
@@ -33,6 +37,7 @@ func (q *Queries) CountTransactionsBy(ctx context.Context, arg CountTransactions
 		arg.StartDate,
 		arg.EndDate,
 		arg.Kind,
+		arg.Status,
 		arg.IncludeVoided,
 	)
 	var count int64
@@ -171,7 +176,10 @@ LEFT JOIN card_types ct ON ct.id = c.card_type_id
 WHERE ($3::timestamptz IS NULL OR t.transaction_time >= $3::timestamptz)
   AND ($4::timestamptz   IS NULL OR t.transaction_time <  $4::timestamptz)
   AND ($5::text              IS NULL OR t.kind             =  $5::text)
-  AND ($6::bool    IS TRUE OR t.status           =  'completed')
+  AND (
+    $6::text IS NOT NULL AND t.status = $6::text
+    OR $6::text IS NULL AND ($7::bool IS TRUE OR t.status = 'completed')
+  )
 ORDER BY t.transaction_time DESC, t.id DESC
 LIMIT $1 OFFSET $2
 `
@@ -182,6 +190,7 @@ type ListTransactionsParams struct {
 	StartDate     pgtype.Timestamptz `json:"start_date"`
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
+	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
 
@@ -193,6 +202,9 @@ type ListTransactionsRow struct {
 }
 
 // 列出交易，附带会员名 / 卡类型名 / 项目数 (POS 收银底部 / 流水页展示)
+//
+//	status:         可选精确过滤（'completed' / 'voided'）
+//	include_voided: 兼容参数，true 时等同不限 status；否则仅 completed（当 status 未指定时生效）
 func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsParams) ([]ListTransactionsRow, error) {
 	rows, err := q.db.Query(ctx, listTransactions,
 		arg.Limit,
@@ -200,6 +212,7 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 		arg.StartDate,
 		arg.EndDate,
 		arg.Kind,
+		arg.Status,
 		arg.IncludeVoided,
 	)
 	if err != nil {
@@ -236,6 +249,77 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 			&i.CardTypeName,
 			&i.ItemQty,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockTransactionForUpdate = `-- name: LockTransactionForUpdate :one
+SELECT id, tenant_id, kind, status, member_id, customer_name, staff_id, payment_method_id, card_id, total_amount, actual_paid_amount, discount_amount, transaction_time, voided_at, voided_by_user_id, voided_by_name, void_reason, summary, notes, legacy_id, created_at, updated_at FROM transactions WHERE id = $1 FOR UPDATE
+`
+
+// 撤单路径：防止双击重复反向扣款
+func (q *Queries) LockTransactionForUpdate(ctx context.Context, id uuid.UUID) (Transaction, error) {
+	row := q.db.QueryRow(ctx, lockTransactionForUpdate, id)
+	var i Transaction
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.Kind,
+		&i.Status,
+		&i.MemberID,
+		&i.CustomerName,
+		&i.StaffID,
+		&i.PaymentMethodID,
+		&i.CardID,
+		&i.TotalAmount,
+		&i.ActualPaidAmount,
+		&i.DiscountAmount,
+		&i.TransactionTime,
+		&i.VoidedAt,
+		&i.VoidedByUserID,
+		&i.VoidedByName,
+		&i.VoidReason,
+		&i.Summary,
+		&i.Notes,
+		&i.LegacyID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lookupTransactionsByIDs = `-- name: LookupTransactionsByIDs :many
+SELECT t.id,
+       t.total_amount,
+       COALESCE(m.name, t.customer_name, '散客')::text AS display_name
+FROM transactions t
+LEFT JOIN members m ON m.id = t.member_id
+WHERE t.id = ANY($1::uuid[])
+`
+
+type LookupTransactionsByIDsRow struct {
+	ID          uuid.UUID       `json:"id"`
+	TotalAmount decimal.Decimal `json:"total_amount"`
+	DisplayName string          `json:"display_name"`
+}
+
+// 批量返回 id + 简要信息（给操作日志对象列显示用）
+func (q *Queries) LookupTransactionsByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]LookupTransactionsByIDsRow, error) {
+	rows, err := q.db.Query(ctx, lookupTransactionsByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LookupTransactionsByIDsRow
+	for rows.Next() {
+		var i LookupTransactionsByIDsRow
+		if err := rows.Scan(&i.ID, &i.TotalAmount, &i.DisplayName); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

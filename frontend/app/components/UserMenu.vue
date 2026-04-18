@@ -1,6 +1,17 @@
 <template>
   <UPopover :content="{ side: 'top', align: 'start' }">
     <UButton
+      v-if="compact"
+      color="neutral"
+      variant="ghost"
+      square
+      class="active:scale-[0.98] !bg-stone-200/40 dark:!bg-stone-800/40 hover:!bg-stone-200/70 dark:hover:!bg-stone-800/70 transition-colors duration-150"
+      :aria-label="auth.user?.name || '账户'"
+    >
+      <UAvatar :alt="auth.user?.name" size="xs" />
+    </UButton>
+    <UButton
+      v-else
       :block="block"
       color="neutral"
       variant="ghost"
@@ -95,6 +106,18 @@
 
         <div class="h-px bg-stone-200/70 dark:bg-stone-800 my-1" />
 
+        <!-- 个人设置 -->
+        <UButton
+          icon="i-lucide-user-cog"
+          color="neutral"
+          variant="ghost"
+          block
+          class="!justify-start"
+          @click="profileOpen = true"
+        >
+          个人设置
+        </UButton>
+
         <!-- 退出 -->
         <UButton
           icon="i-lucide-log-out"
@@ -109,12 +132,15 @@
       </div>
     </template>
   </UPopover>
+
+  <!-- 共享 Dialog（与"设置→账号→设置"同一个组件） -->
+  <UserAccountDialog v-model:open="profileOpen" :target="auth.user" />
 </template>
 
 <script setup lang="ts">
-import { useAuthStore } from '~/stores/auth'
+import { useAuthStore, roleLabel as authRoleLabel } from '~/stores/auth'
 
-interface Props { block?: boolean }
+interface Props { block?: boolean; compact?: boolean }
 defineProps<Props>()
 
 const auth = useAuthStore()
@@ -124,9 +150,7 @@ const colorMode = useColorMode()
 const { themes, apply: applyTheme, current: themeCurrent } = useTheme()
 const { options: fontOptions, apply: applyFont, current: fontCurrent } = useFontSize()
 
-const roleLabel = computed(() => {
-  return { admin: '管理员', manager: '经理', staff: '员工' }[auth.user?.role ?? ''] ?? '—'
-})
+const roleLabel = computed(() => authRoleLabel(auth.user?.role ?? ''))
 
 const modes = [
   { key: 'light',  label: '浅色',     icon: 'i-lucide-sun' },
@@ -138,4 +162,6 @@ function onLogout() {
   auth.logout()
   router.push('/login')
 }
+
+const profileOpen = ref(false)
 </script>

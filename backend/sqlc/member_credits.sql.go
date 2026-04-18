@@ -97,52 +97,6 @@ func (q *Queries) GetCreditByID(ctx context.Context, id uuid.UUID) (MemberCredit
 	return i, err
 }
 
-const listCreditsByMember = `-- name: ListCreditsByMember :many
-SELECT id, tenant_id, member_id, amount, summary, charged_at, charged_tx_id, settled_at, settlement_tx_id, legacy_id, created_at, updated_at FROM member_credits
-WHERE member_id = $1
-ORDER BY charged_at DESC
-LIMIT $2 OFFSET $3
-`
-
-type ListCreditsByMemberParams struct {
-	MemberID uuid.UUID `json:"member_id"`
-	Limit    int32     `json:"limit"`
-	Offset   int32     `json:"offset"`
-}
-
-func (q *Queries) ListCreditsByMember(ctx context.Context, arg ListCreditsByMemberParams) ([]MemberCredit, error) {
-	rows, err := q.db.Query(ctx, listCreditsByMember, arg.MemberID, arg.Limit, arg.Offset)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []MemberCredit
-	for rows.Next() {
-		var i MemberCredit
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.MemberID,
-			&i.Amount,
-			&i.Summary,
-			&i.ChargedAt,
-			&i.ChargedTxID,
-			&i.SettledAt,
-			&i.SettlementTxID,
-			&i.LegacyID,
-			&i.CreatedAt,
-			&i.UpdatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCreditsBySettlementTx = `-- name: ListCreditsBySettlementTx :many
 SELECT id, tenant_id, member_id, amount, summary, charged_at, charged_tx_id, settled_at, settlement_tx_id, legacy_id, created_at, updated_at FROM member_credits
 WHERE settlement_tx_id = $1
@@ -191,6 +145,72 @@ ORDER BY charged_at DESC
 // 未清挂账
 func (q *Queries) ListPendingCreditsByMember(ctx context.Context, memberID uuid.UUID) ([]MemberCredit, error) {
 	rows, err := q.db.Query(ctx, listPendingCreditsByMember, memberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MemberCredit
+	for rows.Next() {
+		var i MemberCredit
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.MemberID,
+			&i.Amount,
+			&i.Summary,
+			&i.ChargedAt,
+			&i.ChargedTxID,
+			&i.SettledAt,
+			&i.SettlementTxID,
+			&i.LegacyID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockCreditForUpdate = `-- name: LockCreditForUpdate :one
+SELECT id, tenant_id, member_id, amount, summary, charged_at, charged_tx_id, settled_at, settlement_tx_id, legacy_id, created_at, updated_at FROM member_credits WHERE id = $1 FOR UPDATE
+`
+
+// 单笔清账路径：防双击重复创建 settlement 交易
+func (q *Queries) LockCreditForUpdate(ctx context.Context, id uuid.UUID) (MemberCredit, error) {
+	row := q.db.QueryRow(ctx, lockCreditForUpdate, id)
+	var i MemberCredit
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.MemberID,
+		&i.Amount,
+		&i.Summary,
+		&i.ChargedAt,
+		&i.ChargedTxID,
+		&i.SettledAt,
+		&i.SettlementTxID,
+		&i.LegacyID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const lockPendingCreditsByMember = `-- name: LockPendingCreditsByMember :many
+SELECT id, tenant_id, member_id, amount, summary, charged_at, charged_tx_id, settled_at, settlement_tx_id, legacy_id, created_at, updated_at FROM member_credits
+WHERE member_id = $1 AND settled_at IS NULL
+ORDER BY charged_at DESC
+FOR UPDATE
+`
+
+// 批量清账路径：一次锁定该会员所有未清挂账；再有并发请求会阻塞到本 tx commit
+func (q *Queries) LockPendingCreditsByMember(ctx context.Context, memberID uuid.UUID) ([]MemberCredit, error) {
+	rows, err := q.db.Query(ctx, lockPendingCreditsByMember, memberID)
 	if err != nil {
 		return nil, err
 	}

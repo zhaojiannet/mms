@@ -13,7 +13,7 @@
         <div class="flex items-center gap-4">
           <UAvatar :alt="member.name" size="lg" />
           <div>
-            <h1 class="text-3xl font-semibold tracking-tight">{{ member.name }}</h1>
+            <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ member.name }}</h1>
             <div class="mt-1 text-sm text-stone-500 space-x-3 tabular-nums">
               <span>{{ member.phone || '未留手机' }}</span>
               <span>{{ genderLabel(member.gender) }}</span>
@@ -22,10 +22,10 @@
             <p v-if="member.notes" class="mt-2 text-sm text-stone-600 dark:text-stone-400 italic">{{ member.notes }}</p>
           </div>
         </div>
-        <div class="flex items-center gap-2">
-          <UButton color="neutral" variant="soft" icon="i-lucide-plus-circle" @click="openIssueCard">办卡</UButton>
-          <UButton color="neutral" variant="soft" icon="i-lucide-file-minus" @click="openPending">挂账</UButton>
-          <UButton icon="i-lucide-shopping-cart" @click="goPos">开单</UButton>
+        <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
+          <UButton color="neutral" variant="soft" icon="i-lucide-plus-circle" class="flex-1 sm:flex-none justify-center" @click="openIssueCard">办卡</UButton>
+          <UButton color="neutral" variant="soft" icon="i-lucide-file-minus" class="flex-1 sm:flex-none justify-center" @click="openPending">挂账</UButton>
+          <UButton icon="i-lucide-shopping-cart" class="flex-1 sm:flex-none justify-center" @click="goPos">开单</UButton>
         </div>
       </header>
 
@@ -49,10 +49,13 @@
 
       <!-- 会员卡 -->
       <section>
-        <h2 class="text-lg font-medium mb-3 flex items-center justify-between">
-          <span>会员卡</span>
-          <span class="text-sm font-normal text-stone-500">{{ cards.length }} 张</span>
-        </h2>
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
+            <h2 class="text-base font-medium">会员卡</h2>
+          </div>
+          <span class="text-sm text-stone-500">{{ cards.length }} 张</span>
+        </div>
         <div v-if="cards.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div
             v-for="c in cards" :key="c.id"
@@ -78,15 +81,18 @@
             <div class="mt-1 text-xs text-stone-500">开卡于 {{ formatDate(c.issued_at) }}</div>
           </div>
         </div>
-        <div v-else class="p-8 text-center text-stone-500 rounded-2xl border border-dashed">尚无会员卡</div>
+        <EmptyState v-else icon="i-lucide-credit-card" text="暂无会员卡" hint="点击右上角「办卡」添加" />
       </section>
 
       <!-- 挂账 -->
       <section>
-        <h2 class="text-lg font-medium mb-3 flex items-center justify-between">
-          <span>未清挂账</span>
+        <div class="flex items-center justify-between mb-3">
+          <div class="flex items-center gap-2">
+            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
+            <h2 class="text-base font-medium">未清挂账</h2>
+          </div>
           <UButton v-if="pendings.length > 1" size="sm" variant="soft" @click="openSettleAll">批量清账</UButton>
-        </h2>
+        </div>
         <div v-if="pendings.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
           <table class="w-full text-base">
             <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -103,19 +109,34 @@
                 <td class="px-4 py-3 text-right tabular-nums">¥{{ p.amount }}</td>
                 <td class="px-4 py-3 text-stone-500 text-sm tabular-nums">{{ formatDate(p.charged_at) }}</td>
                 <td class="px-4 py-3 text-right">
-                  <UButton size="xs" variant="soft" @click="openSettle(p)">清账</UButton>
-                  <UButton size="xs" variant="ghost" color="error" @click="removePending(p)">撤消</UButton>
+                  <div class="inline-flex items-center gap-1.5">
+                    <UButton
+                      size="xs" variant="soft" color="primary"
+                      icon="i-lucide-circle-check"
+                      class="active:scale-95 transition-transform"
+                      @click="openSettle(p)"
+                    >清账</UButton>
+                    <UButton
+                      size="xs" variant="soft" color="error"
+                      icon="i-lucide-rotate-ccw"
+                      class="active:scale-95 transition-transform"
+                      @click="removePending(p)"
+                    >撤消</UButton>
+                  </div>
                 </td>
               </tr>
             </tbody>
           </table>
         </div>
-        <div v-else class="p-6 text-center text-stone-500 rounded-2xl border border-dashed">无未清挂账</div>
+        <EmptyState v-else icon="i-lucide-file-minus" text="无未清挂账" />
       </section>
 
       <!-- 最近交易 -->
       <section>
-        <h2 class="text-lg font-medium mb-3">最近交易</h2>
+        <div class="flex items-center gap-2 mb-3">
+          <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
+          <h2 class="text-base font-medium">最近交易</h2>
+        </div>
         <div v-if="recentTx.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
           <table class="w-full text-base">
             <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -138,7 +159,7 @@
             </tbody>
           </table>
         </div>
-        <div v-else class="p-6 text-center text-stone-500 rounded-2xl border border-dashed">无交易记录</div>
+        <EmptyState v-else icon="i-lucide-receipt" text="无交易记录" />
       </section>
 
       <!-- 挂账 / 清账 dialogs -->

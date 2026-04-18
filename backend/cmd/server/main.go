@@ -6,12 +6,15 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"net/url"
 	"os"
+	"os/signal"
+	"strings"
+	"syscall"
 	"time"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/labstack/echo/v5"
+	echomw "github.com/labstack/echo/v5/middleware"
 	"github.com/pressly/goose/v3"
 
 	"github.com/zhaojiannet/mms/backend/internal/core/appointments"
@@ -20,18 +23,19 @@ import (
 	"github.com/zhaojiannet/mms/backend/internal/core/booking"
 	cardtypes "github.com/zhaojiannet/mms/backend/internal/core/card_types"
 	"github.com/zhaojiannet/mms/backend/internal/core/cards"
-	commissionrules "github.com/zhaojiannet/mms/backend/internal/core/commission_rules"
 	membercredits "github.com/zhaojiannet/mms/backend/internal/core/member_credits"
 	"github.com/zhaojiannet/mms/backend/internal/core/members"
+	"github.com/zhaojiannet/mms/backend/internal/core/notifications"
 	paymentmethods "github.com/zhaojiannet/mms/backend/internal/core/payment_methods"
 	"github.com/zhaojiannet/mms/backend/internal/core/reports"
 	"github.com/zhaojiannet/mms/backend/internal/core/services"
 	"github.com/zhaojiannet/mms/backend/internal/core/staff"
 	tenantsettings "github.com/zhaojiannet/mms/backend/internal/core/tenant_settings"
 	"github.com/zhaojiannet/mms/backend/internal/core/transactions"
+	"github.com/zhaojiannet/mms/backend/internal/core/uploads"
 	users2 "github.com/zhaojiannet/mms/backend/internal/core/users"
 	"github.com/zhaojiannet/mms/backend/internal/platform/bootstrap"
-	"github.com/zhaojiannet/mms/backend/internal/platform/db"
+	dbpkg "github.com/zhaojiannet/mms/backend/internal/platform/db"
 	"github.com/zhaojiannet/mms/backend/internal/platform/events"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/migrations"
@@ -41,12 +45,18 @@ func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
 
+	// 启动硬校验：关键环境变量必须是非默认值，否则拒绝启动
+	if err := validateCriticalEnv(); err != nil {
+		slog.Error("env validation failed", "err", err)
+		os.Exit(1)
+	}
+
 	if err := runMigrations(); err != nil {
 		slog.Error("migration failed", "err", err)
 		os.Exit(1)
 	}
 
-	pool, err := db.NewPool(context.Background())
+	pool, err := dbpkg.NewPool(context.Background())
 	if err != nil {
 		slog.Error("pgxpool init failed", "err", err)
 		os.Exit(1)
@@ -59,10 +69,40 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 系统公告 seed：从 announcements.json upsert 入库；失败只 warn 不中断
+	notifications.SeedAnnouncements(context.Background(), pool)
+
+	// 注入 pool 到 auth 包：登录失败计数的独立 tx 会用（绕过业务 handler tx 的 rollback）
+	if err := auth.Init(pool); err != nil {
+		slog.Error("auth init failed", "err", err)
+		os.Exit(1)
+	}
+
 	e := echo.New()
+
+	// 全局 body 上限 2MB：防存储型 DoS（notes / name 塞巨大字符串）
+	// logo 上传走独立 multipart 路径，handler 内自校验 2MB 限制
+	e.Use(echomw.BodyLimit(2 << 20))
 
 	// 全局 CORS（dev 用，生产由反代统一处理）
 	e.Use(mw.CORS())
+
+	// 全局安全响应头（defense-in-depth，反代可叠加/覆盖）
+	hostedMode := getenv("DEPLOYMENT_MODE", "self-hosted") == "hosted"
+	e.Use(func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			h := c.Response().Header()
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("X-Frame-Options", "DENY")
+			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+			// HSTS：仅 hosted 模式启用（自建者可能走 HTTP 或自签证书期，HSTS 会锁死浏览器）
+			if hostedMode {
+				h.Set("Strict-Transport-Security", "max-age=63072000; includeSubDomains; preload")
+			}
+			return next(c)
+		}
+	})
 
 	// 全局健康检查（不经过租户解析）
 	e.GET("/health", func(c *echo.Context) error {
@@ -100,122 +140,231 @@ func main() {
 	})
 
 	// 登录端点：用 tenant 上下文 + RLS 验证 users 表
-	api.POST("/login", auth.LoginHandler)
+	// per-IP 限流：每分钟 10 次（防暴力穷举）
+	loginLimit := mw.RateLimit(10, time.Minute)
+	api.POST("/login", auth.LoginHandler, loginLimit)
+
+	// 图形验证码：登录失败多次后前端显示，也用于锁定账号自救
+	// per-IP 限流：每分钟 20 次（防刷消耗内存）
+	captchaLimit := mw.RateLimit(20, time.Minute)
+	api.GET("/captcha", auth.CaptchaHandler, captchaLimit)
 
 	// 公开预约端（含 booking_code 校验，不需要 JWT）
-	api.GET("/booking/options", booking.Options)
-	api.POST("/booking", booking.Create)
+	// per-IP 限流：防 booking_code 暴力枚举 + 垃圾预约（code 错误也消耗配额）
+	bookingLimit := mw.RateLimit(30, time.Minute)
+	api.GET("/booking/options", booking.Options, bookingLimit)
+	api.POST("/booking", booking.Create, bookingLimit)
 
-	// 需要 JWT 的业务路由组（JWT 中 tenant_id 必须与 Host 解析到的一致）
+	// 公开店铺展示信息（登录页等未登录场景使用）
+	api.GET("/store/info", tenantsettings.StoreInfo)
+
+	// 静态文件服务：店铺 logo 等上传资源（公开访问）
+	// 路径映射 /uploads/* → ./uploads/*
+	// 安全响应头：禁止 MIME sniff + 严格 CSP + inline 展示（防 polyglot XSS）
+	uploadsGroup := e.Group("/uploads", func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			h := c.Response().Header()
+			h.Set("X-Content-Type-Options", "nosniff")
+			h.Set("Content-Security-Policy", "default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'")
+			h.Set("Content-Disposition", "inline")
+			h.Set("X-Frame-Options", "DENY")
+			return next(c)
+		}
+	})
+	uploadsGroup.Static("", uploads.UploadRoot)
+
+	// --------------- 三级权限分组 ---------------
+	// secured        : 所有登录用户（super_admin + admin + staff）
+	// adminAndAbove  : super_admin + admin（staff 不可）
+	// superOnly      : 仅 super_admin
 	secured := api.Group("")
 	secured.Use(mw.RequireAuth())
-	secured.GET("/members", members.List)
-	secured.POST("/members", members.Create)
-	secured.GET("/members/:id", members.Get)
-	secured.PUT("/members/:id", members.Update)
-	secured.DELETE("/members/:id", members.Delete)
 
+	adminAndAbove := secured.Group("")
+	adminAndAbove.Use(mw.RequireAtLeastAdmin())
+
+	superOnly := secured.Group("")
+	superOnly.Use(mw.RequireSuperAdmin())
+
+	pwdLimit := mw.RateLimit(5, time.Minute)
+	// 员工查询限流：仅 role=staff 生效，admin/super_admin 不受限
+	// 覆盖会员/交易 list + detail，防止通过 :id 逐个枚举绕过 List 的 search≥3 限制
+	staffReadLimit := mw.RateLimitStaffOnly(30, time.Minute)
+
+	// --------------- 会员 ---------------
+	// staff 可查、可创建（录入新会员）；编辑/删除需 admin（防离职员工批量改 phone 劫持续费通知）
+	secured.GET("/members", members.List, staffReadLimit)
+	secured.POST("/members", members.Create)
+	secured.GET("/members/:id", members.Get, staffReadLimit)
+	adminAndAbove.PUT("/members/:id", members.Update)
+	adminAndAbove.DELETE("/members/:id", members.Delete)
+
+	// --------------- 基础配置（仅 admin 及以上可写） ---------------
 	secured.GET("/payment-methods", paymentmethods.List)
-	secured.POST("/payment-methods", paymentmethods.Create)
 	secured.GET("/payment-methods/:id", paymentmethods.Get)
-	secured.PUT("/payment-methods/:id", paymentmethods.Update)
-	secured.DELETE("/payment-methods/:id", paymentmethods.Delete)
+	adminAndAbove.POST("/payment-methods", paymentmethods.Create)
+	adminAndAbove.PUT("/payment-methods/:id", paymentmethods.Update)
+	adminAndAbove.DELETE("/payment-methods/:id", paymentmethods.Delete)
 
 	secured.GET("/services", services.List)
-	secured.POST("/services", services.Create)
 	secured.GET("/services/:id", services.Get)
-	secured.PUT("/services/:id", services.Update)
-	secured.DELETE("/services/:id", services.Delete)
+	adminAndAbove.POST("/services", services.Create)
+	adminAndAbove.PUT("/services/:id", services.Update)
+	adminAndAbove.DELETE("/services/:id", services.Delete)
 
 	secured.GET("/staff", staff.List)
-	secured.POST("/staff", staff.Create)
 	secured.GET("/staff/:id", staff.Get)
-	secured.PUT("/staff/:id", staff.Update)
-	secured.DELETE("/staff/:id", staff.Delete)
+	adminAndAbove.POST("/staff", staff.Create)
+	adminAndAbove.PUT("/staff/:id", staff.Update)
+	adminAndAbove.DELETE("/staff/:id", staff.Delete)
 
 	secured.GET("/card-types", cardtypes.List)
-	secured.POST("/card-types", cardtypes.Create)
 	secured.GET("/card-types/:id", cardtypes.Get)
-	secured.PUT("/card-types/:id", cardtypes.Update)
-	secured.DELETE("/card-types/:id", cardtypes.Delete)
+	adminAndAbove.POST("/card-types", cardtypes.Create)
+	adminAndAbove.PUT("/card-types/:id", cardtypes.Update)
+	adminAndAbove.DELETE("/card-types/:id", cardtypes.Delete)
 
+	// --------------- 会员卡 ---------------
+	// staff 可查+办卡（业务需要），不可改不可删（防篡改卡次/过期时间）
 	secured.GET("/members/:memberId/cards", cards.ListByMember)
 	secured.POST("/members/:memberId/cards", cards.Issue)
 	secured.GET("/cards/:id", cards.Get)
-	secured.PUT("/cards/:id", cards.Update)
-	secured.DELETE("/cards/:id", cards.Delete)
+	adminAndAbove.PUT("/cards/:id", cards.Update)
+	adminAndAbove.DELETE("/cards/:id", cards.Delete)
 
+	// --------------- 挂账 ---------------
+	// staff 可建挂账、可清账（业务需要）；撤消（删挂账）需 admin（防员工消除痕迹）
 	secured.GET("/members/:memberId/pending", membercredits.ListPending)
 	secured.POST("/members/:memberId/pending", membercredits.Create)
-	secured.DELETE("/members/:memberId/pending/:pendingId", membercredits.Delete)
+	adminAndAbove.DELETE("/members/:memberId/pending/:pendingId", membercredits.Delete)
 	secured.POST("/members/:memberId/pending/:pendingId/settle", transactions.SettleCredit)
 
-	secured.GET("/transactions", transactions.List)
+	// --------------- 交易 ---------------
+	secured.GET("/transactions", transactions.List, staffReadLimit)
 	secured.POST("/transactions", transactions.Create)
-	secured.GET("/transactions/:id", transactions.Get)
-	secured.POST("/transactions/:id/void", transactions.Void)
+	secured.GET("/transactions/:id", transactions.Get, staffReadLimit)
+	// 交易撤销：仅 super_admin（敏感操作）
+	superOnly.POST("/transactions/:id/void", transactions.Void)
 	secured.POST("/members/:memberId/cards/with-transaction", transactions.IssueCard)
 	secured.POST("/members/:memberId/pending/settle-all", transactions.SettleAllCredits)
 
+	// --------------- 预约 ---------------
+	// staff 可查+建预约；修改状态/删除需 admin（防改 completed 骗佣金 / 删他人预约）
 	secured.GET("/appointments", appointments.List)
 	secured.POST("/appointments", appointments.Create)
 	secured.GET("/appointments/count/today", appointments.CountToday)
 	secured.GET("/appointments/:id", appointments.Get)
-	secured.PATCH("/appointments/:id/status", appointments.UpdateStatus)
-	secured.DELETE("/appointments/:id", appointments.Delete)
+	adminAndAbove.PATCH("/appointments/:id/status", appointments.UpdateStatus)
+	adminAndAbove.DELETE("/appointments/:id", appointments.Delete)
 
+	// --------------- 租户设置 ---------------
 	secured.GET("/tenant-settings", tenantsettings.List)
 	secured.GET("/tenant-settings/:key", tenantsettings.Get)
-	secured.PUT("/tenant-settings/:key", tenantsettings.Upsert)
-	secured.DELETE("/tenant-settings/:key", tenantsettings.Delete)
-	secured.POST("/tenant-settings/enable-void", tenantsettings.EnableVoid)
-	secured.POST("/tenant-settings/disable-void", tenantsettings.DisableVoid)
-	secured.POST("/tenant-settings/booking-code", tenantsettings.RegenerateBookingCode)
+	adminAndAbove.PUT("/tenant-settings/:key", tenantsettings.Upsert)
+	adminAndAbove.DELETE("/tenant-settings/:key", tenantsettings.Delete)
+	// 开启/关闭撤单 + 设置超级密码：仅 super_admin
+	superOnly.POST("/tenant-settings/enable-void", tenantsettings.EnableVoid)
+	superOnly.POST("/tenant-settings/disable-void", tenantsettings.DisableVoid)
+	adminAndAbove.POST("/tenant-settings/booking-code", tenantsettings.RegenerateBookingCode)
+	superOnly.POST("/tenant-settings/super-password", tenantsettings.SetSuperPassword, pwdLimit)
+	secured.GET("/tenant-settings/super-password/status", tenantsettings.SuperPasswordStatus)
 
-	secured.GET("/users",                  users2.List)
-	secured.POST("/users",                 users2.Create)
-	secured.GET("/users/:id",              users2.Get)
-	secured.PUT("/users/:id",              users2.Update)
-	secured.POST("/users/:id/reset-password", users2.ResetPassword)
-	secured.DELETE("/users/:id",           users2.Delete)
+	// --------------- 用户账号（仅 admin 及以上可见，仅 super_admin 可管） ---------------
+	// staff 不应能列举员工账号（姓名/邮箱/role/最后登录时间）
+	adminAndAbove.GET("/users", users2.List)
+	adminAndAbove.GET("/users/:id", users2.Get)
+	superOnly.POST("/users", users2.Create)
+	superOnly.PUT("/users/:id", users2.Update)
+	superOnly.POST("/users/:id/reset-password", users2.ResetPassword)
+	superOnly.DELETE("/users/:id", users2.Delete)
 
-	secured.GET("/audit-logs",              auditlogs.List)
+	// --------------- 操作日志（admin 及以上） ---------------
+	adminAndAbove.GET("/audit-logs", auditlogs.List)
+	// 批量 ID→名字解析：给日志对象列显示"会员·张三 / 交易·¥128 / 预约·王女士"
+	adminAndAbove.GET("/audit-logs/lookup", auditlogs.Lookup)
 
-	secured.GET("/commission-rules",        commissionrules.List)
-	secured.POST("/commission-rules",       commissionrules.Create)
-	secured.PUT("/commission-rules/:id",    commissionrules.Update)
-	secured.DELETE("/commission-rules/:id", commissionrules.Delete)
+	// --------------- 自助修改密码 / 续签 ---------------
+	secured.POST("/auth/change-password", auth.ChangePasswordHandler, pwdLimit)
+	secured.POST("/auth/refresh", auth.RefreshHandler)
 
-	secured.GET("/reports/business",           reports.Business)
-	secured.GET("/reports/service-ranking",    reports.ServiceRanking)
-	secured.GET("/reports/sleeping-members",   reports.SleepingMembers)
-	secured.GET("/reports/member-ranking",     reports.MemberRanking)
-	secured.GET("/reports/birthday-reminders", reports.BirthdayReminders)
-	secured.GET("/reports/payment-summary",    reports.PaymentSummary)
-	secured.GET("/reports/card-sales-summary", reports.CardSalesSummary)
-	secured.GET("/reports/pending-stats",      reports.PendingStats)
+	// --------------- 店铺 logo（admin 及以上） ---------------
+	adminAndAbove.POST("/store/logo", uploads.UploadLogo)
+	adminAndAbove.DELETE("/store/logo", uploads.DeleteLogo)
+
+	// --------------- 通知与公告（所有登录用户） ---------------
+	secured.GET("/notifications", notifications.List)
+	secured.POST("/notifications/:version/read", notifications.MarkRead)
+	secured.POST("/notifications/read-all", notifications.MarkAllRead)
+	secured.GET("/notifications/latest-version", notifications.LatestVersion)
+	secured.GET("/changelog", notifications.ListChangelog)
+
+	// --------------- 报表（admin 及以上） ---------------
+	adminAndAbove.GET("/reports/business", reports.Business)
+	adminAndAbove.GET("/reports/service-ranking", reports.ServiceRanking)
+	adminAndAbove.GET("/reports/sleeping-members", reports.SleepingMembers)
+	adminAndAbove.GET("/reports/member-ranking", reports.MemberRanking)
+	adminAndAbove.GET("/reports/birthday-reminders", reports.BirthdayReminders)
+	adminAndAbove.GET("/reports/payment-summary", reports.PaymentSummary)
+	adminAndAbove.GET("/reports/card-sales-summary", reports.CardSalesSummary)
+	adminAndAbove.GET("/reports/pending-stats", reports.PendingStats)
 
 	addr := ":" + getenv("APP_PORT", "8080")
 	slog.Info("mms server starting", "addr", addr)
-	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
+
+	// 优雅关闭：SIGINT / SIGTERM → ctx cancel → Echo StartConfig 自动 drain 活跃请求
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	cfg := echo.StartConfig{
+		Address:         addr,
+		GracefulTimeout: 15 * time.Second,
+	}
+	if err := cfg.Start(ctx, e); err != nil && err != http.ErrServerClosed {
 		slog.Error("server stopped", "err", err)
 		os.Exit(1)
 	}
+	// 等待所有审计 goroutine 落盘（最多 8s）
+	mw.AuditWait(8 * time.Second)
+	slog.Info("mms server exited")
+}
+
+// validateCriticalEnv 启动时检查关键环境变量，拦截默认/示例值
+// 避免 JWT_SECRET 忘改导致"所有人可伪造任意 JWT"等灾难
+func validateCriticalEnv() error {
+	secret := os.Getenv("JWT_SECRET")
+	if secret == "" {
+		return fmt.Errorf("JWT_SECRET is required")
+	}
+	if len(secret) < 32 {
+		return fmt.Errorf("JWT_SECRET too short (need >= 32 bytes, got %d); use `openssl rand -hex 64`", len(secret))
+	}
+	if strings.Contains(secret, "change_me") {
+		return fmt.Errorf("JWT_SECRET still has default placeholder 'change_me_*'; please set a real value")
+	}
+
+	dbPass := os.Getenv("DB_PASSWORD")
+	if dbPass == "" {
+		return fmt.Errorf("DB_PASSWORD is required")
+	}
+	if strings.Contains(dbPass, "change_me") {
+		return fmt.Errorf("DB_PASSWORD still has default placeholder 'change_me_*'; please set a real value")
+	}
+
+	// BOOTSTRAP_ADMIN_PASSWORD：仅在非空时校验（空=已有 admin 跳过 bootstrap）
+	// 避免默认 "change_me_on_first_login" 成为事实默认密码
+	bootstrapPwd := os.Getenv("BOOTSTRAP_ADMIN_PASSWORD")
+	if bootstrapPwd != "" && strings.Contains(bootstrapPwd, "change_me") {
+		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD contains 'change_me' placeholder; set a real initial password or leave empty")
+	}
+	return nil
 }
 
 // runMigrations 使用应用用户 mms 跑 goose 迁移
 // mms 是 mms 数据库的 owner，且 pgcrypto/citext/pg_trgm 均为 trusted extension，
 // 无需 superuser 即可完成 CREATE EXTENSION / CREATE TABLE / RLS 策略创建
 func runMigrations() error {
-	dsn := buildDSN(
-		getenv("DB_USER", "mms"),
-		os.Getenv("DB_PASSWORD"),
-		getenv("DB_HOST", "postgres-server"),
-		getenv("DB_PORT", "5432"),
-		getenv("DB_NAME", "mms"),
-	)
-
-	db, err := sql.Open("pgx", dsn)
+	// 与运行时 pool 共用 DSN 构造器（sslmode / statement_timeout 统一走 env）
+	db, err := sql.Open("pgx", dbpkg.BuildDSN())
 	if err != nil {
 		return fmt.Errorf("open migration db: %w", err)
 	}
@@ -236,11 +385,6 @@ func runMigrations() error {
 	}
 	slog.Info("migrations applied")
 	return nil
-}
-
-func buildDSN(user, pass, host, port, name string) string {
-	return fmt.Sprintf("postgres://%s:%s@%s:%s/%s?sslmode=disable",
-		user, url.QueryEscape(pass), host, port, name)
 }
 
 func getenv(k, def string) string {

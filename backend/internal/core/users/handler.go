@@ -31,7 +31,7 @@ type CreateRequest struct {
 	Email    string  `json:"email"`
 	Phone    *string `json:"phone"`
 	Name     string  `json:"name"`
-	Role     string  `json:"role"` // admin / manager / staff
+	Role     string  `json:"role"` // super_admin / admin / staff
 	Password string  `json:"password"`
 }
 
@@ -56,7 +56,7 @@ func List(c *echo.Context) error {
 		Status: status, Limit: 200, Offset: 0,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list: "+err.Error())
+		return mw.InternalError(c, "list: ", err)
 	}
 	items := make([]DTO, 0, len(rows))
 	for _, u := range rows {
@@ -76,7 +76,7 @@ func Get(c *echo.Context) error {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "get: "+err.Error())
+		return mw.InternalError(c, "get: ", err)
 	}
 	return c.JSON(http.StatusOK, toDTO(u))
 }
@@ -89,20 +89,20 @@ func Create(c *echo.Context) error {
 	if req.Email == "" || req.Name == "" || req.Password == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "email / name / password required")
 	}
-	if len(req.Password) < 6 {
-		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 6 chars")
+	if len(req.Password) < 8 {
+		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 8 chars")
 	}
 	role := req.Role
 	if role == "" {
-		role = "staff"
+		role = mw.RoleStaff
 	}
-	if role != "admin" && role != "manager" && role != "staff" {
-		return echo.NewHTTPError(http.StatusBadRequest, "role must be admin/manager/staff")
+	if role != mw.RoleSuperAdmin && role != mw.RoleAdmin && role != mw.RoleStaff {
+		return echo.NewHTTPError(http.StatusBadRequest, "role must be super_admin/admin/staff")
 	}
 
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "hash: "+err.Error())
+		return mw.InternalError(c, "hash: ", err)
 	}
 
 	t := mw.TenantFrom(c)
@@ -116,7 +116,7 @@ func Create(c *echo.Context) error {
 		Role:         &role,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "create: ", err)
 	}
 	return c.JSON(http.StatusCreated, toDTO(u))
 }
@@ -130,18 +130,53 @@ func Update(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
 	}
-	if req.Role != nil && *req.Role != "admin" && *req.Role != "manager" && *req.Role != "staff" {
-		return echo.NewHTTPError(http.StatusBadRequest, "role must be admin/manager/staff")
+	if req.Role != nil && *req.Role != mw.RoleSuperAdmin && *req.Role != mw.RoleAdmin && *req.Role != mw.RoleStaff {
+		return echo.NewHTTPError(http.StatusBadRequest, "role must be super_admin/admin/staff")
 	}
+
+	ctx := c.Request().Context()
 	q := sqlc.New(mw.TxFrom(c))
-	u, err := q.UpdateUser(c.Request().Context(), sqlc.UpdateUserParams{
+
+	// 最后一个超级管理员保护：原是 active super_admin 的用户，修改会导致其不再是 active super_admin 时，
+	// 必须确保系统内至少还有另一个 active super_admin
+	cur, err := q.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		}
+		return mw.InternalError(c, "get user: ", err)
+	}
+	willLeaveSuper := cur.Role == mw.RoleSuperAdmin && cur.Status == "active" &&
+		((req.Role != nil && *req.Role != mw.RoleSuperAdmin) ||
+			(req.Status != nil && *req.Status != "active"))
+	if willLeaveSuper {
+		// SELECT ... FOR UPDATE 锁定所有 active super_admin 行，防 TOCTOU 竞态
+		// 其他并发的"降级/删除"事务会在这里阻塞，直到本事务 commit/rollback
+		ids, err := q.LockActiveSuperAdmins(ctx)
+		if err != nil {
+			return mw.InternalError(c, "lock super admins: ", err)
+		}
+		if len(ids) <= 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, "本店必须至少保留 1 位超级管理员，请先将其他用户升为超级管理员")
+		}
+	}
+
+	u, err := q.UpdateUser(ctx, sqlc.UpdateUserParams{
 		ID: id, Name: req.Name, Phone: req.Phone, Role: req.Role, Status: req.Status,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return echo.NewHTTPError(http.StatusNotFound, "user not found")
 		}
-		return echo.NewHTTPError(http.StatusInternalServerError, "update: "+err.Error())
+		return mw.InternalError(c, "update: ", err)
+	}
+	// role 或 status 变动 → 递增 token_version，持有旧 token 的会话立即失效
+	roleChanged := req.Role != nil && *req.Role != cur.Role
+	statusChanged := req.Status != nil && *req.Status != cur.Status
+	if roleChanged || statusChanged {
+		if err := q.IncrementUserTokenVersion(ctx, id); err != nil {
+			return mw.InternalError(c, "bump token version: ", err)
+		}
 	}
 	return c.JSON(http.StatusOK, toDTO(u))
 }
@@ -155,18 +190,18 @@ func ResetPassword(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
 	}
-	if len(req.NewPassword) < 6 {
-		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 6 chars")
+	if len(req.NewPassword) < 8 {
+		return echo.NewHTTPError(http.StatusBadRequest, "password must be at least 8 chars")
 	}
 	hash, err := auth.HashPassword(req.NewPassword)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "hash: "+err.Error())
+		return mw.InternalError(c, "hash: ", err)
 	}
 	q := sqlc.New(mw.TxFrom(c))
 	if err := q.UpdateUserPassword(c.Request().Context(), sqlc.UpdateUserPasswordParams{
 		ID: id, PasswordHash: hash,
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "update password: "+err.Error())
+		return mw.InternalError(c, "update password: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -181,9 +216,30 @@ func Delete(c *echo.Context) error {
 	if claims.UserID == id {
 		return echo.NewHTTPError(http.StatusBadRequest, "不能删除自己")
 	}
+
+	ctx := c.Request().Context()
 	q := sqlc.New(mw.TxFrom(c))
-	if err := q.DeleteUser(c.Request().Context(), id); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "delete: "+err.Error())
+
+	// 最后一个超级管理员保护：目标若是 active super_admin，系统必须还有其他 active super_admin
+	cur, err := q.GetUserByID(ctx, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusNotFound, "user not found")
+		}
+		return mw.InternalError(c, "get user: ", err)
+	}
+	if cur.Role == mw.RoleSuperAdmin && cur.Status == "active" {
+		ids, err := q.LockActiveSuperAdmins(ctx)
+		if err != nil {
+			return mw.InternalError(c, "lock super admins: ", err)
+		}
+		if len(ids) <= 1 {
+			return echo.NewHTTPError(http.StatusBadRequest, "本店必须至少保留 1 位超级管理员，请先将其他用户升为超级管理员")
+		}
+	}
+
+	if err := q.DeleteUser(ctx, id); err != nil {
+		return mw.InternalError(c, "delete: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

@@ -9,6 +9,7 @@ import (
 	"context"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
 const createUser = `-- name: CreateUser :one
@@ -17,7 +18,7 @@ INSERT INTO users (
 ) VALUES (
     $1, $2, $3, $4, $5, COALESCE($6::text, 'staff')
 )
-RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id
+RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at
 `
 
 type CreateUserParams struct {
@@ -52,6 +53,10 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LegacyID,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
@@ -66,7 +71,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id FROM users WHERE email = $1
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -85,12 +90,16 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LegacyID,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id FROM users WHERE id = $1
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -109,12 +118,26 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LegacyID,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
 
+const incrementUserTokenVersion = `-- name: IncrementUserTokenVersion :exec
+UPDATE users SET token_version = token_version + 1, updated_at = now() WHERE id = $1
+`
+
+// 角色/状态变更后递增版本，旧 token 失效（不改密码）
+func (q *Queries) IncrementUserTokenVersion(ctx context.Context, id uuid.UUID) error {
+	_, err := q.db.Exec(ctx, incrementUserTokenVersion, id)
+	return err
+}
+
 const listUsersByTenant = `-- name: ListUsersByTenant :many
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id FROM users
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at FROM users
 WHERE ($3::text IS NULL OR status = $3::text)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -148,6 +171,10 @@ func (q *Queries) ListUsersByTenant(ctx context.Context, arg ListUsersByTenantPa
 			&i.CreatedAt,
 			&i.UpdatedAt,
 			&i.LegacyID,
+			&i.FailedLoginAttempts,
+			&i.LockedUntil,
+			&i.TokenVersion,
+			&i.PasswordChangedAt,
 		); err != nil {
 			return nil, err
 		}
@@ -159,6 +186,67 @@ func (q *Queries) ListUsersByTenant(ctx context.Context, arg ListUsersByTenantPa
 	return items, nil
 }
 
+const lockActiveSuperAdmins = `-- name: LockActiveSuperAdmins :many
+SELECT id FROM users
+WHERE role = 'super_admin' AND status = 'active'
+ORDER BY id
+FOR UPDATE
+`
+
+// 锁定当前租户所有 active super_admin 行，防 TOCTOU 竞态
+// 调用方必须在事务中使用；RLS 自动按 current_tenant 过滤
+// 用于"最后一个超级管理员不可删/不可降级/不可停用"保护
+func (q *Queries) LockActiveSuperAdmins(ctx context.Context) ([]uuid.UUID, error) {
+	rows, err := q.db.Query(ctx, lockActiveSuperAdmins)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const recordLoginFailure = `-- name: RecordLoginFailure :one
+UPDATE users
+SET failed_login_attempts = failed_login_attempts + 1,
+    locked_until = CASE
+        WHEN failed_login_attempts + 1 >= $2::int
+        THEN now() + ($3::int || ' minutes')::interval
+        ELSE locked_until
+    END,
+    updated_at = now()
+WHERE id = $1
+RETURNING failed_login_attempts, locked_until
+`
+
+type RecordLoginFailureParams struct {
+	ID          uuid.UUID `json:"id"`
+	MaxAttempts int32     `json:"max_attempts"`
+	LockMinutes int32     `json:"lock_minutes"`
+}
+
+type RecordLoginFailureRow struct {
+	FailedLoginAttempts int32              `json:"failed_login_attempts"`
+	LockedUntil         pgtype.Timestamptz `json:"locked_until"`
+}
+
+func (q *Queries) RecordLoginFailure(ctx context.Context, arg RecordLoginFailureParams) (RecordLoginFailureRow, error) {
+	row := q.db.QueryRow(ctx, recordLoginFailure, arg.ID, arg.MaxAttempts, arg.LockMinutes)
+	var i RecordLoginFailureRow
+	err := row.Scan(&i.FailedLoginAttempts, &i.LockedUntil)
+	return i, err
+}
+
 const updateUser = `-- name: UpdateUser :one
 UPDATE users
 SET name   = COALESCE($2::text,   name),
@@ -167,7 +255,7 @@ SET name   = COALESCE($2::text,   name),
     status = COALESCE($5::text, status),
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id
+RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at
 `
 
 type UpdateUserParams struct {
@@ -200,6 +288,10 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.CreatedAt,
 		&i.UpdatedAt,
 		&i.LegacyID,
+		&i.FailedLoginAttempts,
+		&i.LockedUntil,
+		&i.TokenVersion,
+		&i.PasswordChangedAt,
 	)
 	return i, err
 }
@@ -207,7 +299,9 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 const updateUserLastLogin = `-- name: UpdateUserLastLogin :exec
 UPDATE users
 SET last_login_at = now(),
-    updated_at = now()
+    updated_at = now(),
+    failed_login_attempts = 0,
+    locked_until = NULL
 WHERE id = $1
 `
 
@@ -217,7 +311,12 @@ func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
 }
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec
-UPDATE users SET password_hash = $2, updated_at = now() WHERE id = $1
+UPDATE users
+SET password_hash       = $2,
+    token_version       = token_version + 1,
+    password_changed_at = now(),
+    updated_at          = now()
+WHERE id = $1
 `
 
 type UpdateUserPasswordParams struct {
@@ -225,6 +324,7 @@ type UpdateUserPasswordParams struct {
 	PasswordHash string    `json:"password_hash"`
 }
 
+// 改密同时递增 token_version + 更新 password_changed_at：旧 token 立即失效
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
 	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
 	return err

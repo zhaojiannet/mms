@@ -8,7 +8,7 @@
     <!-- Top tabs -->
     <nav class="flex items-center gap-1 flex-wrap border-b border-stone-200/60 dark:border-stone-800 mb-6">
       <NuxtLink
-        v-for="tab in tabs"
+        v-for="tab in visibleTabs"
         :key="tab.to"
         :to="tab.to"
         class="inline-flex items-center gap-2 px-3 py-2.5 text-sm whitespace-nowrap
@@ -32,16 +32,38 @@
 </template>
 
 <script setup lang="ts">
-const tabs = [
-  { to: '/settings/services',        label: '服务项目',   icon: 'i-lucide-scissors' },
-  { to: '/settings/cards',           label: '会员卡类型', icon: 'i-lucide-credit-card' },
-  { to: '/settings/staff',           label: '员工',       icon: 'i-lucide-user-round' },
-  { to: '/settings/commissions',     label: '提成规则',   icon: 'i-lucide-percent' },
-  { to: '/settings/payment-methods', label: '支付方式',   icon: 'i-lucide-wallet' },
-  { to: '/settings/users',           label: '用户',       icon: 'i-lucide-shield' },
-  { to: '/settings/account',         label: '账户',       icon: 'i-lucide-key-round' },
-  { to: '/settings/void',            label: '交易撤销',   icon: 'i-lucide-undo-2' },
-  { to: '/settings/booking',         label: '预约配置',   icon: 'i-lucide-calendar-check' },
-  { to: '/settings/audit',           label: '操作日志',   icon: 'i-lucide-history' },
+import { useAuthStore } from '~/stores/auth'
+
+// 整个设置页：admin 及以上才能进入（staff 直接跳首页）
+definePageMeta({ middleware: 'at-least-admin' })
+
+const auth = useAuthStore()
+auth.hydrate()
+
+// requires：不填=所有登录用户可见；'admin'=admin 及以上；'super'=仅超级管理员
+type Requires = 'admin' | 'super' | undefined
+interface Tab { to: string; label: string; icon: string; requires?: Requires }
+
+const tabs: Tab[] = [
+  { to: '/settings/store',           label: '店铺',       icon: 'i-lucide-store',          requires: 'admin' },
+  { to: '/settings/services',        label: '服务项目',   icon: 'i-lucide-scissors',       requires: 'admin' },
+  { to: '/settings/cards',           label: '会员卡类型', icon: 'i-lucide-credit-card',    requires: 'admin' },
+  { to: '/settings/staff',           label: '员工',       icon: 'i-lucide-user-round',     requires: 'admin' },
+  { to: '/settings/payment-methods', label: '支付方式',   icon: 'i-lucide-wallet',         requires: 'admin' },
+  { to: '/settings/users',           label: '账号',       icon: 'i-lucide-shield',         requires: 'super' },
+  { to: '/settings/void',            label: '交易撤销',   icon: 'i-lucide-undo-2',         requires: 'super' },
+  { to: '/settings/booking',         label: '预约配置',   icon: 'i-lucide-calendar-check', requires: 'admin' },
+  { to: '/settings/audit',           label: '操作日志',   icon: 'i-lucide-history',        requires: 'admin' },
 ]
+
+const visibleTabs = computed(() => {
+  const role = auth.user?.role
+  const isSuper = role === 'super_admin'
+  const isAdminUp = isSuper || role === 'admin'
+  return tabs.filter(t => {
+    if (t.requires === 'super') return isSuper
+    if (t.requires === 'admin') return isAdminUp
+    return true
+  })
+})
 </script>

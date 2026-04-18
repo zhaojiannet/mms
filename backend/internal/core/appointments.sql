@@ -1,10 +1,23 @@
+-- name: LookupAppointmentsByIDs :many
+-- 批量返回 id + 顾客姓名（给操作日志对象列显示用）
+SELECT id, customer_name, appointment_time FROM appointments WHERE id = ANY($1::uuid[]);
+
 -- name: ListAppointments :many
 SELECT * FROM appointments
 WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR appointment_time >= sqlc.narg('start_date')::timestamptz)
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR appointment_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('staff_id')::uuid          IS NULL OR assigned_staff_id = sqlc.narg('staff_id')::uuid)
   AND (sqlc.narg('status')::text            IS NULL OR status            = sqlc.narg('status')::text)
-ORDER BY appointment_time ASC;
+ORDER BY
+  CASE status
+    WHEN 'pending'   THEN 0
+    WHEN 'confirmed' THEN 1
+    WHEN 'completed' THEN 2
+    WHEN 'no_show'   THEN 3
+    WHEN 'cancelled' THEN 4
+    ELSE 5
+  END,
+  appointment_time ASC;
 
 -- name: GetAppointmentByID :one
 SELECT * FROM appointments WHERE id = $1;
@@ -47,7 +60,7 @@ ON CONFLICT DO NOTHING;
 DELETE FROM appointment_services WHERE appointment_id = $1;
 
 -- name: ListAppointmentServices :many
-SELECT s.id, s.name, s.price, s.duration_min
+SELECT s.id, s.name, s.price
 FROM appointment_services aps
 JOIN services s ON s.id = aps.service_id
 WHERE aps.appointment_id = $1

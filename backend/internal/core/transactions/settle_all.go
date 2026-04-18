@@ -40,9 +40,10 @@ func SettleAllCredits(c *echo.Context) error {
 	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 
-	credits, err := q.ListPendingCreditsByMember(ctx, memberID)
+	// FOR UPDATE 锁定该会员所有未清挂账：防并发双扣（同一会员两个请求同时"一键清账"）
+	credits, err := q.LockPendingCreditsByMember(ctx, memberID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "list pending: "+err.Error())
+		return mw.InternalError(c, "lock pending: ", err)
 	}
 	if len(credits) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "no unsettled credits")
@@ -62,9 +63,9 @@ func SettleAllCredits(c *echo.Context) error {
 	var cardBefore decimal.Decimal
 	var cardID uuid.UUID
 	if req.CardID != nil {
-		card, err := q.GetCardByID(ctx, *req.CardID)
+		card, err := q.LockCardForUpdate(ctx, *req.CardID)
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "get card: "+err.Error())
+			return mw.InternalError(c, "get card: ", err)
 		}
 		if card.MemberID != memberID {
 			return echo.NewHTTPError(http.StatusBadRequest, "card does not belong to member")
@@ -100,7 +101,7 @@ func SettleAllCredits(c *echo.Context) error {
 		Summary:          strPtr(summary),
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create tx: "+err.Error())
+		return mw.InternalError(c, "create tx: ", err)
 	}
 
 	// 走卡扣款 + 流水
@@ -110,7 +111,7 @@ func SettleAllCredits(c *echo.Context) error {
 			Balance: total.Neg(),
 		})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "adjust balance: "+err.Error())
+			return mw.InternalError(c, "adjust balance: ", err)
 		}
 		if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
 			TenantID:      t.ID,
@@ -122,7 +123,7 @@ func SettleAllCredits(c *echo.Context) error {
 			TransactionID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 			Note:          strPtr("batch clear pending"),
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "log: "+err.Error())
+			return mw.InternalError(c, "log: ", err)
 		}
 	}
 
@@ -132,7 +133,7 @@ func SettleAllCredits(c *echo.Context) error {
 		SettledAt:      pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		SettlementTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 	}); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "mark settled: "+err.Error())
+		return mw.InternalError(c, "mark settled: ", err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{

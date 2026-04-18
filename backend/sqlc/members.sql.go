@@ -83,6 +83,28 @@ func (q *Queries) DeleteMember(ctx context.Context, id uuid.UUID) error {
 	return err
 }
 
+const existsMemberByPhone = `-- name: ExistsMemberByPhone :one
+SELECT EXISTS (
+  SELECT 1 FROM members
+  WHERE phone = $1::text
+    AND ($2::uuid IS NULL OR id <> $2::uuid)
+) AS "exists"
+`
+
+type ExistsMemberByPhoneParams struct {
+	Phone     string      `json:"phone"`
+	ExcludeID pgtype.UUID `json:"exclude_id"`
+}
+
+// 手机号唯一性检查（占位号 '00000000000' 允许重复，由 handler 跳过）
+// exclude_id：编辑时排除自己
+func (q *Queries) ExistsMemberByPhone(ctx context.Context, arg ExistsMemberByPhoneParams) (bool, error) {
+	row := q.db.QueryRow(ctx, existsMemberByPhone, arg.Phone, arg.ExcludeID)
+	var exists bool
+	err := row.Scan(&exists)
+	return exists, err
+}
+
 const getMemberByID = `-- name: GetMemberByID :one
 SELECT id, tenant_id, name, phone, gender, birthday, notes, status, created_at, updated_at, legacy_id FROM members WHERE id = $1
 `
@@ -112,10 +134,14 @@ SELECT
   m.created_at, m.updated_at, m.legacy_id,
   COALESCE(cb.total_balance, 0)::numeric AS total_balance,
   COALESCE(pc.total_pending, 0)::numeric AS total_pending,
-  COALESCE(cb.card_count, 0)::bigint     AS card_count
+  COALESCE(cb.card_count, 0)::bigint     AS card_count,
+  COALESCE(cb.active_card_count, 0)::bigint AS active_card_count
 FROM members m
 LEFT JOIN (
-  SELECT member_id, SUM(balance)::numeric AS total_balance, COUNT(*)::bigint AS card_count
+  SELECT member_id,
+         SUM(balance)::numeric AS total_balance,
+         COUNT(*)::bigint AS card_count,
+         COUNT(*) FILTER (WHERE balance > 0)::bigint AS active_card_count
   FROM cards WHERE status = 'active' GROUP BY member_id
 ) cb ON cb.member_id = m.id
 LEFT JOIN (
@@ -138,20 +164,21 @@ type ListMembersParams struct {
 }
 
 type ListMembersRow struct {
-	ID           uuid.UUID          `json:"id"`
-	TenantID     uuid.UUID          `json:"tenant_id"`
-	Name         string             `json:"name"`
-	Phone        *string            `json:"phone"`
-	Gender       string             `json:"gender"`
-	Birthday     pgtype.Date        `json:"birthday"`
-	Notes        *string            `json:"notes"`
-	Status       string             `json:"status"`
-	CreatedAt    pgtype.Timestamptz `json:"created_at"`
-	UpdatedAt    pgtype.Timestamptz `json:"updated_at"`
-	LegacyID     *string            `json:"legacy_id"`
-	TotalBalance decimal.Decimal    `json:"total_balance"`
-	TotalPending decimal.Decimal    `json:"total_pending"`
-	CardCount    int64              `json:"card_count"`
+	ID              uuid.UUID          `json:"id"`
+	TenantID        uuid.UUID          `json:"tenant_id"`
+	Name            string             `json:"name"`
+	Phone           *string            `json:"phone"`
+	Gender          string             `json:"gender"`
+	Birthday        pgtype.Date        `json:"birthday"`
+	Notes           *string            `json:"notes"`
+	Status          string             `json:"status"`
+	CreatedAt       pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt       pgtype.Timestamptz `json:"updated_at"`
+	LegacyID        *string            `json:"legacy_id"`
+	TotalBalance    decimal.Decimal    `json:"total_balance"`
+	TotalPending    decimal.Decimal    `json:"total_pending"`
+	CardCount       int64              `json:"card_count"`
+	ActiveCardCount int64              `json:"active_card_count"`
 }
 
 func (q *Queries) ListMembers(ctx context.Context, arg ListMembersParams) ([]ListMembersRow, error) {
@@ -183,7 +210,38 @@ func (q *Queries) ListMembers(ctx context.Context, arg ListMembersParams) ([]Lis
 			&i.TotalBalance,
 			&i.TotalPending,
 			&i.CardCount,
+			&i.ActiveCardCount,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lookupMembersByIDs = `-- name: LookupMembersByIDs :many
+SELECT id, name FROM members WHERE id = ANY($1::uuid[])
+`
+
+type LookupMembersByIDsRow struct {
+	ID   uuid.UUID `json:"id"`
+	Name string    `json:"name"`
+}
+
+// 按一组 ID 批量返回 id→name（用于操作日志对象列人名化）
+func (q *Queries) LookupMembersByIDs(ctx context.Context, dollar_1 []uuid.UUID) ([]LookupMembersByIDsRow, error) {
+	rows, err := q.db.Query(ctx, lookupMembersByIDs, dollar_1)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LookupMembersByIDsRow
+	for rows.Next() {
+		var i LookupMembersByIDsRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

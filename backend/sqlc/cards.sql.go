@@ -225,17 +225,66 @@ func (q *Queries) ListCardsByMember(ctx context.Context, memberID uuid.UUID) ([]
 	return items, nil
 }
 
-const sumMemberActiveBalance = `-- name: SumMemberActiveBalance :one
-SELECT COALESCE(SUM(balance), 0)::numeric AS total_balance
-FROM cards
-WHERE member_id = $1 AND status = 'active'
+const lockCardForUpdate = `-- name: LockCardForUpdate :one
+SELECT
+  c.id, c.tenant_id, c.member_id, c.card_type_id,
+  c.final_price, c.final_discount_rate, c.balance,
+  c.issued_at, c.expires_at, c.status, c.notes,
+  c.legacy_id, c.created_at, c.updated_at,
+  ct.name          AS card_type_name,
+  ct.price         AS card_type_price,
+  ct.discount_rate AS card_type_discount_rate
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.id = $1
+FOR UPDATE OF c
 `
 
-func (q *Queries) SumMemberActiveBalance(ctx context.Context, memberID uuid.UUID) (decimal.Decimal, error) {
-	row := q.db.QueryRow(ctx, sumMemberActiveBalance, memberID)
-	var total_balance decimal.Decimal
-	err := row.Scan(&total_balance)
-	return total_balance, err
+type LockCardForUpdateRow struct {
+	ID                   uuid.UUID          `json:"id"`
+	TenantID             uuid.UUID          `json:"tenant_id"`
+	MemberID             uuid.UUID          `json:"member_id"`
+	CardTypeID           uuid.UUID          `json:"card_type_id"`
+	FinalPrice           decimal.Decimal    `json:"final_price"`
+	FinalDiscountRate    decimal.Decimal    `json:"final_discount_rate"`
+	Balance              decimal.Decimal    `json:"balance"`
+	IssuedAt             pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	Status               string             `json:"status"`
+	Notes                *string            `json:"notes"`
+	LegacyID             *string            `json:"legacy_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	CardTypeName         string             `json:"card_type_name"`
+	CardTypePrice        decimal.Decimal    `json:"card_type_price"`
+	CardTypeDiscountRate decimal.Decimal    `json:"card_type_discount_rate"`
+}
+
+// 扣款路径专用：SELECT FOR UPDATE 锁单行，防并发双扣
+// 注：JOIN 的 card_types 不加锁（只读关联）
+func (q *Queries) LockCardForUpdate(ctx context.Context, id uuid.UUID) (LockCardForUpdateRow, error) {
+	row := q.db.QueryRow(ctx, lockCardForUpdate, id)
+	var i LockCardForUpdateRow
+	err := row.Scan(
+		&i.ID,
+		&i.TenantID,
+		&i.MemberID,
+		&i.CardTypeID,
+		&i.FinalPrice,
+		&i.FinalDiscountRate,
+		&i.Balance,
+		&i.IssuedAt,
+		&i.ExpiresAt,
+		&i.Status,
+		&i.Notes,
+		&i.LegacyID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.CardTypeName,
+		&i.CardTypePrice,
+		&i.CardTypeDiscountRate,
+	)
+	return i, err
 }
 
 const updateCard = `-- name: UpdateCard :one

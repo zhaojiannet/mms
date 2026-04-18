@@ -9,10 +9,12 @@ package booking
 
 import (
 	"context"
+	"crypto/subtle"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"regexp"
+	"strconv"
 	"sync"
 	"time"
 
@@ -27,13 +29,39 @@ import (
 )
 
 // ------------- 速率限制（内存，per IP+phone 30s 一次） -------------
+//
+// 与外层 mw.RateLimit(30/min/IP) 互补：
+//   外层挡"同 IP 刷所有手机号"，本层挡"同 IP 针对同一手机号连续提交"
+//
+// 加了 GC loop + 硬上限防内存无限增长
 
 var (
 	rateMu   sync.Mutex
 	rateHits = map[string]time.Time{}
 )
 
-const rateLimitWindow = 30 * time.Second
+const (
+	rateLimitWindow  = 30 * time.Second
+	rateMapMaxSize   = 10_000 // 满则拒绝新 key（攻击者已经很难穿透外层 RateLimit 了）
+	rateMapGCInterval = 5 * time.Minute
+)
+
+func init() {
+	go func() {
+		t := time.NewTicker(rateMapGCInterval)
+		defer t.Stop()
+		for range t.C {
+			rateMu.Lock()
+			now := time.Now()
+			for k, v := range rateHits {
+				if now.Sub(v) > rateLimitWindow*2 {
+					delete(rateHits, k)
+				}
+			}
+			rateMu.Unlock()
+		}
+	}()
+}
 
 func rateLimitCheck(key string) (allowed bool, retryAfter int) {
 	rateMu.Lock()
@@ -41,6 +69,10 @@ func rateLimitCheck(key string) (allowed bool, retryAfter int) {
 	last, ok := rateHits[key]
 	if ok && time.Since(last) < rateLimitWindow {
 		return false, int((rateLimitWindow - time.Since(last)).Seconds()) + 1
+	}
+	// 容量保护：满了就拒绝，等下轮 GC
+	if len(rateHits) >= rateMapMaxSize && !ok {
+		return false, int(rateLimitWindow.Seconds())
 	}
 	rateHits[key] = time.Now()
 	return true, 0
@@ -63,7 +95,14 @@ func verifyBookingCode(ctx context.Context, q *sqlc.Queries, tenantID uuid.UUID,
 	if stored == nil || *stored == "" {
 		return false
 	}
-	return *stored == code
+	// constant-time 比较防时序泄露：subtle.ConstantTimeCompare 对等长串做 O(n)
+	// 不等长直接返 false（长度泄露低风险，code 本身是固定 8 位）
+	a := []byte(*stored)
+	b := []byte(code)
+	if len(a) != len(b) {
+		return false
+	}
+	return subtle.ConstantTimeCompare(a, b) == 1
 }
 
 // ------------- 1. GET /api/booking/options?code=xxx -------------
@@ -74,10 +113,9 @@ type OptionsResponse struct {
 }
 
 type ServiceOption struct {
-	ID          uuid.UUID       `json:"id"`
-	Name        string          `json:"name"`
-	Price       decimal.Decimal `json:"price"`
-	DurationMin *int32          `json:"duration_min"`
+	ID    uuid.UUID       `json:"id"`
+	Name  string          `json:"name"`
+	Price decimal.Decimal `json:"price"`
 }
 
 type StaffOption struct {
@@ -98,16 +136,16 @@ func Options(c *echo.Context) error {
 	active := "active"
 	services, err := q.ListServices(ctx, &active)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "services: "+err.Error())
+		return mw.InternalError(c, "booking.options.services", err)
 	}
 	staffActive, err := q.ListStaff(ctx, &active)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "staff: "+err.Error())
+		return mw.InternalError(c, "booking.options.staff", err)
 	}
 
 	svcs := make([]ServiceOption, 0, len(services))
 	for _, s := range services {
-		svcs = append(svcs, ServiceOption{ID: s.ID, Name: s.Name, Price: s.Price, DurationMin: s.DurationMin})
+		svcs = append(svcs, ServiceOption{ID: s.ID, Name: s.Name, Price: s.Price})
 	}
 	stfs := make([]StaffOption, 0, len(staffActive))
 	for _, s := range staffActive {
@@ -146,18 +184,18 @@ func Create(c *echo.Context) error {
 	if req.CustomerPhone == "" || req.AppointmentTime == "" || len(req.ServiceIDs) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "请填写完整信息")
 	}
+	if len(req.ServiceIDs) > 20 {
+		return echo.NewHTTPError(http.StatusBadRequest, "最多选择 20 项服务")
+	}
 	if !phoneRE.MatchString(req.CustomerPhone) {
 		return echo.NewHTTPError(http.StatusBadRequest, "手机号格式不正确")
 	}
 
-	// 速率限制（IP + 手机号）
-	clientIP := c.Request().RemoteAddr
-	if xff := c.Request().Header.Get("X-Forwarded-For"); xff != "" {
-		clientIP = xff
-	}
-	key := "booking:" + clientIP + ":" + req.CustomerPhone
+	// 速率限制（IP + 手机号），IP 复用 middleware.ClientIP 的 TRUSTED_PROXIES 信任链
+	// 避免无条件信任 X-Forwarded-For 被伪造绕过
+	key := "booking:" + mw.ClientIP(c.Request()) + ":" + req.CustomerPhone
 	if ok, retry := rateLimitCheck(key); !ok {
-		c.Response().Header().Set("Retry-After", string(rune(retry)))
+		c.Response().Header().Set("Retry-After", strconv.Itoa(retry))
 		return echo.NewHTTPError(http.StatusTooManyRequests, "请稍后再试")
 	}
 
@@ -179,7 +217,7 @@ func Create(c *echo.Context) error {
 		AppointmentTime_2: windowEnd,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "phone conflict check: "+err.Error())
+		return mw.InternalError(c, "booking.phone-conflict", err)
 	}
 	if phoneCount > 0 {
 		return echo.NewHTTPError(http.StatusConflict, "您在该时段已有预约")
@@ -192,7 +230,7 @@ func Create(c *echo.Context) error {
 			AppointmentTime_2: windowEnd,
 		})
 		if err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "staff conflict check: "+err.Error())
+			return mw.InternalError(c, "booking.staff-conflict", err)
 		}
 		if staffCount > 0 {
 			return echo.NewHTTPError(http.StatusConflict, "该员工在此时段已有预约")
@@ -206,7 +244,7 @@ func Create(c *echo.Context) error {
 			if errors.Is(err, pgx.ErrNoRows) {
 				return echo.NewHTTPError(http.StatusBadRequest, "所选服务不存在")
 			}
-			return echo.NewHTTPError(http.StatusInternalServerError, "check service: "+err.Error())
+			return mw.InternalError(c, "booking.check-service", err)
 		}
 		if s.Status != "active" {
 			return echo.NewHTTPError(http.StatusBadRequest, "所选服务已下架")
@@ -229,30 +267,21 @@ func Create(c *echo.Context) error {
 		Notes:           req.Notes,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "create: "+err.Error())
+		return mw.InternalError(c, "booking.create", err)
 	}
 	for _, sid := range req.ServiceIDs {
 		if err := q.AddAppointmentService(ctx, sqlc.AddAppointmentServiceParams{
 			TenantID: t.ID, AppointmentID: appt.ID, ServiceID: sid,
 		}); err != nil {
-			return echo.NewHTTPError(http.StatusInternalServerError, "add service: "+err.Error())
+			return mw.InternalError(c, "booking.add-service", err)
 		}
 	}
-
-	// 微信推送（阶段 3 notifications 模块接入后再实现，现在只留 hook）
-	go notifyMerchant(appt)
 
 	return c.JSON(http.StatusCreated, map[string]any{
 		"success":        true,
 		"message":        "预约成功，我们会尽快与您确认",
 		"appointment_id": appt.ID,
 	})
-}
-
-// notifyMerchant 留作将来的通知接入点（注意：这是 goroutine，事务已结束）
-func notifyMerchant(_ sqlc.Appointment) {
-	// TODO: 阶段 3 notifications 模块完成后接入
-	// 当前产线 demo 用 wxpush，迁移期可以继续让老 demo 通知（独立部署）
 }
 
 func optUUID(p *uuid.UUID) pgtype.UUID {
