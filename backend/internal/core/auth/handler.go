@@ -212,18 +212,8 @@ func RefreshHandler(c *echo.Context) error {
 	claims := mw.ClaimsFrom(c)
 	tenant := mw.TenantFrom(c)
 
-	q := sqlc.New(mw.TxFrom(c))
-	u, err := q.GetUserByID(c.Request().Context(), claims.UserID)
-	if err != nil {
-		return echo.NewHTTPError(http.StatusUnauthorized, "user not found")
-	}
-	if u.Status != "active" {
-		return echo.NewHTTPError(http.StatusForbidden, "账号已停用")
-	}
-	// 版本变化（改密/降级）→ 拒绝 refresh
-	if claims.Ver != u.TokenVersion {
-		return echo.NewHTTPError(http.StatusUnauthorized, "会话已失效，请重新登录")
-	}
+	// RequireAuth 已校验 status == active 且 claims.Ver == u.TokenVersion，下游直接复用
+	u := mw.UserFrom(c)
 	// 绝对寿命校验：原 iat + MaxTokenLifetime < now 则拒绝
 	origIat := claims.IssuedAt.Time
 	if time.Since(origIat) > pauth.MaxTokenLifetime {
@@ -257,14 +247,10 @@ func ChangePasswordHandler(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "新密码至少 8 位")
 	}
 
-	claims := mw.ClaimsFrom(c)
 	ctx := c.Request().Context()
 	q := sqlc.New(mw.TxFrom(c))
 
-	user, err := q.GetUserByID(ctx, claims.UserID)
-	if err != nil {
-		return mw.InternalError(c, "get user: ", err)
-	}
+	user := mw.UserFrom(c)
 	ok, err := pauth.VerifyPassword(req.OldPassword, user.PasswordHash)
 	if err != nil || !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "当前密码不正确")
