@@ -154,3 +154,37 @@ func (q *Queries) MarkAnnouncementReadByVersion(ctx context.Context, arg MarkAnn
 	_, err := q.db.Exec(ctx, markAnnouncementReadByVersion, arg.UserID, arg.Version)
 	return err
 }
+
+const upsertSystemAnnouncement = `-- name: UpsertSystemAnnouncement :exec
+INSERT INTO system_announcements
+  (version, type, title, summary, body_markdown, published_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (version) DO UPDATE SET
+  type          = EXCLUDED.type,
+  title         = EXCLUDED.title,
+  summary       = EXCLUDED.summary,
+  body_markdown = EXCLUDED.body_markdown,
+  published_at  = EXCLUDED.published_at
+`
+
+type UpsertSystemAnnouncementParams struct {
+	Version      string             `json:"version"`
+	Type         string             `json:"type"`
+	Title        string             `json:"title"`
+	Summary      string             `json:"summary"`
+	BodyMarkdown string             `json:"body_markdown"`
+	PublishedAt  pgtype.Timestamptz `json:"published_at"`
+}
+
+// 启动时 seed announcements.json 用：以 version 为唯一键 upsert
+func (q *Queries) UpsertSystemAnnouncement(ctx context.Context, arg UpsertSystemAnnouncementParams) error {
+	_, err := q.db.Exec(ctx, upsertSystemAnnouncement,
+		arg.Version,
+		arg.Type,
+		arg.Title,
+		arg.Summary,
+		arg.BodyMarkdown,
+		arg.PublishedAt,
+	)
+	return err
+}

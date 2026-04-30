@@ -287,6 +287,83 @@ func (q *Queries) LockCardForUpdate(ctx context.Context, id uuid.UUID) (LockCard
 	return i, err
 }
 
+const lockCardsForUpdate = `-- name: LockCardsForUpdate :many
+SELECT
+  c.id, c.tenant_id, c.member_id, c.card_type_id,
+  c.final_price, c.final_discount_rate, c.balance,
+  c.issued_at, c.expires_at, c.status, c.notes,
+  c.legacy_id, c.created_at, c.updated_at,
+  ct.name          AS card_type_name,
+  ct.price         AS card_type_price,
+  ct.discount_rate AS card_type_discount_rate
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.id = ANY($1::uuid[])
+ORDER BY c.id
+FOR UPDATE OF c
+`
+
+type LockCardsForUpdateRow struct {
+	ID                   uuid.UUID          `json:"id"`
+	TenantID             uuid.UUID          `json:"tenant_id"`
+	MemberID             uuid.UUID          `json:"member_id"`
+	CardTypeID           uuid.UUID          `json:"card_type_id"`
+	FinalPrice           decimal.Decimal    `json:"final_price"`
+	FinalDiscountRate    decimal.Decimal    `json:"final_discount_rate"`
+	Balance              decimal.Decimal    `json:"balance"`
+	IssuedAt             pgtype.Timestamptz `json:"issued_at"`
+	ExpiresAt            pgtype.Timestamptz `json:"expires_at"`
+	Status               string             `json:"status"`
+	Notes                *string            `json:"notes"`
+	LegacyID             *string            `json:"legacy_id"`
+	CreatedAt            pgtype.Timestamptz `json:"created_at"`
+	UpdatedAt            pgtype.Timestamptz `json:"updated_at"`
+	CardTypeName         string             `json:"card_type_name"`
+	CardTypePrice        decimal.Decimal    `json:"card_type_price"`
+	CardTypeDiscountRate decimal.Decimal    `json:"card_type_discount_rate"`
+}
+
+// 多卡支付路径：一次性锁所有目标卡，避免 N+1 RTT
+// ORDER BY c.id 关键：所有事务用同序加锁，防死锁
+// 调用方需在传入 ids 前自行排序（或保证传入顺序确定）
+func (q *Queries) LockCardsForUpdate(ctx context.Context, ids []uuid.UUID) ([]LockCardsForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, lockCardsForUpdate, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []LockCardsForUpdateRow
+	for rows.Next() {
+		var i LockCardsForUpdateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.MemberID,
+			&i.CardTypeID,
+			&i.FinalPrice,
+			&i.FinalDiscountRate,
+			&i.Balance,
+			&i.IssuedAt,
+			&i.ExpiresAt,
+			&i.Status,
+			&i.Notes,
+			&i.LegacyID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+			&i.CardTypeName,
+			&i.CardTypePrice,
+			&i.CardTypeDiscountRate,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const updateCard = `-- name: UpdateCard :one
 UPDATE cards
 SET final_price         = COALESCE($2::numeric,         final_price),

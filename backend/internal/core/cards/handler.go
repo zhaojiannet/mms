@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -132,7 +133,7 @@ func Issue(c *echo.Context) error {
 	if req.Balance != nil {
 		balanceNull = decimal.NullDecimal{Decimal: *req.Balance, Valid: true}
 	}
-	expiresAt, err := parseTimestamp(req.ExpiresAt)
+	expiresAt, err := timex.ParseRFC3339Tz(req.ExpiresAt)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid expires_at: "+err.Error())
 	}
@@ -173,7 +174,7 @@ func Update(c *echo.Context) error {
 	if req.FinalDiscountRate != nil {
 		rateNull = decimal.NullDecimal{Decimal: *req.FinalDiscountRate, Valid: true}
 	}
-	expiresAt, err := parseTimestamp(req.ExpiresAt)
+	expiresAt, err := timex.ParseRFC3339Tz(req.ExpiresAt)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid expires_at: "+err.Error())
 	}
@@ -292,13 +293,3 @@ func tsPtr(t pgtype.Timestamptz) *time.Time {
 	return &v
 }
 
-func parseTimestamp(s *string) (pgtype.Timestamptz, error) {
-	if s == nil || *s == "" {
-		return pgtype.Timestamptz{Valid: false}, nil
-	}
-	t, err := time.Parse(time.RFC3339, *s)
-	if err != nil {
-		return pgtype.Timestamptz{}, err
-	}
-	return pgtype.Timestamptz{Time: t, Valid: true}, nil
-}

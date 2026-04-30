@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -75,7 +76,7 @@ func Create(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "amount must be positive")
 	}
 
-	chargedAt, err := parseTimestamp(req.ChargedAt)
+	chargedAt, err := timex.ParseRFC3339Tz(req.ChargedAt)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid charged_at: "+err.Error())
 	}
@@ -152,13 +153,3 @@ func toDTO(m sqlc.MemberCredit) DTO {
 	return dto
 }
 
-func parseTimestamp(s *string) (pgtype.Timestamptz, error) {
-	if s == nil || *s == "" {
-		return pgtype.Timestamptz{Valid: false}, nil
-	}
-	t, err := time.Parse(time.RFC3339, *s)
-	if err != nil {
-		return pgtype.Timestamptz{}, err
-	}
-	return pgtype.Timestamptz{Time: t, Valid: true}, nil
-}

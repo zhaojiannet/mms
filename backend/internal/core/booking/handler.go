@@ -11,7 +11,6 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -19,12 +18,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -237,14 +236,19 @@ func Create(c *echo.Context) error {
 		}
 	}
 
-	// 校验服务 id 都存在且 active
+	// 校验服务 id 都存在且 active（批量取，避免 N+1）
+	svcRows, err := q.GetServicesByIDs(ctx, req.ServiceIDs)
+	if err != nil {
+		return mw.InternalError(c, "booking.check-service", err)
+	}
+	svcByID := make(map[uuid.UUID]sqlc.Service, len(svcRows))
+	for _, s := range svcRows {
+		svcByID[s.ID] = s
+	}
 	for _, sid := range req.ServiceIDs {
-		s, err := q.GetServiceByID(ctx, sid)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return echo.NewHTTPError(http.StatusBadRequest, "所选服务不存在")
-			}
-			return mw.InternalError(c, "booking.check-service", err)
+		s, ok := svcByID[sid]
+		if !ok {
+			return echo.NewHTTPError(http.StatusBadRequest, "所选服务不存在")
 		}
 		if s.Status != "active" {
 			return echo.NewHTTPError(http.StatusBadRequest, "所选服务已下架")
@@ -262,19 +266,17 @@ func Create(c *echo.Context) error {
 		CustomerName:    customerName,
 		CustomerPhone:   req.CustomerPhone,
 		AppointmentTime: pgtype.Timestamptz{Time: apptTime, Valid: true},
-		AssignedStaffID: optUUID(req.AssignedStaffID),
+		AssignedStaffID: pgtypex.OptUUID(req.AssignedStaffID),
 		Source:          &sourceBooking,
 		Notes:           req.Notes,
 	})
 	if err != nil {
 		return mw.InternalError(c, "booking.create", err)
 	}
-	for _, sid := range req.ServiceIDs {
-		if err := q.AddAppointmentService(ctx, sqlc.AddAppointmentServiceParams{
-			TenantID: t.ID, AppointmentID: appt.ID, ServiceID: sid,
-		}); err != nil {
-			return mw.InternalError(c, "booking.add-service", err)
-		}
+	if err := q.AddAppointmentServicesBulk(ctx, sqlc.AddAppointmentServicesBulkParams{
+		TenantID: t.ID, AppointmentID: appt.ID, ServiceIds: req.ServiceIDs,
+	}); err != nil {
+		return mw.InternalError(c, "booking.add-services", err)
 	}
 
 	return c.JSON(http.StatusCreated, map[string]any{
@@ -284,9 +286,3 @@ func Create(c *echo.Context) error {
 	})
 }
 
-func optUUID(p *uuid.UUID) pgtype.UUID {
-	if p == nil || *p == uuid.Nil {
-		return pgtype.UUID{Valid: false}
-	}
-	return pgtype.UUID{Bytes: *p, Valid: true}
-}

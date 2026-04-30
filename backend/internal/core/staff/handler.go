@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -97,7 +98,7 @@ func Create(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "name and position are required")
 	}
 
-	hireDate, err := parseDate(req.HireDate)
+	hireDate, err := timex.ParseDate(req.HireDate)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hire_date: "+err.Error())
 	}
@@ -137,7 +138,7 @@ func Update(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
 	}
-	hireDate, err := parseDate(req.HireDate)
+	hireDate, err := timex.ParseDate(req.HireDate)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hire_date: "+err.Error())
 	}
@@ -222,13 +223,3 @@ func toDTO(m sqlc.Staff) DTO {
 	return dto
 }
 
-func parseDate(s *string) (pgtype.Date, error) {
-	if s == nil || *s == "" {
-		return pgtype.Date{Valid: false}, nil
-	}
-	t, err := time.Parse("2006-01-02", *s)
-	if err != nil {
-		return pgtype.Date{}, err
-	}
-	return pgtype.Date{Time: t, Valid: true}, nil
-}

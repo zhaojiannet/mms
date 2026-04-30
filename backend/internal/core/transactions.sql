@@ -60,6 +60,19 @@ WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR t.transaction_time >= sql
 ORDER BY t.transaction_time DESC, t.id DESC
 LIMIT $1 OFFSET $2;
 
+-- name: MaxTransactionsUpdatedAt :one
+-- 给 ETag 用：返回当前 filter 范围内最近一次写入的时间
+-- 同 ListTransactions 的 filter 子句保持一致，否则 ETag 会跨 filter 错误命中
+SELECT COALESCE(MAX(updated_at), '1970-01-01 00:00:00+00'::timestamptz)::timestamptz AS max_updated_at
+FROM transactions
+WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.narg('start_date')::timestamptz)
+  AND (sqlc.narg('end_date')::timestamptz   IS NULL OR transaction_time <  sqlc.narg('end_date')::timestamptz)
+  AND (sqlc.narg('kind')::text              IS NULL OR kind              =  sqlc.narg('kind')::text)
+  AND (
+    sqlc.narg('status')::text IS NOT NULL AND status = sqlc.narg('status')::text
+    OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR status = 'completed')
+  );
+
 -- name: CountTransactionsBy :one
 SELECT count(*) FROM transactions
 WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.narg('start_date')::timestamptz)

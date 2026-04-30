@@ -1,7 +1,6 @@
 package members
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,6 +13,7 @@ import (
 	"github.com/labstack/echo/v5"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -121,12 +121,12 @@ func Create(c *echo.Context) error {
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
 
-	birthday, err := parseDate(req.Birthday)
+	birthday, err := timex.ParseDate(req.Birthday)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid birthday: "+err.Error())
 	}
 
-	if err := checkPhoneUnique(c.Request().Context(), q, *req.Phone, nil); err != nil {
+	if err := checkPhoneUnique(c, q, *req.Phone, nil); err != nil {
 		return err
 	}
 
@@ -174,7 +174,7 @@ func Update(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
 	}
 
-	birthday, err := parseDate(req.Birthday)
+	birthday, err := timex.ParseDate(req.Birthday)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid birthday: "+err.Error())
 	}
@@ -182,7 +182,7 @@ func Update(c *echo.Context) error {
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
 	if req.Phone != nil && *req.Phone != "" {
-		if err := checkPhoneUnique(c.Request().Context(), q, *req.Phone, &id); err != nil {
+		if err := checkPhoneUnique(c, q, *req.Phone, &id); err != nil {
 			return err
 		}
 	}
@@ -261,21 +261,11 @@ func toListDTO(r sqlc.ListMembersRow) MemberDTO {
 	return dto
 }
 
-func parseDate(s *string) (pgtype.Date, error) {
-	if s == nil || *s == "" {
-		return pgtype.Date{Valid: false}, nil
-	}
-	t, err := time.Parse("2006-01-02", *s)
-	if err != nil {
-		return pgtype.Date{}, err
-	}
-	return pgtype.Date{Time: t, Valid: true}, nil
-}
 
 // checkPhoneUnique
 //   - 占位号 '00000000000' 跳过校验（业务允许重复，如"旅行社"）
 //   - excludeID：编辑时传当前会员 ID，排除自己
-func checkPhoneUnique(ctx context.Context, q *sqlc.Queries, phone string, excludeID *uuid.UUID) error {
+func checkPhoneUnique(c *echo.Context, q *sqlc.Queries, phone string, excludeID *uuid.UUID) error {
 	if phone == "00000000000" {
 		return nil
 	}
@@ -283,12 +273,12 @@ func checkPhoneUnique(ctx context.Context, q *sqlc.Queries, phone string, exclud
 	if excludeID != nil {
 		ex = pgtype.UUID{Bytes: *excludeID, Valid: true}
 	}
-	exists, err := q.ExistsMemberByPhone(ctx, sqlc.ExistsMemberByPhoneParams{
+	exists, err := q.ExistsMemberByPhone(c.Request().Context(), sqlc.ExistsMemberByPhoneParams{
 		Phone:     phone,
 		ExcludeID: ex,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "check phone failed")
+		return mw.InternalError(c, "members.check_phone", err)
 	}
 	if exists {
 		return echo.NewHTTPError(http.StatusBadRequest, "该手机号已被其他会员使用")

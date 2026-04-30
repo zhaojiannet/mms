@@ -29,6 +29,18 @@ INSERT INTO system_announcement_reads (user_id, announcement_id)
 SELECT $1, id FROM system_announcements
 ON CONFLICT DO NOTHING;
 
+-- name: UpsertSystemAnnouncement :exec
+-- 启动时 seed announcements.json 用：以 version 为唯一键 upsert
+INSERT INTO system_announcements
+  (version, type, title, summary, body_markdown, published_at)
+VALUES ($1, $2, $3, $4, $5, $6)
+ON CONFLICT (version) DO UPDATE SET
+  type          = EXCLUDED.type,
+  title         = EXCLUDED.title,
+  summary       = EXCLUDED.summary,
+  body_markdown = EXCLUDED.body_markdown,
+  published_at  = EXCLUDED.published_at;
+
 -- name: GetLatestAnnouncementVersion :one
 -- 侧边栏版本号红点：最新公告版本；若当前用户未读则前端显红点
 SELECT a.version, (r.read_at IS NOT NULL)::boolean AS is_read

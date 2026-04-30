@@ -12,6 +12,8 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -84,7 +86,7 @@ func SettleAllCredits(c *echo.Context) error {
 	// summary（前 3 条详情 + "等 N 笔"）
 	summary := "批量清账：" + joinBriefSummary(summaryParts, 3)
 
-	txTime, err := parseTimestamp(req.TransactionTime)
+	txTime, err := timex.ParseRFC3339Tz(req.TransactionTime)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid transaction_time: "+err.Error())
 	}
@@ -98,7 +100,7 @@ func SettleAllCredits(c *echo.Context) error {
 		MemberID:         pgtype.UUID{Bytes: memberID, Valid: true},
 		CardID:           primaryCardID,
 		TransactionTime:  txTime,
-		Summary:          strPtr(summary),
+		Summary:          pgtypex.StrPtr(summary),
 	})
 	if err != nil {
 		return mw.InternalError(c, "create tx: ", err)
@@ -121,7 +123,7 @@ func SettleAllCredits(c *echo.Context) error {
 			BalanceBefore: cardBefore,
 			BalanceAfter:  updated.Balance,
 			TransactionID: pgtype.UUID{Bytes: trx.ID, Valid: true},
-			Note:          strPtr("batch clear pending"),
+			Note:          pgtypex.StrPtr("batch clear pending"),
 		}); err != nil {
 			return mw.InternalError(c, "log: ", err)
 		}

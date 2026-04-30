@@ -42,6 +42,24 @@ JOIN card_types ct ON ct.id = c.card_type_id
 WHERE c.id = $1
 FOR UPDATE OF c;
 
+-- name: LockCardsForUpdate :many
+-- 多卡支付路径：一次性锁所有目标卡，避免 N+1 RTT
+-- ORDER BY c.id 关键：所有事务用同序加锁，防死锁
+-- 调用方需在传入 ids 前自行排序（或保证传入顺序确定）
+SELECT
+  c.id, c.tenant_id, c.member_id, c.card_type_id,
+  c.final_price, c.final_discount_rate, c.balance,
+  c.issued_at, c.expires_at, c.status, c.notes,
+  c.legacy_id, c.created_at, c.updated_at,
+  ct.name          AS card_type_name,
+  ct.price         AS card_type_price,
+  ct.discount_rate AS card_type_discount_rate
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.id = ANY(sqlc.arg('ids')::uuid[])
+ORDER BY c.id
+FOR UPDATE OF c;
+
 -- name: IssueCard :one
 -- 最小单元：只建 card 不建 transaction（开卡+收款联动由 handler 层组合）
 -- balance 默认 = final_price；调用方也可显式传（比如迁移时保留老余额）

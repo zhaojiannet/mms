@@ -30,6 +30,25 @@ func (q *Queries) AddAppointmentService(ctx context.Context, arg AddAppointmentS
 	return err
 }
 
+const addAppointmentServicesBulk = `-- name: AddAppointmentServicesBulk :exec
+INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
+SELECT $1::uuid, $2::uuid, sid
+FROM unnest($3::uuid[]) AS sid
+ON CONFLICT DO NOTHING
+`
+
+type AddAppointmentServicesBulkParams struct {
+	TenantID      uuid.UUID   `json:"tenant_id"`
+	AppointmentID uuid.UUID   `json:"appointment_id"`
+	ServiceIds    []uuid.UUID `json:"service_ids"`
+}
+
+// 一次插入多条 appointment_services；ON CONFLICT 兼容入参重复 id
+func (q *Queries) AddAppointmentServicesBulk(ctx context.Context, arg AddAppointmentServicesBulkParams) error {
+	_, err := q.db.Exec(ctx, addAppointmentServicesBulk, arg.TenantID, arg.AppointmentID, arg.ServiceIds)
+	return err
+}
+
 const clearAppointmentServices = `-- name: ClearAppointmentServices :exec
 DELETE FROM appointment_services WHERE appointment_id = $1
 `

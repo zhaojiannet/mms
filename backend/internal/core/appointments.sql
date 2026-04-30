@@ -56,6 +56,13 @@ INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
 VALUES ($1, $2, $3)
 ON CONFLICT DO NOTHING;
 
+-- name: AddAppointmentServicesBulk :exec
+-- 一次插入多条 appointment_services；ON CONFLICT 兼容入参重复 id
+INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
+SELECT sqlc.arg('tenant_id')::uuid, sqlc.arg('appointment_id')::uuid, sid
+FROM unnest(sqlc.arg('service_ids')::uuid[]) AS sid
+ON CONFLICT DO NOTHING;
+
 -- name: ClearAppointmentServices :exec
 DELETE FROM appointment_services WHERE appointment_id = $1;
 
