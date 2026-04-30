@@ -70,6 +70,10 @@ func List(c *echo.Context) error {
 	}
 	var search *string
 	if s := c.Request().URL.Query().Get("search"); s != "" {
+		// 上限 100：防 ILIKE '%超长字符串%' 全表 CPU 飙升（自伤型 DoS）
+		if utf8.RuneCountInString(s) > 100 {
+			return echo.NewHTTPError(http.StatusBadRequest, "搜索关键词过长（最多 100 字）")
+		}
 		search = &s
 	}
 
