@@ -99,6 +99,20 @@ func (q *Queries) ReportBusiness(ctx context.Context, arg ReportBusinessParams) 
 	return i, err
 }
 
+const reportCardPool = `-- name: ReportCardPool :one
+SELECT COALESCE(SUM(balance), 0)::numeric AS total
+FROM cards WHERE status = 'active'
+`
+
+// 卡池余额：当前店内所有 active 卡的余额总和
+// 用于首页 KPI；RLS 自动按 tenant 隔离
+func (q *Queries) ReportCardPool(ctx context.Context) (decimal.Decimal, error) {
+	row := q.db.QueryRow(ctx, reportCardPool)
+	var total decimal.Decimal
+	err := row.Scan(&total)
+	return total, err
+}
+
 const reportCardSalesSummary = `-- name: ReportCardSalesSummary :many
 SELECT
   (CASE

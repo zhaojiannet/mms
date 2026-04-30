@@ -1,3 +1,9 @@
+-- name: ReportCardPool :one
+-- 卡池余额：当前店内所有 active 卡的余额总和
+-- 用于首页 KPI；RLS 自动按 tenant 隔离
+SELECT COALESCE(SUM(balance), 0)::numeric AS total
+FROM cards WHERE status = 'active';
+
 -- name: ReportBusiness :one
 -- 营业报表：区间内的综合统计（对齐老系统口径）
 --   sale_revenue     : kind='sale' 实收合计（含挂账场景）
