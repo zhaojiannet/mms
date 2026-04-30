@@ -17,6 +17,8 @@ import (
 
 	"github.com/labstack/echo/v5"
 	"github.com/mojocn/base64Captcha"
+
+	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 )
 
 type captchaEntry struct {
@@ -94,7 +96,7 @@ type CaptchaResponse struct {
 func CaptchaHandler(c *echo.Context) error {
 	id, b64, _, err := captchaInstance.Generate()
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "生成验证码失败")
+		return mw.InternalError(c, "captcha.generate", err)
 	}
 	return c.JSON(http.StatusOK, CaptchaResponse{ID: id, Image: b64})
 }

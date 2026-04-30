@@ -122,6 +122,9 @@ func main() {
 		slog.Info("event: transaction.voided", "data", p)
 	})
 
+	// 审计 worker pool：固定 4 worker 消费写队列；满时 block（不丢审计）
+	mw.StartAuditWorkers(pool)
+
 	// 多租户 API：所有 /api/* 必须经过 tenant resolver + 事务中间件
 	api := e.Group("/api")
 	api.Use(mw.TenantResolver(pool))

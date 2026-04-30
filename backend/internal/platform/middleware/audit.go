@@ -20,13 +20,40 @@ import (
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
-// auditWG 进程级 WaitGroup：main 优雅关闭时调用 AuditWait，等所有在途 goroutine 写完再退出
-// 避免 SIGTERM 瞬间丢失审计日志（尤其是"谁触发了停机"这种关键信息）
-var auditWG sync.WaitGroup
+// 审计写入用 worker pool 模式：
+//   - 固定 N 个 worker 从 channel 消费 job
+//   - DB 连接占用上限 = N（不再随请求并发爆）
+//   - 队列满时中间件 block，直到有 worker 空闲；不 drop（审计是合规要求）
+//   - 关闭：StartAuditWorkers 后调 AuditWait → close(channel) + WG.Wait
+const (
+	auditWorkerCount = 4
+	auditQueueSize   = 1024
+)
 
-// AuditWait 由 main.go 在关闭前调用；带超时防挂死
-// 超时：后台 goroutine 本身已有 5s DB 超时，此处留 8s 总兜底
+var (
+	auditWG    sync.WaitGroup
+	auditQueue chan auditJob // 由 StartAuditWorkers 初始化；nil 时 fallback 启动单 goroutine 模式
+)
+
+// StartAuditWorkers 启动后台 worker pool。在 main.go 注册路由前调用。
+func StartAuditWorkers(pool *pgxpool.Pool) {
+	auditQueue = make(chan auditJob, auditQueueSize)
+	for i := 0; i < auditWorkerCount; i++ {
+		auditWG.Add(1)
+		go func() {
+			defer auditWG.Done()
+			for job := range auditQueue {
+				writeAuditJob(pool, job)
+			}
+		}()
+	}
+}
+
+// AuditWait 由 main.go 在关闭前调用：close(queue) → workers drain → WG.Wait → 超时兜底
 func AuditWait(timeout time.Duration) {
+	if auditQueue != nil {
+		close(auditQueue)
+	}
 	done := make(chan struct{})
 	go func() {
 		auditWG.Wait()
@@ -49,9 +76,10 @@ func AuditWait(timeout time.Duration) {
 //	会读到下一个请求的 tenant/claims/header，审计日志张冠李戴。
 //	→ 所有 context 依赖值必须在 goroutine 启动前提取到 auditJob 值类型里传递。
 //
-//	- 异步写入：不阻塞 handler 响应
+//	- 异步写入：worker pool 消费 auditQueue，不阻塞 handler 响应
+//	- 队列满时中间件 block：审计是合规要求，宁可让请求慢一点也不丢日志
 //	- 独立 context + 5s 超时：原 req ctx 返回后会 cancel
-//	- audit_logs 表无 RLS（全局表），用独立 pool 连接写
+//	- audit_logs 表 RLS：worker 内部 SET LOCAL app.current_tenant 后再 INSERT
 func AuditLog(pool *pgxpool.Pool) echo.MiddlewareFunc {
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
@@ -64,7 +92,11 @@ func AuditLog(pool *pgxpool.Pool) echo.MiddlewareFunc {
 
 			var bodySnapshot []byte
 			if recordBody && req.Body != nil {
-				bodySnapshot, _ = io.ReadAll(req.Body)
+				if data, err := io.ReadAll(req.Body); err != nil {
+					slog.Warn("audit read body failed", "err", err, "path", path)
+				} else {
+					bodySnapshot = data
+				}
 				req.Body = io.NopCloser(bytes.NewBuffer(bodySnapshot))
 			}
 
@@ -75,14 +107,14 @@ func AuditLog(pool *pgxpool.Pool) echo.MiddlewareFunc {
 				return err
 			}
 
-			// 必须在 goroutine 启动前从 Context 提取所有值
-			// 此时 c 还属于当前请求，Echo 尚未 Reset
+			// 必须在入队前从 Context 提取所有值（Echo handler 返回后 Context 被 Reset）
 			job := buildAuditJob(c, method, path, bodySnapshot, err)
-			auditWG.Add(1)
-			go func() {
-				defer auditWG.Done()
+			if auditQueue != nil {
+				auditQueue <- job // 满了 block；不丢审计
+			} else {
+				// fallback：未调 StartAuditWorkers（如测试场景），同步写
 				writeAuditJob(pool, job)
-			}()
+			}
 			return err
 		}
 	}
@@ -177,7 +209,11 @@ func buildAuditJob(c *echo.Context, method, path string, body []byte, handlerErr
 			payload["raw"] = string(body)
 		}
 	}
-	job.payload, _ = json.Marshal(payload)
+	if data, err := json.Marshal(payload); err != nil {
+		slog.Warn("audit marshal payload failed", "err", err, "action", job.action)
+	} else {
+		job.payload = data
+	}
 
 	// IP（从 RemoteAddr 提取；X-Forwarded-For 处理见 clientIP()）
 	if s := c.Request().RemoteAddr; s != "" {
