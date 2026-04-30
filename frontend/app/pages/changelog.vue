@@ -16,10 +16,7 @@
       class="p-6 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs space-y-3 scroll-mt-20"
     >
       <div class="flex items-start justify-between gap-3 flex-wrap">
-        <div class="flex items-center gap-2">
-          <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-          <h2 class="text-base font-medium">{{ a.title }}</h2>
-        </div>
+        <SectionTitle as="h2">{{ a.title }}</SectionTitle>
         <div class="flex items-center gap-2 text-xs text-stone-500 tabular-nums">
           <UBadge :label="typeLabel(a.type)" :color="typeColor(a.type)" variant="soft" size="sm" />
           <span>V {{ a.version }}</span>

@@ -5,7 +5,7 @@
       color="neutral"
       variant="ghost"
       square
-      class="active:scale-[0.98] !bg-stone-200/40 dark:!bg-stone-800/40 hover:!bg-stone-200/70 dark:hover:!bg-stone-800/70 transition-colors duration-150"
+      class="active:scale-[0.98] bg-stone-200/40! dark:bg-stone-800/40! hover:bg-stone-200/70! dark:hover:bg-stone-800/70! transition-colors duration-150"
       :aria-label="auth.user?.name || '账户'"
     >
       <UAvatar :alt="auth.user?.name" size="xs" />
@@ -15,9 +15,9 @@
       :block="block"
       color="neutral"
       variant="ghost"
-      class="!justify-start gap-2 active:scale-[0.98]
-             !bg-stone-200/40 dark:!bg-stone-800/40
-             hover:!bg-stone-200/70 dark:hover:!bg-stone-800/70
+      class="justify-start! gap-2 active:scale-[0.98]
+             bg-stone-200/40! dark:bg-stone-800/40!
+             hover:bg-stone-200/70! dark:hover:bg-stone-800/70!
              transition-colors duration-150"
     >
       <UAvatar :alt="auth.user?.name" size="xs" />
@@ -54,7 +54,7 @@
               :title="`${t.name} · ${t.tone}`"
               :style="{ background: t.hex }"
               :class="[
-                'w-5 h-5 rounded-full transition-transform duration-150 active:scale-90 focus-visible:outline-none',
+                'w-5 h-5 rounded-full transition-transform duration-150 active:scale-90 focus-visible:outline-hidden',
                 themeCurrent === t.key
                   ? 'scale-110 ring-2 ring-offset-2 ring-stone-900/20 dark:ring-white/40 ring-offset-white dark:ring-offset-stone-900'
                   : 'hover:scale-110 opacity-80 hover:opacity-100',
@@ -77,7 +77,7 @@
               :color="fontCurrent === opt.key ? 'primary' : 'neutral'"
               :class="fontCurrent === opt.key
                 ? ''
-                : '!bg-stone-100 dark:!bg-stone-800 hover:!bg-primary-50 hover:!text-primary-700 dark:hover:!bg-primary-950/40 dark:hover:!text-primary-300'"
+                : 'bg-stone-100! dark:bg-stone-800! hover:bg-primary-50! hover:text-primary-700! dark:hover:bg-primary-950/40! dark:hover:text-primary-300!'"
               @click="applyFont(opt.key)"
             />
           </div>
@@ -98,7 +98,7 @@
               :color="colorMode.preference === m.key ? 'primary' : 'neutral'"
               :class="colorMode.preference === m.key
                 ? ''
-                : '!bg-stone-100 dark:!bg-stone-800 hover:!bg-primary-50 hover:!text-primary-700 dark:hover:!bg-primary-950/40 dark:hover:!text-primary-300'"
+                : 'bg-stone-100! dark:bg-stone-800! hover:bg-primary-50! hover:text-primary-700! dark:hover:bg-primary-950/40! dark:hover:text-primary-300!'"
               @click="colorMode.preference = m.key"
             />
           </div>
@@ -112,7 +112,7 @@
           color="neutral"
           variant="ghost"
           block
-          class="!justify-start"
+          class="justify-start!"
           @click="profileOpen = true"
         >
           个人设置
@@ -124,7 +124,7 @@
           color="neutral"
           variant="ghost"
           block
-          class="!justify-start"
+          class="justify-start!"
           @click="onLogout"
         >
           退出登录

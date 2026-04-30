@@ -75,7 +75,7 @@
                     size="sm"
                     icon="i-lucide-circle-x"
                     aria-label="清空搜索"
-                    @click="memberSearch = ''; debouncedSearch('')"
+                    @click="memberSearch = ''; debouncedSearch()"
                   />
                 </template>
               </UInput>
@@ -276,7 +276,7 @@
         </div>
 
         <!-- 支付方式（上下都不显示分割线，间距收紧） -->
-        <div class="!border-y-0 !py-3">
+        <div class="border-y-0! py-3!">
           <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />支付方式</label>
           <div class="mt-1.5 flex flex-wrap gap-1.5">
             <button
@@ -334,7 +334,7 @@
         </div>
 
         <!-- 交易时间 + 备注：4.5:5.5 横向并列（与上方支付方式之间不显示分割线，间距收紧） -->
-        <div class="grid grid-cols-1 sm:[grid-template-columns:9fr_11fr] gap-4 !border-y-0 !pt-3">
+        <div class="grid grid-cols-1 sm:[grid-template-columns:9fr_11fr] gap-4 border-y-0! pt-3!">
           <div>
             <label class="inline-flex items-center gap-2 text-base font-medium text-stone-900 dark:text-stone-100"><span class="inline-block w-1 h-4 rounded-full bg-primary-500" />交易时间</label>
             <div class="mt-1.5">
@@ -527,17 +527,15 @@
                 <UButton size="xs" variant="soft" color="neutral" @click="pendingMode = ''; selectOtherPm()">选择其他支付方式</UButton>
                 <UButton size="xs" variant="soft" color="warning" @click="pendingMode = 'full'">挂账</UButton>
               </div>
-              <div v-if="pendingMode" class="pt-2 border-t border-warning-200/60 dark:border-warning-800 space-y-2">
-                <div class="flex items-center gap-3 text-sm">
-                  <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" v-model="pendingMode" value="full" class="accent-primary-500" />
-                    全额挂账 ¥{{ discountedTotal.toFixed(2) }}
-                  </label>
-                  <label class="flex items-center gap-1.5 cursor-pointer">
-                    <input type="radio" v-model="pendingMode" value="use_balance" class="accent-primary-500" />
-                    利用余额（扣卡 ¥{{ memberTotalBalance }} + 挂账 ¥{{ (discountedTotal - parseFloat(memberTotalBalance)).toFixed(2) }}）
-                  </label>
-                </div>
+              <div v-if="pendingMode" class="pt-2 border-t border-warning-200/60 dark:border-warning-800">
+                <URadioGroup
+                  v-model="pendingMode"
+                  orientation="horizontal"
+                  :items="[
+                    { value: 'full', label: `全额挂账 ¥${discountedTotal.toFixed(2)}` },
+                    { value: 'use_balance', label: `利用余额（扣卡 ¥${memberTotalBalance} + 挂账 ¥${(discountedTotal - parseFloat(memberTotalBalance)).toFixed(2)}）` },
+                  ]"
+                />
               </div>
             </div>
           </div>
@@ -596,7 +594,7 @@
         <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
           <tr
             v-for="t in visibleTx" :key="t.id"
-            :class="['even:bg-stone-50/40 dark:even:bg-stone-800/20 hover:!bg-stone-100/60 dark:hover:!bg-stone-800/30 transition-colors', t.status === 'voided' ? 'opacity-50' : '']"
+            :class="['even:bg-stone-50/40 dark:even:bg-stone-800/20 hover:bg-stone-100/60! dark:hover:bg-stone-800/30! transition-colors', t.status === 'voided' ? 'opacity-50' : '']"
           >
             <td class="px-4 py-1.5 whitespace-nowrap truncate">
               <span v-if="t.member_name" class="inline-flex items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium">
@@ -842,9 +840,14 @@ function formatHm(s: string) {
   const d = new Date(s)
   return `${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
-function kindLabel(k: string) { return ({ sale: '消费', recharge: '办卡', credit_settlement: '清账' } as Record<string,string>)[k] ?? k }
-function kindColor(k: string): any { return ({ sale: 'primary', recharge: 'info', credit_settlement: 'neutral' } as Record<string,string>)[k] ?? 'neutral' }
+function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
+function kindColor(k: string) { return (TX_KIND_COLOR as Record<string, 'primary' | 'info' | 'neutral'>)[k] ?? 'neutral' }
 
+// fetchTodayTx 使用 ETag 缓存
+//   - 后端 List handler 在 filter 范围内 max(updated_at) 没变时返回 304
+//   - 命中 → 跳过 JSON 解析 + 列表更新；只更新 loading 标记
+//   - 多店员多 tab 60s 轮询场景下大幅省网络/CPU
+let todayTxEtag = ''
 async function fetchTodayTx() {
   todayTx.loading = true
   try {
@@ -855,11 +858,24 @@ async function fetchTodayTx() {
       limit: '50',
       include_voided: '1',
     })
-    const data = await api<{ items: TodayTx[]; total: number }>(`/api/transactions?${q}`)
-    todayTx.items = data.items
-    const valid = data.items.filter(t => t.status !== 'voided')
+    const headers: Record<string, string> = {}
+    if (todayTxEtag) headers['If-None-Match'] = todayTxEtag
+    const res = await api.raw<{ items: TodayTx[]; total: number }>(`/api/transactions?${q}`, {
+      headers,
+      // 让 304 也走 success 通道而不是抛错
+      ignoreResponseError: true,
+    })
+    if (res.status === 304) {
+      // 数据未变，保持当前 items 不变
+      return
+    }
+    if (res.status !== 200 || !res._data) return
+    const newEtag = res.headers.get('ETag') || ''
+    if (newEtag) todayTxEtag = newEtag
+    todayTx.items = res._data.items
+    const valid = res._data.items.filter(t => t.status !== 'voided')
     todayTx.total = valid.length
-    todayTx.voidedCount = data.items.length - valid.length
+    todayTx.voidedCount = res._data.items.length - valid.length
     todayTx.actualSum = valid
       .reduce((s, t) => s + parseFloat(t.actual_paid_amount), 0)
       .toFixed(2)
@@ -1022,11 +1038,9 @@ const canSubmit = computed(() => {
   return true
 })
 
-// 实时时钟（每 5 秒刷新；分钟变化必能被显示捕捉到）
+// 实时时钟（每 30 秒刷新；分钟显示精度足够，避免每 5s 触发响应式）
 const _now = ref(new Date())
-let _nowTimer: any
-onMounted(() => { _nowTimer = setInterval(() => { _now.value = new Date() }, 5_000) })
-onBeforeUnmount(() => clearInterval(_nowTimer))
+useIntervalFn(() => { _now.value = new Date() }, 30_000)
 
 function pad(n: number) { return String(n).padStart(2, '0') }
 const nowLabel = computed(() => {
@@ -1144,25 +1158,21 @@ async function fetchBase() {
   }
 }
 
-// 会员搜索：debounce 150ms（POS 响应敏捷感）+ 取消旧请求避免乱序
-let searchTimer: any
+// 会员搜索：useDebounceFn 150ms（POS 响应敏捷感）+ 取消旧请求避免乱序
 let searchAbort: AbortController | null = null
-function debouncedSearch() {
-  clearTimeout(searchTimer)
-  searchTimer = setTimeout(async () => {
-    const q = memberSearch.value.trim()
-    if (!q) { memberOptions.value = []; return }
-    // 取消上一次未完成的请求
-    if (searchAbort) searchAbort.abort()
-    searchAbort = new AbortController()
-    try {
-      const d = await api<{ items: Member[] }>(`/api/members?search=${encodeURIComponent(q)}&limit=8`, { signal: searchAbort.signal })
-      memberOptions.value = d.items || []
-    } catch (e: any) {
-      if (e?.name !== 'AbortError') memberOptions.value = []
-    }
-  }, 150)
-}
+const debouncedSearch = useDebounceFn(async () => {
+  const q = memberSearch.value.trim()
+  if (!q) { memberOptions.value = []; return }
+  // 取消上一次未完成的请求
+  if (searchAbort) searchAbort.abort()
+  searchAbort = new AbortController()
+  try {
+    const d = await api<{ items: Member[] }>(`/api/members?search=${encodeURIComponent(q)}&limit=8`, { signal: searchAbort.signal })
+    memberOptions.value = d.items || []
+  } catch (e: any) {
+    if (e?.name !== 'AbortError') memberOptions.value = []
+  }
+}, 150)
 
 function handleEnter() {
   if (memberOptions.value.length > 0) {
@@ -1297,16 +1307,13 @@ async function submit() {
 }
 
 // 静默轮询：每 60 秒拉一次今日记录，自动同步其他店员的开单（多店员场景）
-let _txPollTimer: any
 onMounted(() => {
   fetchBase()
   fetchTodayTx()
   ensureVoidFetched()
-  _txPollTimer = setInterval(fetchTodayTx, 60_000)
 })
+useIntervalFn(fetchTodayTx, 60_000)
 onBeforeUnmount(() => {
-  clearInterval(_txPollTimer)
-  clearTimeout(searchTimer)
   searchAbort?.abort()
 })
 </script>

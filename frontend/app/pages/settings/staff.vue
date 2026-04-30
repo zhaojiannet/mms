@@ -2,7 +2,7 @@
   <div class="space-y-4">
     <div class="flex items-center justify-between gap-2 flex-wrap">
       <p class="text-sm text-stone-500">共 {{ items.length }} 人</p>
-      <UButton icon="i-lucide-user-plus" @click="openCreate">新建员工</UButton>
+      <UButton icon="i-lucide-user-plus" @click="onOpenCreate">新建员工</UButton>
     </div>
 
     <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
@@ -41,20 +41,7 @@
               <UBadge :label="s.status === 'active' ? '在职' : '离职'" :color="s.status === 'active' ? 'success' : 'neutral'" variant="soft" size="sm" />
             </td>
             <td class="px-4 py-3 text-right">
-              <div class="inline-flex items-center gap-1.5">
-                <UButton
-                  size="xs" variant="soft" color="primary"
-                  icon="i-lucide-pencil"
-                  class="active:scale-95 transition-transform"
-                  @click="openEdit(s)"
-                >编辑</UButton>
-                <UButton
-                  size="xs" variant="soft" color="error"
-                  icon="i-lucide-trash-2"
-                  class="active:scale-95 transition-transform"
-                  @click="confirmDelete(s)"
-                >删除</UButton>
-              </div>
+              <RowActions @edit="openEdit(s)" @delete="confirmDelete(s)" />
             </td>
           </tr>
         </tbody>
@@ -90,10 +77,7 @@
           <div class="grid gap-4" :class="editingId ? 'grid-cols-2' : 'grid-cols-1'">
             <!-- 提成 -->
             <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900 space-y-3">
-              <div class="flex items-center gap-2">
-                <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-                <h3 class="text-base font-medium">提成</h3>
-              </div>
+              <SectionTitle>提成</SectionTitle>
               <UCheckbox v-model="form.counts_commission" label="参与提成核算" />
               <UFormField v-if="form.counts_commission" label="默认提成率" help="小数表示，如 0.5 = 5 成 / 50%">
                 <UInput v-model="form.default_commission_rate" type="number" step="0.01" min="0" max="1" placeholder="0.5" size="md" class="w-full" />
@@ -102,10 +86,7 @@
 
             <!-- 状态（仅编辑） -->
             <div v-if="editingId" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900 space-y-3">
-              <div class="flex items-center gap-2">
-                <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-                <h3 class="text-base font-medium">状态</h3>
-              </div>
+              <SectionTitle>状态</SectionTitle>
               <URadioGroup v-model="form.status" :items="[{label:'在职', value:'active'},{label:'离职', value:'inactive'}]" orientation="horizontal" />
             </div>
           </div>
@@ -119,15 +100,14 @@
       </template>
     </UModal>
 
-    <UModal v-model:open="deleteOpen" title="删除员工" :ui="{ content: 'sm:max-w-md' }">
-      <template #body><p>确认删除「<strong>{{ deleting?.name }}</strong>」？必须先将员工状态设为"离职"。</p></template>
-      <template #footer>
-        <div class="flex justify-end gap-2 w-full">
-          <UButton variant="ghost" color="neutral" @click="deleteOpen = false">取消</UButton>
-          <UButton color="error" :loading="deletingLoading" @click="onDelete">确认删除</UButton>
-        </div>
-      </template>
-    </UModal>
+    <DeleteConfirmModal
+      v-model:open="deleteOpen"
+      title="删除员工"
+      :target="deleting?.name"
+      hint="必须先将员工状态设为&quot;离职&quot;。"
+      :loading="deletingLoading"
+      @confirm="onDelete"
+    />
   </div>
 </template>
 
@@ -138,82 +118,44 @@ interface Staff {
   counts_commission: boolean; default_commission_rate: string; sort_order: number
 }
 
-const api = useApi()
-const items = ref<Staff[]>([])
-const loading = ref(true)
+const {
+  items, loading,
+  formOpen, editingId, submitting, formError,
+  deleteOpen, deleting, deletingLoading,
+  fetchList, openCreate, openEdit: baseOpenEdit, submit, confirmDelete, onDelete,
+} = useResourceCrud<Staff>('/api/staff')
 
-const formOpen = ref(false)
-const submitting = ref(false)
-const formError = ref('')
-const editingId = ref<string | null>(null)
 const form = reactive({
   name: '', position: '', phone: '',
   counts_commission: true, default_commission_rate: '0',
   sort_order: 99, status: 'active' as 'active' | 'inactive',
 })
 
-const deleteOpen = ref(false)
-const deleting = ref<Staff | null>(null)
-const deletingLoading = ref(false)
-
-async function fetchList() {
-  loading.value = true
-  try {
-    const data = await api<{ items: Staff[] }>('/api/staff')
-    items.value = data.items
-  } finally { loading.value = false }
-}
-
 function resetForm() {
   form.name = ''; form.position = ''; form.phone = ''
   form.counts_commission = true; form.default_commission_rate = '0'
-  form.sort_order = 99; form.status = 'active'; formError.value = ''
+  form.sort_order = 99; form.status = 'active'
 }
-function openCreate() { editingId.value = null; resetForm(); formOpen.value = true }
+const onOpenCreate = () => { resetForm(); openCreate() }
 function openEdit(s: Staff) {
-  editingId.value = s.id
   form.name = s.name; form.position = s.position
   form.phone = s.phone ?? ''
   form.counts_commission = s.counts_commission
   form.default_commission_rate = s.default_commission_rate
   form.sort_order = s.sort_order; form.status = s.status
-  formError.value = ''; formOpen.value = true
+  baseOpenEdit(s)
 }
 
 async function onSubmit() {
-  submitting.value = true; formError.value = ''
-  try {
-    const body: any = {
-      name: form.name, position: form.position,
-      phone: form.phone || null,
-      counts_commission: form.counts_commission,
-      default_commission_rate: parseFloat(form.default_commission_rate) || 0,
-      sort_order: Number(form.sort_order) || 99,
-    }
-    if (editingId.value) {
-      body.status = form.status
-      await api(`/api/staff/${editingId.value}`, { method: 'PUT', body })
-    } else {
-      await api('/api/staff', { method: 'POST', body })
-    }
-    formOpen.value = false
-    await fetchList()
-  } catch (e: any) {
-    formError.value = e?.data?.message || e?.message || '保存失败'
-  } finally { submitting.value = false }
-}
-
-function confirmDelete(s: Staff) { deleting.value = s; deleteOpen.value = true }
-async function onDelete() {
-  if (!deleting.value) return
-  deletingLoading.value = true
-  try {
-    await api(`/api/staff/${deleting.value.id}`, { method: 'DELETE' })
-    deleteOpen.value = false; deleting.value = null
-    await fetchList()
-  } catch (e: any) {
-    formError.value = e?.data?.message || '删除失败'
-  } finally { deletingLoading.value = false }
+  const body: Record<string, unknown> = {
+    name: form.name, position: form.position,
+    phone: form.phone || null,
+    counts_commission: form.counts_commission,
+    default_commission_rate: parseFloat(form.default_commission_rate) || 0,
+    sort_order: Number(form.sort_order) || 99,
+  }
+  if (editingId.value) body.status = form.status
+  await submit(body)
 }
 
 onMounted(fetchList)

@@ -50,16 +50,13 @@
       <!-- 会员卡 -->
       <section>
         <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-            <h2 class="text-base font-medium">会员卡</h2>
-          </div>
+          <SectionTitle as="h2">会员卡</SectionTitle>
           <span class="text-sm text-stone-500">{{ cards.length }} 张</span>
         </div>
         <div v-if="cards.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div
             v-for="c in cards" :key="c.id"
-            class="p-4 rounded-2xl bg-gradient-to-br from-primary-50/50 to-white dark:from-primary-950/30 dark:to-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800"
+            class="p-4 rounded-2xl bg-linear-to-br from-primary-50/50 to-white dark:from-primary-950/30 dark:to-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800"
           >
             <div class="flex items-start justify-between">
               <div>
@@ -87,10 +84,7 @@
       <!-- 挂账 -->
       <section>
         <div class="flex items-center justify-between mb-3">
-          <div class="flex items-center gap-2">
-            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-            <h2 class="text-base font-medium">未清挂账</h2>
-          </div>
+          <SectionTitle as="h2">未清挂账</SectionTitle>
           <UButton v-if="pendings.length > 1" size="sm" variant="soft" @click="openSettleAll">批量清账</UButton>
         </div>
         <div v-if="pendings.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
@@ -120,7 +114,7 @@
                       size="xs" variant="soft" color="error"
                       icon="i-lucide-rotate-ccw"
                       class="active:scale-95 transition-transform"
-                      @click="removePending(p)"
+                      @click="askRemovePending(p)"
                     >撤消</UButton>
                   </div>
                 </td>
@@ -133,10 +127,7 @@
 
       <!-- 最近交易 -->
       <section>
-        <div class="flex items-center gap-2 mb-3">
-          <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-          <h2 class="text-base font-medium">最近交易</h2>
-        </div>
+        <SectionTitle as="h2" class="mb-3">最近交易</SectionTitle>
         <div v-if="recentTx.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
           <table class="w-full text-base">
             <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -222,6 +213,18 @@
           </div>
         </template>
       </UModal>
+
+      <DeleteConfirmModal
+        v-model:open="removePendOpen"
+        title="撤消挂账"
+        confirm-text="确认撤消"
+        :loading="removePendLoading"
+        @confirm="confirmRemovePending"
+      >
+        <template #message>
+          <p>确认撤消这笔 <strong>¥{{ removePendTarget?.amount }}</strong> 的未清挂账？</p>
+        </template>
+      </DeleteConfirmModal>
     </template>
   </div>
 </template>
@@ -231,6 +234,7 @@ const api = useApi()
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id as string
+const ops = useMemberOps(() => id)
 
 interface Member { id: string; name: string; phone: string | null; gender: string; birthday: string | null; notes: string | null; status: string }
 interface Card { id: string; card_type_name: string; card_type_id: string; final_price: string; final_discount_rate: string; balance: string; status: string; issued_at: string; is_custom: boolean }
@@ -279,8 +283,8 @@ async function fetchAll() {
 }
 
 function genderLabel(g: string) { return { male: '男', female: '女', unknown: '—' }[g] ?? '—' }
-function statusLabel(s: string) { return { active: '正常', frozen: '冻结', expired: '过期', depleted: '用尽' }[s] ?? s }
-function kindLabel(k: string) { return { sale: '消费', recharge: '办卡', credit_settlement: '清账' }[k] ?? k }
+function statusLabel(s: string) { return (CARD_STATUS_LABEL as Record<string, string>)[s] ?? s }
+function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
 function formatDate(s: string) { return new Date(s).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) }
 function displayRate(r: string) { const n = parseFloat(r); return (Math.round(n * 100) / 10).toFixed(1) + '折' }
 
@@ -292,15 +296,28 @@ function openPending() { pendForm.amount = ''; pendForm.summary = ''; pendOpen.v
 async function submitPending() {
   pendSaving.value = true
   try {
-    await api(`/api/members/${id}/pending`, { method: 'POST', body: { amount: pendForm.amount, summary: pendForm.summary || null } })
+    await ops.addPending({ amount: pendForm.amount, summary: pendForm.summary || null })
     pendOpen.value = false
     await fetchAll()
-  } catch {} finally { pendSaving.value = false }
+  } catch (e) {
+    console.warn('addPending failed', e)
+  } finally { pendSaving.value = false }
 }
-async function removePending(p: Pending) {
-  if (!confirm('撤消这笔未清挂账？')) return
-  await api(`/api/members/${id}/pending/${p.id}`, { method: 'DELETE' })
-  await fetchAll()
+const removePendOpen = ref(false)
+const removePendTarget = ref<Pending | null>(null)
+const removePendLoading = ref(false)
+function askRemovePending(p: Pending) {
+  removePendTarget.value = p
+  removePendOpen.value = true
+}
+async function confirmRemovePending() {
+  if (!removePendTarget.value) return
+  removePendLoading.value = true
+  try {
+    await ops.removePending(removePendTarget.value.id)
+    removePendOpen.value = false
+    await fetchAll()
+  } finally { removePendLoading.value = false }
 }
 
 // ---- 清账 ----
@@ -320,10 +337,12 @@ async function submitSettle() {
   if (!settleForm.paymentMethodId) { settleErr.value = '请选择收款方式'; return }
   settleSaving.value = true; settleErr.value = ''
   try {
-    const body: any = { payment_method_id: settleForm.paymentMethodId }
-    if (isMemberCard.value) body.card_id = settleForm.cardId || null
-    const path = settleAll.value ? `/api/members/${id}/pending/settle-all` : `/api/members/${id}/pending/${settleTarget.value!.id}/settle`
-    await api(path, { method: 'POST', body })
+    const body = {
+      payment_method_id: settleForm.paymentMethodId,
+      card_id: isMemberCard.value ? (settleForm.cardId || null) : undefined,
+    }
+    if (settleAll.value) await ops.settleAll(body)
+    else await ops.settleOne(settleTarget.value!.id, body)
     settleOpen.value = false
     await fetchAll()
   } catch (e: any) { settleErr.value = e?.data?.message || '清账失败' }
@@ -340,9 +359,12 @@ async function submitIssue() {
   if (!issueForm.cardTypeId || !issueForm.paymentMethodId) { issueErr.value = '请选卡型和收款方式'; return }
   issueSaving.value = true; issueErr.value = ''
   try {
-    const body: any = { card_type_id: issueForm.cardTypeId, payment_method_id: issueForm.paymentMethodId }
+    const body: Record<string, unknown> = {
+      card_type_id: issueForm.cardTypeId,
+      payment_method_id: issueForm.paymentMethodId,
+    }
     if (issueForm.finalPrice) body.final_price = issueForm.finalPrice
-    await api(`/api/members/${id}/cards/with-transaction`, { method: 'POST', body })
+    await ops.issueCard(body)
     issueOpen.value = false
     await fetchAll()
   } catch (e: any) { issueErr.value = e?.data?.message || '办卡失败' }

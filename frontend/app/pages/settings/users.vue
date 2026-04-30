@@ -31,21 +31,13 @@
               {{ u.last_login_at ? formatTime(u.last_login_at) : '—' }}
             </td>
             <td class="px-4 py-3 text-right">
-              <div class="inline-flex items-center gap-1.5">
-                <UButton
-                  size="xs" variant="soft" color="primary"
-                  icon="i-lucide-user-cog"
-                  class="active:scale-95 transition-transform"
-                  @click="openEdit(u)"
-                >设置</UButton>
-                <UButton
-                  v-if="u.id !== currentUserId"
-                  size="xs" variant="soft" color="error"
-                  icon="i-lucide-trash-2"
-                  class="active:scale-95 transition-transform"
-                  @click="confirmDelete(u)"
-                >删除</UButton>
-              </div>
+              <RowActions
+                edit-label="设置"
+                edit-icon="i-lucide-user-cog"
+                :can-delete="u.id !== currentUserId"
+                @edit="openEdit(u)"
+                @delete="confirmDelete(u)"
+              />
             </td>
           </tr>
         </tbody>
@@ -61,15 +53,14 @@
       @saved="fetchList"
     />
 
-    <UModal v-model:open="deleteOpen" title="删除账号" :ui="{ content: 'sm:max-w-md' }">
-      <template #body><p>确认删除「<strong>{{ deleting?.name }}</strong>」？此账号所有登录会话立即失效。</p></template>
-      <template #footer>
-        <div class="flex justify-end gap-2 w-full">
-          <UButton variant="ghost" color="neutral" @click="deleteOpen = false">取消</UButton>
-          <UButton color="error" :loading="deletingLoading" @click="onDelete">确认删除</UButton>
-        </div>
-      </template>
-    </UModal>
+    <DeleteConfirmModal
+      v-model:open="deleteOpen"
+      title="删除账号"
+      :target="deleting?.name"
+      hint="此账号所有登录会话立即失效。"
+      :loading="deletingLoading"
+      @confirm="onDelete"
+    />
   </div>
 </template>
 
@@ -85,6 +76,7 @@ interface User {
 }
 
 const api = useApi()
+const toast = useToast()
 const auth = useAuthStore()
 const currentUserId = computed(() => auth.user?.id ?? '')
 const items = ref<User[]>([])
@@ -99,7 +91,6 @@ const deletingLoading = ref(false)
 
 function roleLabel(r: string) { return roleLabelFn(r) }
 function roleColor(r: string): any { return ({ super_admin: 'primary', admin: 'warning', staff: 'neutral' } as any)[r] ?? 'neutral' }
-function formatTime(s: string) { return new Date(s).toLocaleString('zh-CN', { hour12: false }) }
 
 async function fetchList() {
   loading.value = true
@@ -127,7 +118,7 @@ async function onDelete() {
     deleteOpen.value = false; deleting.value = null
     await fetchList()
   } catch (e: any) {
-    alert(e?.data?.message || '删除失败')
+    toast.add({ title: '删除失败', description: e?.data?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
   } finally { deletingLoading.value = false }
 }
 

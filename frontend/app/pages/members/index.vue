@@ -64,7 +64,12 @@
         }"
       >
         <template #name-cell="{ row }">
-          <button type="button" class="flex items-center gap-1.5 min-w-0 text-stone-900 dark:text-stone-100 hover:text-primary-600 transition-colors cursor-pointer" @click="openDetail(row.original)">
+          <UButton
+            variant="link"
+            color="neutral"
+            class="p-0 gap-1.5 min-w-0 hover:text-primary-600!"
+            @click="openDetail(row.original)"
+          >
             <span class="font-medium truncate">{{ row.original.name }}</span>
             <UIcon
               v-if="row.original.gender === 'female'"
@@ -76,7 +81,7 @@
               name="i-lucide-mars"
               class="size-3.5 text-sky-500 shrink-0"
             />
-          </button>
+          </UButton>
         </template>
 
         <template #phone-cell="{ row }">
@@ -329,18 +334,19 @@
           <!-- Section 3: 名下会员卡 -->
           <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
             <div class="flex items-center justify-between mb-3">
-              <div class="flex items-center gap-2">
-                <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-                <h3 class="text-base font-medium">名下会员卡</h3>
-                <span class="text-xs text-stone-400">{{ detailCards.length }} 张</span>
-              </div>
+              <SectionTitle>
+                名下会员卡
+                <template #suffix>
+                  <span class="text-xs text-stone-400">{{ detailCards.length }} 张</span>
+                </template>
+              </SectionTitle>
               <UButton size="xs" variant="soft" color="primary" icon="i-lucide-plus" @click="openIssueCard">办卡</UButton>
             </div>
 
             <div v-if="detailCards.length > 0" class="space-y-2">
               <div
                 v-for="c in visibleCards" :key="c.id"
-                class="px-4 py-3 rounded-lg bg-gradient-to-r from-primary-50/50 to-stone-50/30 dark:from-primary-950/30 dark:to-stone-800/20 ring-1 ring-primary-200/30 dark:ring-primary-900/40"
+                class="px-4 py-3 rounded-lg bg-linear-to-r from-primary-50/50 to-stone-50/30 dark:from-primary-950/30 dark:to-stone-800/20 ring-1 ring-primary-200/30 dark:ring-primary-900/40"
               >
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
@@ -435,13 +441,18 @@
               </UFormField>
               <UFormField label="生日" name="birthday">
                 <UPopover v-model:open="birthdayPopoverOpen" :ui="{ content: 'p-3 w-auto' }">
-                  <button type="button" class="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-md text-base bg-default ring-1 ring-stone-200 dark:ring-stone-700 hover:ring-primary-500/40 transition cursor-pointer">
+                  <UButton
+                    type="button"
+                    color="neutral"
+                    variant="outline"
+                    class="w-full justify-between bg-default! ring-stone-200! dark:ring-stone-700! hover:ring-primary-500/40! cursor-pointer"
+                  >
                     <span class="flex items-center gap-2">
                       <UIcon name="i-lucide-cake" class="size-4 text-stone-400" />
                       <span class="tabular-nums">{{ form.birthday || '未设置' }}</span>
                     </span>
                     <UIcon v-if="form.birthday" name="i-lucide-x" class="size-3.5 text-stone-400 hover:text-stone-600" @click.stop="form.birthday = ''" />
-                  </button>
+                  </UButton>
                   <template #content>
                     <UCalendar v-model="birthdayCalendar" @update:model-value="onBirthdaySelect" />
                   </template>
@@ -451,10 +462,7 @@
           </div>
 
           <div v-if="editingId" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
-            <div class="flex items-center gap-2 mb-3">
-              <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-              <h3 class="text-base font-medium">会员状态</h3>
-            </div>
+            <SectionTitle class="mb-3">会员状态</SectionTitle>
             <UFormField name="status">
               <URadioGroup v-model="form.status" :items="statusOptions" orientation="horizontal" />
               <template #help>
@@ -637,6 +645,18 @@
         </div>
       </template>
     </UModal>
+
+    <DeleteConfirmModal
+      v-model:open="removePendOpen"
+      title="撤消挂账"
+      confirm-text="确认撤消"
+      :loading="removePendLoading"
+      @confirm="confirmRemovePending"
+    >
+      <template #message>
+        <p>确认撤消这笔 <strong>¥{{ removePendTarget?.amount }}</strong> 的挂账？</p>
+      </template>
+    </DeleteConfirmModal>
   </div>
 </template>
 
@@ -685,6 +705,8 @@ const api = useApi()
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+// useMemberOps 接受 getter，自动跟随 detailMember 变化（点不同会员看详情时 endpoint 自动重指）
+const ops = useMemberOps(() => detailMember.value?.id ?? '')
 
 const loaded = ref<Member[]>([])
 const total = ref(0)
@@ -697,13 +719,12 @@ const filters = [
   { key: 'all',      label: '全部' },
   { key: 'active',   label: '正常' },
   { key: 'inactive', label: '停用' },
-]
+] as const
 
 const hasFilter = computed(() => search.value.trim().length > 0 || filter.value !== 'all')
 const hasMore = computed(() => loaded.value.length < total.value)
 
 const auth = useAuthStore()
-auth.hydrate()
 const isStaff = computed(() => auth.user?.role === 'staff')
 
 const columns: TableColumn<Member>[] = [
@@ -860,10 +881,7 @@ async function submitAddPending() {
   pendingSaving.value = true
   pendingError.value = ''
   try {
-    await api(`/api/members/${detailMember.value.id}/pending`, {
-      method: 'POST',
-      body: { amount: pendingForm.amount, summary: pendingForm.summary || null },
-    })
+    await ops.addPending({ amount: pendingForm.amount, summary: pendingForm.summary || null })
     addPendingOpen.value = false
     await refreshDetail()
     await fetchFirst()
@@ -874,13 +892,26 @@ async function submitAddPending() {
   }
 }
 
-async function removePending(p: PendingInfo) {
-  if (!detailMember.value || !confirm(`确认撤消这笔 ¥${p.amount} 的挂账？`)) return
+// 撤消挂账走 UModal 二次确认（替代原 window.confirm）
+const removePendOpen = ref(false)
+const removePendTarget = ref<PendingInfo | null>(null)
+const removePendLoading = ref(false)
+function removePending(p: PendingInfo) {
+  if (!detailMember.value) return
+  removePendTarget.value = p
+  removePendOpen.value = true
+}
+async function confirmRemovePending() {
+  if (!detailMember.value || !removePendTarget.value) return
+  removePendLoading.value = true
   try {
-    await api(`/api/members/${detailMember.value.id}/pending/${p.id}`, { method: 'DELETE' })
+    await ops.removePending(removePendTarget.value.id)
+    removePendOpen.value = false
     await refreshDetail()
     await fetchFirst()
-  } catch {}
+  } catch (e) {
+    console.warn('removePending failed', e)
+  } finally { removePendLoading.value = false }
 }
 
 // ---- 清账 ----
@@ -952,19 +983,16 @@ async function submitSettle() {
   settleSaving.value = true
   settleError.value = ''
   try {
-    const body: any = {}
+    let payload: { payment_method_id: string; card_id?: string }
     if (settleUseOther.value) {
-      body.payment_method_id = settleForm.paymentMethodId
+      payload = { payment_method_id: settleForm.paymentMethodId }
     } else {
       const mcPm = paymentMethods.value.find(p => p.name === '会员卡')
       if (!mcPm) { settleError.value = '未找到会员卡支付方式'; return }
-      body.payment_method_id = mcPm.id
-      body.card_id = settleForm.cardId
+      payload = { payment_method_id: mcPm.id, card_id: settleForm.cardId }
     }
-    const path = settleAll.value
-      ? `/api/members/${detailMember.value.id}/pending/settle-all`
-      : `/api/members/${detailMember.value.id}/pending/${settleTarget.value!.id}/settle`
-    await api(path, { method: 'POST', body })
+    if (settleAll.value) await ops.settleAll(payload)
+    else await ops.settleOne(settleTarget.value!.id, payload)
     settleOpen.value = false
     await refreshDetail()
     await fetchFirst()
@@ -1064,7 +1092,7 @@ async function submitIssue() {
   issueSaving.value = true
   issueError.value = ''
   try {
-    const body: any = { payment_method_id: issueForm.paymentMethodId }
+    const body: Record<string, unknown> = { payment_method_id: issueForm.paymentMethodId }
     if (issueForm.staffId) body.staff_id = issueForm.staffId
 
     if (issueMode.value === 'standard') {
@@ -1080,7 +1108,7 @@ async function submitIssue() {
       }
     }
 
-    await api(`/api/members/${detailMember.value.id}/cards/with-transaction`, { method: 'POST', body })
+    await ops.issueCard(body)
     issueOpen.value = false
     await refreshDetail()
     await fetchFirst()
@@ -1272,9 +1300,7 @@ function displayRate(r: string) {
   return (Math.round(n * 100) / 10).toFixed(1) + '折'
 }
 
-function cardStatusLabel(s: string) {
-  return { active: '正常', frozen: '冻结', expired: '过期', depleted: '用尽' }[s] ?? s
-}
+function cardStatusLabel(s: string) { return (CARD_STATUS_LABEL as Record<string, string>)[s] ?? s }
 
 onMounted(async () => {
   await fetchFirst()

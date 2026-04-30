@@ -24,7 +24,9 @@ export function useStoreInfo() {
       globalInfo.slug     = r.slug     || ''
       globalInfo.login_bg = r.login_bg || 'beauty'
       globalInfo.logo_url = r.logo_url || ''
-    } catch {}
+    } catch (e) {
+      console.warn('useStoreInfo.refresh failed', e)
+    }
   }
 
   function set(partial: Partial<StoreInfo>) {

@@ -16,7 +16,7 @@
             range
             size="sm"
             icon="i-lucide-calendar"
-            class="!h-8 !py-0 !text-sm w-full"
+            class="h-8! py-0! text-sm! w-full"
             :ui="{
               leadingIcon: 'size-4 text-stone-400',
             }"
@@ -69,9 +69,14 @@
         }"
       >
         <template #appointment_time-cell="{ row }">
-          <button type="button" class="text-left text-stone-900 dark:text-stone-100 font-medium tabular-nums hover:text-primary-600 transition-colors cursor-pointer" @click="openDetail(row.original)">
+          <UButton
+            variant="link"
+            color="neutral"
+            class="p-0 font-medium tabular-nums hover:text-primary-600!"
+            @click="openDetail(row.original)"
+          >
             {{ formatDateTime(row.original.appointment_time) }}
-          </button>
+          </UButton>
         </template>
 
         <template #customer-cell="{ row }">
@@ -150,10 +155,7 @@
           </div>
 
           <div v-if="canChangeStatus(detailItem.status)" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
-            <div class="flex items-center gap-2 mb-3">
-              <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-              <h3 class="text-base font-medium">更改状态</h3>
-            </div>
+            <SectionTitle class="mb-3">更改状态</SectionTitle>
             <div class="flex flex-wrap gap-2">
               <UButton v-if="detailItem.status === 'pending'" size="sm" icon="i-lucide-check" @click="changeStatus(detailItem, 'confirmed')">标记已确认</UButton>
               <UButton v-if="detailItem.status === 'confirmed'" size="sm" icon="i-lucide-check-check" @click="changeStatus(detailItem, 'completed')">标记已完成</UButton>
@@ -194,11 +196,12 @@
           </div>
 
           <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
-            <div class="flex items-center gap-2 mb-3">
-              <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-              <h3 class="text-base font-medium">预约项目</h3>
-              <span class="text-xs text-stone-400 ml-auto">{{ form.service_ids.length > 0 ? `已选 ${form.service_ids.length} 项` : '' }}</span>
-            </div>
+            <SectionTitle class="mb-3">
+              预约项目
+              <template #suffix>
+                <span class="text-xs text-stone-400 ml-auto">{{ form.service_ids.length > 0 ? `已选 ${form.service_ids.length} 项` : '' }}</span>
+              </template>
+            </SectionTitle>
             <UInput
               v-if="services.length > 6"
               v-model="svcSearch"
@@ -389,6 +392,7 @@ function onRangeUpdate(v: any) {
 const apptDateTimeVal = computed(() => {
   if (!form.appointment_time) return undefined
   const [datePart, timePart] = form.appointment_time.split('T')
+  if (!datePart) return undefined
   const [y, m, d] = datePart.split('-').map(Number)
   const [hh, mm] = (timePart || '10:00').split(':').map(Number)
   if (!y || !m || !d) return undefined
