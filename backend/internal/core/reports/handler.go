@@ -64,6 +64,18 @@ func Business(c *echo.Context) error {
 	})
 }
 
+// ================= 1.5 卡池余额 =================
+
+// CardPool GET /api/reports/card-pool
+// 返回当前店内所有 active 卡的余额总和（前端 KPI 用，避免拉全量会员算）
+func CardPool(c *echo.Context) error {
+	total, err := sqlc.New(mw.TxFrom(c)).ReportCardPool(c.Request().Context())
+	if err != nil {
+		return mw.InternalError(c, "reports.card_pool", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"total": total})
+}
+
 // ================= 2. 项目销售排行 =================
 
 func ServiceRanking(c *echo.Context) error {
