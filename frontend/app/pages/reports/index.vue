@@ -13,7 +13,7 @@
             range
             size="sm"
             icon="i-lucide-calendar"
-            class="!h-8 !py-0 !text-sm"
+            class="h-8! py-0! text-sm!"
             :ui="{ leadingIcon: 'size-4 text-stone-400' }"
           />
           <template #content>
@@ -46,7 +46,7 @@
         v-for="t in tabs" :key="t.value"
         type="button"
         :class="[
-          'inline-flex items-center gap-2 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors duration-150 cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:rounded',
+          'inline-flex items-center gap-2 px-3 py-2.5 text-sm whitespace-nowrap border-b-2 -mb-px transition-colors duration-150 cursor-pointer focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:rounded',
           activeTab === t.value
             ? 'text-primary-700 dark:text-primary-300 border-primary-500 font-medium'
             : 'text-stone-600 dark:text-stone-400 hover:text-stone-900 dark:hover:text-stone-100 border-transparent',
@@ -532,7 +532,6 @@ const presets = [
 function firstDayOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1) }
 function fmtDate(d: Date) { return d.toISOString().slice(0, 10) }
 function formatDate(s: string) { return s ? s.slice(0, 10) : '' }
-function formatTime(s: string) { return new Date(s).toLocaleString('zh-CN', { hour12: false }) }
 function fmtMoney(n: string | number | undefined | null) {
   if (n == null || n === '') return '¥0.00'
   const v = parseFloat(String(n))
@@ -646,8 +645,8 @@ const txFilters = [
   { key: 'recharge',          label: '办卡 / 充值' },
   { key: 'credit_settlement', label: '清账' },
 ]
-function kindLabel(k: string) { return ({ sale: '消费', recharge: '办卡', credit_settlement: '清账' } as Record<string,string>)[k] ?? k }
-function kindColor(k: string): any { return ({ sale: 'primary', recharge: 'info', credit_settlement: 'neutral' } as Record<string,string>)[k] ?? 'neutral' }
+function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
+function kindColor(k: string) { return (TX_KIND_COLOR as Record<string, 'primary' | 'info' | 'neutral'>)[k] ?? 'neutral' }
 
 async function fetchTx(reset = false) {
   if (reset) { txPage.value = 1; txItems.value = [] }

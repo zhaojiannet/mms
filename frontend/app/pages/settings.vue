@@ -16,8 +16,8 @@
                hover:text-stone-900 dark:hover:text-stone-100
                border-b-2 border-transparent -mb-px
                transition-colors duration-150
-               focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:rounded"
-        active-class="!text-primary-700 dark:!text-primary-300 !border-primary-500 font-medium"
+               focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/40 focus-visible:rounded"
+        active-class="text-primary-700! dark:text-primary-300! border-primary-500! font-medium"
       >
         <UIcon :name="tab.icon" class="size-4 shrink-0" />
         {{ tab.label }}
@@ -38,7 +38,6 @@ import { useAuthStore } from '~/stores/auth'
 definePageMeta({ middleware: 'at-least-admin' })
 
 const auth = useAuthStore()
-auth.hydrate()
 
 // requires：不填=所有登录用户可见；'admin'=admin 及以上；'super'=仅超级管理员
 type Requires = 'admin' | 'super' | undefined

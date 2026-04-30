@@ -79,7 +79,6 @@
               </UFormField>
             </div>
           </div>
-          <UAlert v-if="sp.msg" :description="sp.msg" :color="sp.err ? 'error' : 'success'" variant="soft" icon="i-lucide-alert-circle" />
           <div class="flex justify-end gap-2 pt-2">
             <UButton type="button" variant="ghost" color="neutral" @click="spOpen = false">取消</UButton>
             <UButton :loading="sp.saving" :disabled="!canSaveSuper" @click="saveSuperPwd">保存</UButton>
@@ -130,9 +129,9 @@
       </div>
       <div v-if="voidLoading" class="py-8 text-center text-sm text-stone-400">加载中…</div>
       <div v-if="voidHasMore" class="px-4 py-2.5 border-t border-stone-200/60 dark:border-stone-800 text-center">
-        <button type="button" class="text-xs text-stone-600 dark:text-stone-300 hover:text-primary-600" @click="loadMore">
+        <UButton variant="ghost" color="neutral" size="xs" @click="loadMore">
           加载更多（剩余 {{ voidTotal - voidItems.length }} 条）
-        </button>
+        </UButton>
       </div>
     </div>
   </div>
@@ -167,12 +166,13 @@ const err = ref('')
 const superSet = ref(false)
 
 // ---- 超级密码编辑 ----
+const toast = useToast()
 const spOpen = ref(false)
-const sp = reactive({ login: '', next: '', confirm: '', saving: false, err: false, msg: '' })
+const sp = reactive({ login: '', next: '', confirm: '', saving: false })
 const canSaveSuper = computed(() => !!sp.login && sp.next.length >= 8 && sp.next === sp.confirm)
 
 async function saveSuperPwd() {
-  sp.saving = true; sp.err = false; sp.msg = ''
+  sp.saving = true
   try {
     await api('/api/tenant-settings/super-password', {
       method: 'POST',
@@ -180,16 +180,15 @@ async function saveSuperPwd() {
     })
     superSet.value = true
     sp.login = ''; sp.next = ''; sp.confirm = ''
-    sp.msg = '超级密码已保存'
-    setTimeout(() => { spOpen.value = false; sp.msg = '' }, 800)
+    spOpen.value = false
+    toast.add({ title: '超级密码已保存', color: 'success', icon: 'i-lucide-check' })
   } catch (e: any) {
-    sp.err = true
-    sp.msg = e?.data?.message || '设置失败'
+    toast.add({ title: '设置失败', description: e?.data?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
   } finally { sp.saving = false }
 }
 
 watch(spOpen, (v) => {
-  if (v) { sp.login = ''; sp.next = ''; sp.confirm = ''; sp.msg = ''; sp.err = false }
+  if (v) { sp.login = ''; sp.next = ''; sp.confirm = '' }
 })
 
 async function fetchState() {
@@ -281,10 +280,7 @@ function switchRange(key: '30d' | 'all') {
 }
 function loadMore() { fetchVoided() }
 
-function formatTime(s: string) { return new Date(s).toLocaleString('zh-CN', { hour12: false }) }
-function kindLabel(k: string) {
-  return ({ sale: '消费', recharge: '办卡', credit_settlement: '清账' } as Record<string, string>)[k] ?? k
-}
+function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
 
 onMounted(() => {
   fetchState()

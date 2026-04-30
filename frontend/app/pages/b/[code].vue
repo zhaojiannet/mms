@@ -1,5 +1,5 @@
 <template>
-  <div class="min-h-screen bg-gradient-to-b from-stone-50 to-white dark:from-stone-950 dark:to-stone-900">
+  <div class="min-h-screen bg-linear-to-b from-stone-50 to-white dark:from-stone-950 dark:to-stone-900">
     <div class="max-w-lg mx-auto p-6 pt-10">
       <div class="text-center mb-8">
         <h1 class="text-3xl font-semibold">在线预约</h1>
@@ -46,11 +46,12 @@
         </div>
 
         <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-            <h3 class="text-base font-medium">预约项目</h3>
-            <span class="text-xs text-stone-400 ml-auto">{{ form.service_ids.length > 0 ? `已选 ${form.service_ids.length} 项` : '请至少选一项' }}</span>
-          </div>
+          <SectionTitle class="mb-3">
+            预约项目
+            <template #suffix>
+              <span class="text-xs text-stone-400 ml-auto">{{ form.service_ids.length > 0 ? `已选 ${form.service_ids.length} 项` : '请至少选一项' }}</span>
+            </template>
+          </SectionTitle>
           <UInput
             v-if="services.length > 6"
             v-model="svcSearch"
@@ -139,6 +140,7 @@ function toggleSvc(id: string) {
 const apptDateTimeVal = computed(() => {
   if (!form.appointment_time) return undefined
   const [datePart, timePart] = form.appointment_time.split('T')
+  if (!datePart) return undefined
   const [y, m, d] = datePart.split('-').map(Number)
   const [hh, mm] = (timePart || '10:00').split(':').map(Number)
   if (!y || !m || !d) return undefined

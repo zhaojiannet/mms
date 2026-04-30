@@ -39,11 +39,11 @@
                    text-stone-700 dark:text-stone-300
                    hover:bg-stone-200/70 dark:hover:bg-stone-800/70
                    transition-colors duration-150
-                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40
+                   focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-primary-500/40
                    before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2
                    before:h-5 before:w-0.5 before:bg-primary-500
                    before:opacity-0 before:transition-opacity before:duration-150"
-            active-class="!bg-primary-50 dark:!bg-primary-950/40 !text-primary-700 dark:!text-primary-300 font-medium before:!opacity-100"
+            active-class="bg-primary-50! dark:bg-primary-950/40! text-primary-700! dark:text-primary-300! font-medium before:opacity-100!"
             @click="$emit('navigate')"
           >
             <UIcon :name="item.icon" class="size-5 shrink-0" />
@@ -112,7 +112,6 @@ function onClickVersion() {
 onMounted(refresh)
 
 const auth = useAuthStore()
-auth.hydrate()
 
 type Requires = 'admin' | undefined
 interface NavItem { to: string; label: string; icon: string; badge?: string | number; requires?: Requires }

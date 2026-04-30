@@ -6,7 +6,7 @@
       :style="{ background: leftBg }"
     >
       <div class="absolute inset-0 bg-stone-900/45" />
-      <div class="absolute inset-0 bg-gradient-to-b from-stone-900/10 via-transparent to-stone-900/40" />
+      <div class="absolute inset-0 bg-linear-to-b from-stone-900/10 via-transparent to-stone-900/40" />
 
       <div class="relative leading-tight">
         <div class="font-semibold text-base">{{ storeInfo.name || 'Demo Store' }}</div>
@@ -128,7 +128,7 @@
             :loading="loading"
             block
             size="lg"
-            class="!h-11"
+            class="h-11!"
           >
             登录
           </UButton>

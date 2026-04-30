@@ -18,43 +18,43 @@
           </tr>
         </thead>
         <tbody>
-          <template v-for="r in items" :key="r.id">
+          <template v-for="d in displayItems" :key="d.raw.id">
             <tr
               class="border-t border-stone-100 dark:border-stone-800/60 even:bg-stone-50/40 dark:even:bg-stone-950/30 hover:bg-primary-50/30 dark:hover:bg-primary-950/10 transition-colors cursor-pointer"
-              @click="toggleExpand(r.id)"
+              @click="toggleExpand(d.raw.id)"
             >
-              <td class="px-4 py-2 text-stone-500 tabular-nums whitespace-nowrap">{{ formatTime(r.created_at) }}</td>
+              <td class="px-4 py-2 text-stone-500 tabular-nums whitespace-nowrap">{{ d.formattedTime }}</td>
               <td class="px-4 py-2">
                 <div class="flex items-center gap-1.5">
-                  <UIcon :name="actorIcon(r.actor_type)" class="size-3.5 text-stone-400 shrink-0" />
-                  <span class="font-medium truncate">{{ actorDisplay(r) }}</span>
+                  <UIcon :name="d.actorIcon" class="size-3.5 text-stone-400 shrink-0" />
+                  <span class="font-medium truncate">{{ d.actorDisplay }}</span>
                 </div>
               </td>
               <td class="px-4 py-2">
                 <span class="inline-flex items-center gap-1.5">
-                  <UBadge :label="methodLabel(r)" :color="methodColor(r)" variant="soft" size="sm" />
-                  <span class="truncate">{{ actionLabel(r) }}</span>
+                  <UBadge :label="d.methodLabel" :color="d.methodColor" variant="soft" size="sm" />
+                  <span class="truncate">{{ d.actionLabel }}</span>
                 </span>
               </td>
               <td class="px-4 py-2 text-stone-600 dark:text-stone-400">
-                <span v-if="targetInfo(r)" class="inline-flex items-center gap-1 text-xs">
-                  <span class="text-stone-500">{{ targetInfo(r)!.typeLabel }}</span>
-                  <span v-if="targetInfo(r)!.shortId" class="tabular-nums text-stone-400">{{ targetInfo(r)!.shortId }}</span>
+                <span v-if="d.targetInfo" class="inline-flex items-center gap-1 text-xs">
+                  <span class="text-stone-500">{{ d.targetInfo.typeLabel }}</span>
+                  <span v-if="d.targetInfo.shortId" class="tabular-nums text-stone-400">{{ d.targetInfo.shortId }}</span>
                 </span>
                 <span v-else class="text-stone-400">—</span>
               </td>
               <td class="px-4 py-2 text-center">
                 <UBadge
-                  :label="outcome(r) === 'ok' ? '成功' : '失败'"
-                  :color="outcome(r) === 'ok' ? 'success' : 'error'"
+                  :label="d.outcome === 'ok' ? '成功' : '失败'"
+                  :color="d.outcome === 'ok' ? 'success' : 'error'"
                   variant="soft" size="sm"
                 />
               </td>
-              <td class="px-4 py-2 text-stone-500 tabular-nums text-xs">{{ r.ip_address || '—' }}</td>
+              <td class="px-4 py-2 text-stone-500 tabular-nums text-xs">{{ d.raw.ip_address || '—' }}</td>
             </tr>
-            <tr v-if="expanded.has(r.id)" class="bg-stone-50/60 dark:bg-stone-950/30 border-t border-stone-100 dark:border-stone-800/60">
+            <tr v-if="expanded.has(d.raw.id)" class="bg-stone-50/60 dark:bg-stone-950/30 border-t border-stone-100 dark:border-stone-800/60">
               <td colspan="6" class="px-4 py-3">
-                <pre class="text-xs text-stone-600 dark:text-stone-300 whitespace-pre-wrap break-all leading-relaxed">{{ prettyPayload(r) }}</pre>
+                <pre class="text-xs text-stone-600 dark:text-stone-300 whitespace-pre-wrap break-all leading-relaxed">{{ d.prettyPayload }}</pre>
               </td>
             </tr>
           </template>
@@ -138,7 +138,8 @@ function parseAction(r: Log): { method: string; path: string } {
   return { method, path }
 }
 function methodLabel(r: Log) { return parseAction(r).method || 'N/A' }
-function methodColor(r: Log) {
+type BadgeColor = 'primary' | 'warning' | 'error' | 'neutral'
+function methodColor(r: Log): BadgeColor {
   const m = methodLabel(r)
   if (m === 'POST') return 'primary'
   if (m === 'PUT' || m === 'PATCH') return 'warning'
@@ -333,7 +334,25 @@ function toggleExpand(id: number) {
   else expanded.add(id)
 }
 
-function formatTime(s: string) { return new Date(s).toLocaleString('zh-CN', { hour12: false }) }
+// 派生显示字段：派生量较重（payload base64 解码 / atob / JSON.parse / parseAction 多次）
+// 整体 computed 缓存 → items 或 nameMaps 变更时整列重算一次，模板内只读字段
+const displayItems = computed(() => items.value.map((r) => {
+  const decoded = decodePayload(r)
+  const parsed = parseAction(r)
+  const method = parsed.method || 'N/A'
+  return {
+    raw: r,
+    formattedTime: formatTime(r.created_at),
+    actorIcon:     actorIcon(r.actor_type),
+    actorDisplay:  actorDisplay(r),
+    methodLabel:   method,
+    methodColor:   methodColor(r),
+    actionLabel:   actionLabel(r),
+    targetInfo:    targetInfo(r),
+    outcome:       decoded?.outcome ?? 'unknown',
+    prettyPayload: JSON.stringify(decoded || {}, null, 2),
+  }
+}))
 
 async function fetchList() {
   loading.value = true

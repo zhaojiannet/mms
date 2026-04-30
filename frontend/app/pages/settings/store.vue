@@ -4,26 +4,19 @@
     <div class="p-6 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs space-y-5">
       <!-- 名称 -->
       <div>
-        <div class="flex items-center gap-2 mb-3">
-          <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-          <h2 class="text-base font-medium">店铺名称</h2>
-        </div>
+        <SectionTitle as="h2" class="mb-3">店铺名称</SectionTitle>
         <p class="text-sm text-stone-500 mb-3">显示在登录页、侧边栏顶部、各处"当前店铺"位置。</p>
         <div class="flex items-center gap-2">
           <UInput v-model="storeName" placeholder="如：示例店铺造型" size="md" class="flex-1 max-w-sm" />
           <UButton size="md" :loading="savingName" :disabled="!storeName" @click="saveName">保存</UButton>
         </div>
-        <UAlert v-if="nameMsg" :description="nameMsg" :color="nameErr ? 'error' : 'success'" variant="soft" class="mt-3" />
       </div>
 
       <div class="h-px bg-stone-200/60 dark:bg-stone-800" />
 
       <!-- Logo -->
       <div>
-        <div class="flex items-center gap-2 mb-3">
-          <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-          <h2 class="text-base font-medium">店铺 Logo</h2>
-        </div>
+        <SectionTitle as="h2" class="mb-3">店铺 Logo</SectionTitle>
         <p class="text-sm text-stone-500 mb-3">支持 PNG / JPG / WebP，建议正方形、不超过 2MB。未设置时显示店铺名首字。</p>
         <div class="flex items-center gap-4">
           <div class="flex items-center justify-center shrink-0 size-20">
@@ -40,6 +33,7 @@
             >{{ (info.name || 'S').slice(0, 1) }}</div>
           </div>
           <div class="flex items-center gap-2">
+            <!-- CUSTOM: 隐藏的原生 file input，由上方按钮触发 click。Nuxt UI 的 UFileUpload 是完整 dropzone UI，不适合此处"按钮触发选择"的极简交互 -->
             <input ref="fileInput" type="file" accept="image/png,image/jpeg,image/webp" class="hidden" @change="onPickFile" />
             <UButton size="sm" icon="i-lucide-upload" :loading="logoUploading" @click="fileInput?.click()">
               {{ info.logo_url ? '更换 Logo' : '上传 Logo' }}
@@ -49,20 +43,27 @@
               size="sm" variant="soft" color="error"
               icon="i-lucide-trash-2"
               :loading="logoDeleting"
-              @click="removeLogo"
+              @click="removeLogoOpen = true"
             >删除</UButton>
           </div>
         </div>
-        <UAlert v-if="logoMsg" :description="logoMsg" :color="logoErr ? 'error' : 'success'" variant="soft" class="mt-3" />
       </div>
     </div>
 
+    <DeleteConfirmModal
+      v-model:open="removeLogoOpen"
+      title="删除 Logo"
+      :loading="logoDeleting"
+      @confirm="removeLogo"
+    >
+      <template #message>
+        <p>确认删除当前店铺 Logo？删除后将显示店铺名首字。</p>
+      </template>
+    </DeleteConfirmModal>
+
     <!-- 登录背景主题 -->
     <div class="p-6 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs">
-      <div class="flex items-center gap-2 mb-1">
-        <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-        <h2 class="text-base font-medium">登录页背景</h2>
-      </div>
+      <SectionTitle as="h2" class="mb-1">登录页背景</SectionTitle>
       <p class="text-sm text-stone-500 mb-4">点击下方任一主题即可应用；下次登录时将使用该主题。</p>
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <button
@@ -77,7 +78,7 @@
           @click="applyTheme(t.key)"
         >
           <img :src="t.image" :alt="t.name" class="absolute inset-0 w-full h-full object-cover" />
-          <div class="absolute inset-0 bg-gradient-to-t from-stone-900/70 via-stone-900/10 to-transparent" />
+          <div class="absolute inset-0 bg-linear-to-t from-stone-900/70 via-stone-900/10 to-transparent" />
           <div class="absolute bottom-2 left-3 text-white">
             <div class="text-sm font-semibold">{{ t.name }}</div>
             <div class="text-xs opacity-80">{{ t.hint }}</div>
@@ -90,7 +91,6 @@
           </div>
         </button>
       </div>
-      <UAlert v-if="themeMsg" :description="themeMsg" :color="themeErr ? 'error' : 'success'" variant="soft" class="mt-4" />
     </div>
   </div>
 </template>
@@ -99,25 +99,30 @@
 import { LOGIN_BG_THEMES } from '~/composables/useLoginBgThemes'
 
 const api = useApi()
+const toast = useToast()
 const cfg = useRuntimeConfig().public
 const { info, refresh, set } = useStoreInfo()
 
 const storeName = ref('')
 const savingName = ref(false)
-const nameErr = ref(false)
-const nameMsg = ref('')
 
 // ---- Logo 上传 ----
 const fileInput = ref<HTMLInputElement | null>(null)
 const logoUploading = ref(false)
 const logoDeleting = ref(false)
-const logoErr = ref(false)
-const logoMsg = ref('')
+const removeLogoOpen = ref(false)
+
+function toastOk(title: string) {
+  toast.add({ title, color: 'success', icon: 'i-lucide-check' })
+}
+function toastErr(title: string, e: any) {
+  toast.add({ title, description: e?.data?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
+}
 
 async function onPickFile(e: Event) {
   const f = (e.target as HTMLInputElement).files?.[0]
   if (!f) return
-  logoUploading.value = true; logoErr.value = false; logoMsg.value = ''
+  logoUploading.value = true
   try {
     const fd = new FormData()
     fd.append('file', f)
@@ -128,11 +133,9 @@ async function onPickFile(e: Event) {
     })
     set({ logo_url: r.url })
     await refresh()
-    logoMsg.value = 'Logo 已上传'
-    setTimeout(() => logoMsg.value = '', 2000)
+    toastOk('Logo 已上传')
   } catch (err: any) {
-    logoErr.value = true
-    logoMsg.value = err?.data?.message || '上传失败'
+    toastErr('上传失败', err)
   } finally {
     logoUploading.value = false
     if (fileInput.value) fileInput.value.value = ''
@@ -140,24 +143,20 @@ async function onPickFile(e: Event) {
 }
 
 async function removeLogo() {
-  if (!confirm('确认删除 Logo？')) return
-  logoDeleting.value = true; logoErr.value = false; logoMsg.value = ''
+  logoDeleting.value = true
   try {
     await api('/api/store/logo', { method: 'DELETE' })
     set({ logo_url: '' })
     await refresh()
-    logoMsg.value = 'Logo 已删除'
-    setTimeout(() => logoMsg.value = '', 2000)
+    removeLogoOpen.value = false
+    toastOk('Logo 已删除')
   } catch (e: any) {
-    logoErr.value = true
-    logoMsg.value = e?.data?.message || '删除失败'
+    toastErr('删除失败', e)
   } finally { logoDeleting.value = false }
 }
 
 const themes = LOGIN_BG_THEMES
 const current = ref('beauty')
-const themeErr = ref(false)
-const themeMsg = ref('')
 
 async function init() {
   await refresh()
@@ -166,15 +165,13 @@ async function init() {
 }
 
 async function saveName() {
-  savingName.value = true; nameErr.value = false; nameMsg.value = ''
+  savingName.value = true
   try {
     await api(`/api/tenant-settings/store_name`, { method: 'PUT', body: { value: storeName.value } })
     set({ name: storeName.value })
-    nameMsg.value = '已保存'
-    setTimeout(() => nameMsg.value = '', 2000)
+    toastOk('店铺名称已保存')
   } catch (e: any) {
-    nameErr.value = true
-    nameMsg.value = e?.data?.message || '保存失败'
+    toastErr('保存失败', e)
   } finally { savingName.value = false }
 }
 
@@ -182,16 +179,13 @@ async function applyTheme(key: string) {
   if (current.value === key) return
   const prev = current.value
   current.value = key
-  themeErr.value = false; themeMsg.value = ''
   try {
     await api(`/api/tenant-settings/login_bg_theme`, { method: 'PUT', body: { value: key } })
     set({ login_bg: key })
-    themeMsg.value = `已切换至「${themes.find(t => t.key === key)?.name}」`
-    setTimeout(() => themeMsg.value = '', 2000)
+    toastOk(`已切换至「${themes.find(t => t.key === key)?.name}」`)
   } catch (e: any) {
     current.value = prev
-    themeErr.value = true
-    themeMsg.value = e?.data?.message || '保存失败'
+    toastErr('保存失败', e)
   }
 }
 

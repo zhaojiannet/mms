@@ -35,11 +35,12 @@
 
         <!-- 密码段 -->
         <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900 space-y-3">
-          <div class="flex items-center gap-2">
-            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-            <h3 class="text-base font-medium">{{ pwdSectionTitle }}</h3>
-            <span v-if="!isCreate" class="text-xs text-stone-400 ml-auto">留空则不改</span>
-          </div>
+          <SectionTitle>
+            {{ pwdSectionTitle }}
+            <template #suffix>
+              <span v-if="!isCreate" class="text-xs text-stone-400 ml-auto">留空则不改</span>
+            </template>
+          </SectionTitle>
           <UFormField v-if="isSelf" label="当前密码">
             <UInput v-model="form.currentPwd" type="password" size="md" autocomplete="current-password" class="w-full" />
           </UFormField>

@@ -63,7 +63,7 @@
               size="md"
               square
               aria-label="通知"
-              class="!bg-stone-100 dark:!bg-stone-800 hover:!bg-stone-200/70 dark:hover:!bg-stone-700 transition-colors duration-150"
+              class="bg-stone-100! dark:bg-stone-800! hover:bg-stone-200/70! dark:hover:bg-stone-700! transition-colors duration-150"
             />
             <span
               v-if="hasUnread"
@@ -138,11 +138,11 @@ async function loadKpi() {
     const todayStr = now.toISOString().slice(0, 10)
     const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
 
-    const [today, month, pending, members] = await Promise.all([
+    const [today, month, pending, cardPool] = await Promise.all([
       api<any>(`/api/reports/business?start_date=${todayStr}&end_date=${todayStr}`).catch(() => null),
       api<any>(`/api/reports/business?start_date=${monthStart}&end_date=${todayStr}`).catch(() => null),
       api<any>('/api/reports/pending-stats?limit=1').catch(() => null),
-      api<{ items: { total_balance: string }[] }>('/api/members?limit=200').catch(() => null),
+      api<{ total: string }>('/api/reports/card-pool').catch(() => null),
     ])
 
     if (today) {
@@ -155,24 +155,17 @@ async function loadKpi() {
       kpi.monthRevenue = month.total_revenue || '0'
     }
     if (pending) kpi.pending = pending.summary?.total_amount || '0'
-
-    // 卡池余额：本应有专属 endpoint；先用会员列表 sum total_balance（暂时近似）
-    if (members?.items) {
-      const sum = members.items.reduce((s, m) => s + parseFloat(m.total_balance || '0'), 0)
-      kpi.cardPool = sum.toFixed(2)
-    }
-  } catch {}
+    if (cardPool) kpi.cardPool = cardPool.total || '0'
+  } catch (e) {
+    console.warn('loadKpi failed', e)
+  }
 }
 onMounted(loadKpi)
 
 // 祝福语：从 useGreeting composable 取（可被 PosWorkbench 结算成功时刷新）
 const { greeting, refresh: refreshGreeting } = useGreeting()
-let _greetingTimer: any
-onMounted(() => {
-  // 每 30 分钟自动换一次（一个客人服务周期，避免久看同一句腻）
-  _greetingTimer = setInterval(refreshGreeting, 30 * 60 * 1000)
-})
-onBeforeUnmount(() => clearInterval(_greetingTimer))
+// 每 30 分钟自动换一次（一个客人服务周期，避免久看同一句腻）
+useIntervalFn(refreshGreeting, 30 * 60 * 1000)
 
 // 通知：3 类合并（生日 / 预约 / 系统公告）
 interface NotiItem { id: string; type: 'birthday' | 'appointment' | 'announcement'; title: string; summary: string; link: string; occurred_at: string; read: boolean }
@@ -185,13 +178,17 @@ async function loadNotifications() {
     const r = await api<{ items: NotiItem[]; unread_count: number }>('/api/notifications')
     notifications.value = r.items || []
     unreadCount.value = r.unread_count || 0
-  } catch {}
+  } catch (e) {
+    console.warn('loadNotifications failed', e)
+  }
 }
 async function markAllRead() {
   try {
     await api('/api/notifications/read-all', { method: 'POST' })
     await loadNotifications()
-  } catch {}
+  } catch (e) {
+    console.warn('markAllRead failed', e)
+  }
 }
 async function onNotiClick(n: NotiItem) {
   if (n.type === 'announcement') {
@@ -207,7 +204,5 @@ function colorFor(t: string) {
 }
 onMounted(loadNotifications)
 // 60 秒静默轮询
-let _notiTimer: any
-onMounted(() => { _notiTimer = setInterval(loadNotifications, 60 * 1000) })
-onBeforeUnmount(() => clearInterval(_notiTimer))
+useIntervalFn(loadNotifications, 60 * 1000)
 </script>

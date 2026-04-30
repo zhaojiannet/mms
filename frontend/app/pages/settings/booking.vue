@@ -28,10 +28,7 @@
         </div>
 
         <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
-          <div class="flex items-center gap-2 mb-3">
-            <span class="inline-block w-1 h-4 rounded-full bg-primary-500" />
-            <h3 class="text-base font-medium">预约链接</h3>
-          </div>
+          <SectionTitle class="mb-3">预约链接</SectionTitle>
           <div class="flex items-center gap-2 mb-3">
             <code class="flex-1 px-3 py-2 rounded-md bg-stone-50 dark:bg-stone-950/40 text-xs tabular-nums truncate ring-1 ring-stone-200/60 dark:ring-stone-800">{{ bookingUrl }}</code>
             <UButton variant="soft" size="sm" icon="i-lucide-link" class="shrink-0 active:scale-95 transition-transform" @click="copyUrl">复制</UButton>
@@ -52,8 +49,6 @@
           <UButton icon="i-lucide-refresh-cw" size="sm" :loading="loading" @click="generate">生成预约码</UButton>
         </div>
       </div>
-      <UAlert v-if="msg" :description="msg" color="info" variant="soft" icon="i-lucide-info" class="mt-3" />
-      <UAlert v-if="err" :description="err" color="error" variant="soft" icon="i-lucide-alert-circle" class="mt-3" />
     </div>
   </div>
 </template>
@@ -62,13 +57,12 @@
 import QRCode from 'qrcode'
 
 const api = useApi()
+const toast = useToast()
 const cfg = useRuntimeConfig().public
 const code = ref<string | null>(null)
 const updatedAt = ref<string | null>(null)
 const customCode = ref('')
 const loading = ref(false)
-const msg = ref('')
-const err = ref('')
 const qrDataUrl = ref('')
 
 const bookingUrl = computed(() => {
@@ -92,11 +86,13 @@ async function fetchCode() {
     code.value = row.value
     const ts = await api<{ value: any }>('/api/tenant-settings/booking_code_updated_at').catch(() => null)
     updatedAt.value = ts?.value ?? null
-  } catch {}
+  } catch (e) {
+    console.warn('fetchCode failed', e)
+  }
 }
 
 async function generate() {
-  err.value = ''; msg.value = ''; loading.value = true
+  loading.value = true
   try {
     const body: any = {}
     if (customCode.value) body.code = customCode.value
@@ -106,10 +102,9 @@ async function generate() {
     code.value = res.booking_code
     updatedAt.value = res.updated_at
     customCode.value = ''
-    msg.value = '预约码已更新'
-    setTimeout(() => msg.value = '', 2000)
+    toast.add({ title: '预约码已更新', color: 'success', icon: 'i-lucide-check' })
   } catch (e: any) {
-    err.value = e?.data?.message || '生成失败'
+    toast.add({ title: '生成失败', description: e?.data?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
   } finally { loading.value = false }
 }
 
@@ -117,8 +112,7 @@ async function copyCode() {
   if (!code.value) return
   try {
     await navigator.clipboard.writeText(code.value)
-    msg.value = '预约码已复制'
-    setTimeout(() => msg.value = '', 2000)
+    toast.add({ title: '预约码已复制', color: 'success', icon: 'i-lucide-clipboard-check' })
   } catch {}
 }
 
@@ -126,13 +120,8 @@ async function copyUrl() {
   if (!bookingUrl.value) return
   try {
     await navigator.clipboard.writeText(bookingUrl.value)
-    msg.value = '预约链接已复制'
-    setTimeout(() => msg.value = '', 2000)
+    toast.add({ title: '预约链接已复制', color: 'success', icon: 'i-lucide-clipboard-check' })
   } catch {}
-}
-
-function formatTime(s: string) {
-  return new Date(s).toLocaleString('zh-CN', { hour12: false })
 }
 
 onMounted(fetchCode)
