@@ -116,11 +116,11 @@ func UploadLogo(c *echo.Context) error {
 	closeErr := out.Close()
 	if writeErr != nil {
 		_ = os.Remove(tmpPath)
-		return echo.NewHTTPError(http.StatusInternalServerError, "sanitize: "+writeErr.Error())
+		return mw.InternalError(c, "uploads.sanitize", writeErr)
 	}
 	if closeErr != nil {
 		_ = os.Remove(tmpPath)
-		return echo.NewHTTPError(http.StatusInternalServerError, "close: "+closeErr.Error())
+		return mw.InternalError(c, "uploads.close", closeErr)
 	}
 	if err := os.Rename(tmpPath, outPath); err != nil {
 		_ = os.Remove(tmpPath)

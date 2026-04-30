@@ -3,7 +3,6 @@ package reports
 
 import (
 	"net/http"
-	"strconv"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgtype"
@@ -11,6 +10,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/echox"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -71,7 +71,7 @@ func ServiceRanking(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page, limit, offset := parsePaging(c, 50, 200)
+	page, limit, offset := echox.Paging(c, 50, 200)
 
 	rows, err := sqlc.New(mw.TxFrom(c)).ReportServiceRanking(c.Request().Context(), sqlc.ReportServiceRankingParams{
 		TransactionTime: start, TransactionTime_2: end, Limit: limit, Offset: offset,
@@ -89,7 +89,7 @@ func ServiceRanking(c *echo.Context) error {
 // ================= 3. 沉睡会员（90 天无 sale）=================
 
 func SleepingMembers(c *echo.Context) error {
-	page, limit, offset := parsePaging(c, 50, 200)
+	page, limit, offset := echox.Paging(c, 50, 200)
 	cutoff := time.Now().AddDate(0, 0, -90)
 	rows, err := sqlc.New(mw.TxFrom(c)).ReportSleepingMembers(c.Request().Context(), sqlc.ReportSleepingMembersParams{
 		TransactionTime: pgtype.Timestamptz{Time: cutoff, Valid: true},
@@ -109,7 +109,7 @@ func MemberRanking(c *echo.Context) error {
 	if err != nil {
 		return err
 	}
-	page, limit, offset := parsePaging(c, 50, 200)
+	page, limit, offset := echox.Paging(c, 50, 200)
 	rows, err := sqlc.New(mw.TxFrom(c)).ReportMemberRanking(c.Request().Context(), sqlc.ReportMemberRankingParams{
 		TransactionTime: start, TransactionTime_2: end, Limit: limit, Offset: offset,
 	})
@@ -181,7 +181,7 @@ type PendingStatsSummary struct {
 }
 
 func PendingStats(c *echo.Context) error {
-	page, limit, offset := parsePaging(c, 50, 200)
+	page, limit, offset := echox.Paging(c, 50, 200)
 	ctx := c.Request().Context()
 	q := sqlc.New(mw.TxFrom(c))
 
@@ -235,23 +235,3 @@ func parseDateRange(c *echo.Context) (pgtype.Timestamptz, pgtype.Timestamptz, er
 		pgtype.Timestamptz{Time: end, Valid: true}, nil
 }
 
-func parsePaging(c *echo.Context, def, max int32) (page, limit, offset int32) {
-	page = parseInt32(c.QueryParam("page"), 1, 100000)
-	limit = parseInt32(c.QueryParam("limit"), def, max)
-	offset = (page - 1) * limit
-	return
-}
-
-func parseInt32(s string, def, max int32) int32 {
-	if s == "" {
-		return def
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil || v <= 0 {
-		return def
-	}
-	if int32(v) > max {
-		return max
-	}
-	return int32(v)
-}

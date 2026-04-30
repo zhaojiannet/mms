@@ -129,6 +129,45 @@ func (q *Queries) GetServiceByID(ctx context.Context, id uuid.UUID) (Service, er
 	return i, err
 }
 
+const getServicesByIDs = `-- name: GetServicesByIDs :many
+SELECT id, tenant_id, name, price, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at FROM services WHERE id = ANY($1::uuid[])
+`
+
+// 批量查多个服务（用于 transactions / booking / appointments 创建时一次性校验 + 取价）
+// 返回顺序与入参 ids 顺序无关，调用方自行 build map
+func (q *Queries) GetServicesByIDs(ctx context.Context, ids []uuid.UUID) ([]Service, error) {
+	rows, err := q.db.Query(ctx, getServicesByIDs, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []Service
+	for rows.Next() {
+		var i Service
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.Name,
+			&i.Price,
+			&i.Category,
+			&i.Description,
+			&i.NoDiscount,
+			&i.SortOrder,
+			&i.Status,
+			&i.LegacyID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listServices = `-- name: ListServices :many
 SELECT id, tenant_id, name, price, category, description, no_discount, sort_order, status, legacy_id, created_at, updated_at FROM services
 WHERE status = COALESCE($1::text, status)

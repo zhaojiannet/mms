@@ -11,6 +11,8 @@ import (
 	"github.com/labstack/echo/v5"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -47,11 +49,11 @@ type UpdateStatusRequest struct {
 // List GET /api/appointments?start=&end=&staff_id=&status=
 func List(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
-	start, err := parseTS(c.QueryParam("start_date"))
+	start, err := timex.ParseRFC3339TzStr(c.QueryParam("start_date"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid start_date")
 	}
-	end, err := parseTS(c.QueryParam("end_date"))
+	end, err := timex.ParseRFC3339TzStr(c.QueryParam("end_date"))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid end_date")
 	}
@@ -137,8 +139,8 @@ func Create(c *echo.Context) error {
 		CustomerName:    req.CustomerName,
 		CustomerPhone:   req.CustomerPhone,
 		AppointmentTime: pgtype.Timestamptz{Time: apptTime, Valid: true},
-		MemberID:        optUUID(req.MemberID),
-		AssignedStaffID: optUUID(req.AssignedStaffID),
+		MemberID:        pgtypex.OptUUID(req.MemberID),
+		AssignedStaffID: pgtypex.OptUUID(req.AssignedStaffID),
 		Status:          req.Status,
 		Source:          nil, // 默认 'staff'
 		Notes:           req.Notes,
@@ -147,14 +149,12 @@ func Create(c *echo.Context) error {
 		return mw.InternalError(c, "create: ", err)
 	}
 
-	for _, sid := range req.ServiceIDs {
-		if err := q.AddAppointmentService(ctx, sqlc.AddAppointmentServiceParams{
-			TenantID:      t.ID,
-			AppointmentID: appt.ID,
-			ServiceID:     sid,
-		}); err != nil {
-			return mw.InternalError(c, "add service: ", err)
-		}
+	if err := q.AddAppointmentServicesBulk(ctx, sqlc.AddAppointmentServicesBulkParams{
+		TenantID:      t.ID,
+		AppointmentID: appt.ID,
+		ServiceIds:    req.ServiceIDs,
+	}); err != nil {
+		return mw.InternalError(c, "add services: ", err)
 	}
 
 	return c.JSON(http.StatusCreated, toDTO(appt, req.ServiceIDs))
@@ -249,20 +249,3 @@ func toDTO(a sqlc.Appointment, svcIDs []uuid.UUID) DTO {
 	return dto
 }
 
-func optUUID(p *uuid.UUID) pgtype.UUID {
-	if p == nil || *p == uuid.Nil {
-		return pgtype.UUID{Valid: false}
-	}
-	return pgtype.UUID{Bytes: *p, Valid: true}
-}
-
-func parseTS(s string) (pgtype.Timestamptz, error) {
-	if s == "" {
-		return pgtype.Timestamptz{Valid: false}, nil
-	}
-	t, err := time.Parse(time.RFC3339, s)
-	if err != nil {
-		return pgtype.Timestamptz{}, err
-	}
-	return pgtype.Timestamptz{Time: t, Valid: true}, nil
-}

@@ -46,6 +46,42 @@ func (q *Queries) GetTenantSetting(ctx context.Context, arg GetTenantSettingPara
 	return i, err
 }
 
+const getTenantSettingsByKeys = `-- name: GetTenantSettingsByKeys :many
+SELECT tenant_id, key, value, updated_at FROM tenant_settings
+WHERE tenant_id = $1 AND key = ANY($2::text[])
+`
+
+type GetTenantSettingsByKeysParams struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	Keys     []string  `json:"keys"`
+}
+
+// 批量按 key 取多条 setting，避免连续 N 次 GetTenantSetting 往返
+func (q *Queries) GetTenantSettingsByKeys(ctx context.Context, arg GetTenantSettingsByKeysParams) ([]TenantSetting, error) {
+	rows, err := q.db.Query(ctx, getTenantSettingsByKeys, arg.TenantID, arg.Keys)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []TenantSetting
+	for rows.Next() {
+		var i TenantSetting
+		if err := rows.Scan(
+			&i.TenantID,
+			&i.Key,
+			&i.Value,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listTenantSettings = `-- name: ListTenantSettings :many
 SELECT tenant_id, key, value, updated_at FROM tenant_settings WHERE tenant_id = $1 ORDER BY key
 `

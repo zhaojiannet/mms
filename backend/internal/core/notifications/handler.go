@@ -42,24 +42,18 @@ func List(c *echo.Context) error {
 
 	items := make([]Item, 0, 16)
 	now := time.Now()
-	todayKey := now.Format("01-02")
 
-	// 1. 今日生日（复用 ReportBirthdayReminders 15 天窗口后前端过滤）
-	if births, err := q.ReportBirthdayReminders(ctx); err == nil {
+	// 1. 今日生日：直接用 ReportTodayBirthdays，避免拉 15 天窗口再前端筛
+	if births, err := q.ReportTodayBirthdays(ctx); err == nil {
+		dayStart := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
 		for _, m := range births {
-			if !m.Birthday.Valid {
-				continue
-			}
-			if m.Birthday.Time.Format("01-02") != todayKey {
-				continue
-			}
 			items = append(items, Item{
 				ID:         m.ID.String(),
 				Type:       "birthday",
 				Title:      "会员生日",
 				Summary:    fmt.Sprintf("今天是 %s 的生日", m.Name),
 				Link:       "/members/" + m.ID.String(),
-				OccurredAt: time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()),
+				OccurredAt: dayStart,
 				Read:       false,
 			})
 		}

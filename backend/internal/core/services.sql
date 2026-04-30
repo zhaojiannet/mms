@@ -9,6 +9,11 @@ SELECT count(*) FROM services;
 -- name: GetServiceByID :one
 SELECT * FROM services WHERE id = $1;
 
+-- name: GetServicesByIDs :many
+-- 批量查多个服务（用于 transactions / booking / appointments 创建时一次性校验 + 取价）
+-- 返回顺序与入参 ids 顺序无关，调用方自行 build map
+SELECT * FROM services WHERE id = ANY(sqlc.arg('ids')::uuid[]);
+
 -- name: CreateService :one
 INSERT INTO services (
   tenant_id, name, price, category, description,

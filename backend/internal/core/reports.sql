@@ -76,6 +76,15 @@ WHERE status = 'active'
   )
 ORDER BY to_char(birthday, 'MM-DD');
 
+-- name: ReportTodayBirthdays :many
+-- 今日生日：铃铛通知用，比 15 天窗口少拉 14 天数据
+SELECT id, name, phone, birthday
+FROM members
+WHERE status = 'active'
+  AND birthday IS NOT NULL
+  AND to_char(birthday, 'MM-DD') = to_char(CURRENT_DATE, 'MM-DD')
+ORDER BY name;
+
 -- name: ReportPaymentSummary :many
 SELECT
   pm.id   AS payment_method_id,

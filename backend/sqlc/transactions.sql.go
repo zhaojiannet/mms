@@ -330,6 +330,41 @@ func (q *Queries) LookupTransactionsByIDs(ctx context.Context, dollar_1 []uuid.U
 	return items, nil
 }
 
+const maxTransactionsUpdatedAt = `-- name: MaxTransactionsUpdatedAt :one
+SELECT COALESCE(MAX(updated_at), '1970-01-01 00:00:00+00'::timestamptz)::timestamptz AS max_updated_at
+FROM transactions
+WHERE ($1::timestamptz IS NULL OR transaction_time >= $1::timestamptz)
+  AND ($2::timestamptz   IS NULL OR transaction_time <  $2::timestamptz)
+  AND ($3::text              IS NULL OR kind              =  $3::text)
+  AND (
+    $4::text IS NOT NULL AND status = $4::text
+    OR $4::text IS NULL AND ($5::bool IS TRUE OR status = 'completed')
+  )
+`
+
+type MaxTransactionsUpdatedAtParams struct {
+	StartDate     pgtype.Timestamptz `json:"start_date"`
+	EndDate       pgtype.Timestamptz `json:"end_date"`
+	Kind          *string            `json:"kind"`
+	Status        *string            `json:"status"`
+	IncludeVoided *bool              `json:"include_voided"`
+}
+
+// 给 ETag 用：返回当前 filter 范围内最近一次写入的时间
+// 同 ListTransactions 的 filter 子句保持一致，否则 ETag 会跨 filter 错误命中
+func (q *Queries) MaxTransactionsUpdatedAt(ctx context.Context, arg MaxTransactionsUpdatedAtParams) (pgtype.Timestamptz, error) {
+	row := q.db.QueryRow(ctx, maxTransactionsUpdatedAt,
+		arg.StartDate,
+		arg.EndDate,
+		arg.Kind,
+		arg.Status,
+		arg.IncludeVoided,
+	)
+	var max_updated_at pgtype.Timestamptz
+	err := row.Scan(&max_updated_at)
+	return max_updated_at, err
+}
+
 const voidTransaction = `-- name: VoidTransaction :exec
 UPDATE transactions
 SET status            = 'voided',

@@ -207,30 +207,28 @@ func EnableVoid(c *echo.Context) error {
 
 	ok, verr := auth.VerifyPassword(req.Password, superHash)
 	if verr != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, "verify: "+verr.Error())
+		return mw.InternalError(c, "tenant_settings.verify_super", verr)
 	}
 	if !ok {
 		recordAttempt(key)
 		return echo.NewHTTPError(http.StatusBadRequest, "超级密码错误")
 	}
-	// claims 与 t 已在前面校验使用
-	_ = claims
 
 	// 成功：清计数 + upsert 两条配置
 	clearAttempts(key)
 
 	if err := setBool(ctx, q, t.ID, "enable_transaction_void", true); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.enable_void", err)
 	}
 	nowISO := time.Now().UTC().Format(time.RFC3339)
 	if err := setString(ctx, q, t.ID, "void_enabled_at", &nowISO); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.set_void_at", err)
 	}
 	// 记录开启者 ID：多超管租户时，Void handler 校验 claims.UserID == enabler
 	// 防止 "A 开了 B 趁窗口撤单" 的攻击
 	enablerID := claims.UserID.String()
 	if err := setString(ctx, q, t.ID, "void_enabled_by", &enablerID); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.set_void_by", err)
 	}
 
 	return c.JSON(http.StatusOK, map[string]any{
@@ -246,10 +244,10 @@ func DisableVoid(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
 	ctx := c.Request().Context()
 	if err := setBool(ctx, q, t.ID, "enable_transaction_void", false); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.disable_void", err)
 	}
 	if err := setString(ctx, q, t.ID, "void_enabled_at", nil); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.clear_void_at", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{"enabled": false})
 }
@@ -263,6 +261,7 @@ type BookingCodeRequest struct {
 
 func RegenerateBookingCode(c *echo.Context) error {
 	var req BookingCodeRequest
+	// Bind 失败（无 body / 非法 JSON）按"未传 code"走自动生成分支，是有意 UX
 	_ = c.Bind(&req)
 	var newCode string
 	if req.Code != nil && *req.Code != "" {
@@ -279,11 +278,11 @@ func RegenerateBookingCode(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
 	ctx := c.Request().Context()
 	if err := setString(ctx, q, t.ID, "booking_code", &newCode); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.set_booking_code", err)
 	}
 	nowISO := time.Now().UTC().Format(time.RFC3339)
 	if err := setString(ctx, q, t.ID, "booking_code_updated_at", &nowISO); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.set_booking_updated_at", err)
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"booking_code": newCode,
@@ -304,13 +303,9 @@ func SetSuperPassword(c *echo.Context) error {
 	}
 	ctx := c.Request().Context()
 	t := mw.TenantFrom(c)
-	claims := mw.ClaimsFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 
-	user, err := q.GetUserByID(ctx, claims.UserID)
-	if err != nil {
-		return mw.InternalError(c, "get user: ", err)
-	}
+	user := mw.UserFrom(c)
 	ok, verr := auth.VerifyPassword(req.CurrentPassword, user.PasswordHash)
 	if verr != nil || !ok {
 		return echo.NewHTTPError(http.StatusBadRequest, "当前登录密码不正确")
@@ -321,7 +316,7 @@ func SetSuperPassword(c *echo.Context) error {
 		return mw.InternalError(c, "hash: ", err)
 	}
 	if err := setString(ctx, q, t.ID, "super_password_hash", &hash); err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.set_super_password", err)
 	}
 	return c.NoContent(http.StatusNoContent)
 }
@@ -333,7 +328,7 @@ func SuperPasswordStatus(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
 	hash, err := getSuperPasswordHash(ctx, q, t.ID)
 	if err != nil {
-		return echo.NewHTTPError(http.StatusInternalServerError, err.Error())
+		return mw.InternalError(c, "tenant_settings.get_super_password", err)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"is_set": hash != ""})
 }

@@ -3,10 +3,14 @@
 package transactions
 
 import (
+	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -18,6 +22,9 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/echox"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -116,6 +123,26 @@ func Create(c *echo.Context) error {
 	q := sqlc.New(tx)
 
 	// 1. 查 services + 算 total_amount（总应收，按标价）
+	// 一次性批量取所有 service，避免 N+1：原 for 循环 GetServiceByID
+	if len(req.Items) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "items required")
+	}
+	svcIDs := make([]uuid.UUID, 0, len(req.Items))
+	for _, it := range req.Items {
+		if it.Quantity <= 0 {
+			return echo.NewHTTPError(http.StatusBadRequest, "quantity must be > 0")
+		}
+		svcIDs = append(svcIDs, it.ServiceID)
+	}
+	svcRows, err := q.GetServicesByIDs(ctx, svcIDs)
+	if err != nil {
+		return mw.InternalError(c, "transactions.get_services", err)
+	}
+	svcByID := make(map[uuid.UUID]sqlc.Service, len(svcRows))
+	for _, s := range svcRows {
+		svcByID[s.ID] = s
+	}
+
 	total := decimal.Zero
 	itemRows := make([]struct {
 		svc sqlc.Service
@@ -123,15 +150,9 @@ func Create(c *echo.Context) error {
 	}, 0, len(req.Items))
 	summaryParts := make([]string, 0, len(req.Items))
 	for _, it := range req.Items {
-		if it.Quantity <= 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "quantity must be > 0")
-		}
-		svc, err := q.GetServiceByID(ctx, it.ServiceID)
-		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
-				return echo.NewHTTPError(http.StatusNotFound, "service not found: "+it.ServiceID.String())
-			}
-			return mw.InternalError(c, "get service: ", err)
+		svc, ok := svcByID[it.ServiceID]
+		if !ok {
+			return echo.NewHTTPError(http.StatusNotFound, "service not found: "+it.ServiceID.String())
 		}
 		total = total.Add(svc.Price.Mul(decimal.NewFromInt32(it.Quantity)))
 		itemRows = append(itemRows, struct {
@@ -182,10 +203,10 @@ func Create(c *echo.Context) error {
 	discount := total.Sub(actualPaid)
 
 	// 3. 扣卡前置校验
-	// FOR UPDATE 锁卡行：防并发双扣（POS 双击 / 同一卡在多终端同时开单）
+	// 批量 FOR UPDATE 锁卡：避免 N 张卡 N 次 RTT；ORDER BY id 保证多事务统一加锁顺序，防死锁
 	var primaryCardID *uuid.UUID
 	type allocLine struct {
-		card   sqlc.LockCardForUpdateRow
+		card   sqlc.LockCardsForUpdateRow
 		deduct decimal.Decimal
 	}
 	allocs := make([]allocLine, 0, len(req.CardAllocations))
@@ -193,27 +214,44 @@ func Create(c *echo.Context) error {
 	if req.MemberID != nil {
 		memberIDForCardCheck = *req.MemberID
 	}
-	for i, a := range req.CardAllocations {
-		card, err := q.LockCardForUpdate(ctx, a.CardID)
+
+	if len(req.CardAllocations) > 0 {
+		ids := make([]uuid.UUID, len(req.CardAllocations))
+		for i, a := range req.CardAllocations {
+			ids[i] = a.CardID
+		}
+		// 排序传入也无所谓（PG 端 ORDER BY 也保证），这里冗余排序便于调试日志一致
+		sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
+
+		rows, err := q.LockCardsForUpdate(ctx, ids)
 		if err != nil {
-			if errors.Is(err, pgx.ErrNoRows) {
+			return mw.InternalError(c, "lock cards", err)
+		}
+		cardByID := make(map[uuid.UUID]sqlc.LockCardsForUpdateRow, len(rows))
+		for _, r := range rows {
+			cardByID[r.ID] = r
+		}
+
+		// 按 req 原顺序遍历做业务校验 + 保留 primaryCardID 语义（首张卡）
+		for i, a := range req.CardAllocations {
+			card, ok := cardByID[a.CardID]
+			if !ok {
 				return echo.NewHTTPError(http.StatusNotFound, "card not found: "+a.CardID.String())
 			}
-			return mw.InternalError(c, "get card: ", err)
-		}
-		if memberIDForCardCheck != uuid.Nil && card.MemberID != memberIDForCardCheck {
-			return echo.NewHTTPError(http.StatusBadRequest, "card does not belong to this member")
-		}
-		if card.Status != "active" {
-			return echo.NewHTTPError(http.StatusBadRequest, "card is not active: "+card.Status)
-		}
-		if card.Balance.LessThan(a.Deduct) {
-			return echo.NewHTTPError(http.StatusBadRequest, "insufficient balance on card "+card.CardTypeName)
-		}
-		allocs = append(allocs, allocLine{card, a.Deduct})
-		if i == 0 {
-			id := card.ID
-			primaryCardID = &id
+			if memberIDForCardCheck != uuid.Nil && card.MemberID != memberIDForCardCheck {
+				return echo.NewHTTPError(http.StatusBadRequest, "card does not belong to this member")
+			}
+			if card.Status != "active" {
+				return echo.NewHTTPError(http.StatusBadRequest, "card is not active: "+card.Status)
+			}
+			if card.Balance.LessThan(a.Deduct) {
+				return echo.NewHTTPError(http.StatusBadRequest, "insufficient balance on card "+card.CardTypeName)
+			}
+			allocs = append(allocs, allocLine{card, a.Deduct})
+			if i == 0 {
+				id := card.ID
+				primaryCardID = &id
+			}
 		}
 	}
 	// 多卡时 transactions.card_id 留空（后端靠 card_balance_logs 找关联）
@@ -224,7 +262,7 @@ func Create(c *echo.Context) error {
 	// 4. 构造 summary（如 "剪发、洗发"，最多 3 项，超出省略）
 	summary := joinSummary(summaryParts, 3)
 	notes := req.Notes
-	txTime, err := parseTimestamp(req.TransactionTime)
+	txTime, err := timex.ParseRFC3339Tz(req.TransactionTime)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid transaction_time: "+err.Error())
 	}
@@ -246,13 +284,13 @@ func Create(c *echo.Context) error {
 		PaymentMethodID:  req.PaymentMethodID,
 		TotalAmount:      total,
 		ActualPaidAmount: actualPaid,
-		MemberID:         optUUID(req.MemberID),
+		MemberID:         pgtypex.OptUUID(req.MemberID),
 		CustomerName:     req.CustomerName,
-		StaffID:          optUUID(req.StaffID),
-		CardID:           optUUID(primaryCardID),
+		StaffID:          pgtypex.OptUUID(req.StaffID),
+		CardID:           pgtypex.OptUUID(primaryCardID),
 		DiscountAmount:   decimal.NullDecimal{Decimal: discount, Valid: true},
 		TransactionTime:  txTime,
-		Summary:          strPtr(summary),
+		Summary:          pgtypex.StrPtr(summary),
 		Notes:            notes,
 	})
 	if err != nil {
@@ -306,7 +344,7 @@ func Create(c *echo.Context) error {
 				TenantID:    t.ID,
 				MemberID:    *req.MemberID,
 				Amount:      pendingAmount,
-				Summary:     strPtr(summary),
+				Summary:     pgtypex.StrPtr(summary),
 				ChargedAt:   txTime,
 				ChargedTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 			}); err != nil {
@@ -390,7 +428,7 @@ func IssueCard(c *echo.Context) error {
 		finalRate = *req.FinalDiscountRate
 	}
 
-	expiresAt, err := parseTimestamp(req.ExpiresAt)
+	expiresAt, err := timex.ParseRFC3339Tz(req.ExpiresAt)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid expires_at: "+err.Error())
 	}
@@ -412,7 +450,7 @@ func IssueCard(c *echo.Context) error {
 
 	// 2. 办卡交易
 	summary := fmt.Sprintf("办理【%s %s折】", ct.Name, formatRate(finalRate))
-	txTime, err := parseTimestamp(req.TransactionTime)
+	txTime, err := timex.ParseRFC3339Tz(req.TransactionTime)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid transaction_time: "+err.Error())
 	}
@@ -423,11 +461,11 @@ func IssueCard(c *echo.Context) error {
 		TotalAmount:      finalPrice,
 		ActualPaidAmount: finalPrice,
 		MemberID:         pgtype.UUID{Bytes: memberID, Valid: true},
-		StaffID:          optUUID(req.StaffID),
+		StaffID:          pgtypex.OptUUID(req.StaffID),
 		CardID:           pgtype.UUID{Bytes: card.ID, Valid: true},
 		DiscountAmount:   decimal.NullDecimal{Decimal: decimal.Zero, Valid: true},
 		TransactionTime:  txTime,
-		Summary:          strPtr(summary),
+		Summary:          pgtypex.StrPtr(summary),
 	})
 	if err != nil {
 		return mw.InternalError(c, "create recharge tx: ", err)
@@ -527,7 +565,7 @@ func SettleCredit(c *echo.Context) error {
 		summary = "清账：" + *credit.Summary
 	}
 
-	txTime, err := parseTimestamp(req.TransactionTime)
+	txTime, err := timex.ParseRFC3339Tz(req.TransactionTime)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid transaction_time: "+err.Error())
 	}
@@ -541,7 +579,7 @@ func SettleCredit(c *echo.Context) error {
 		MemberID:         pgtype.UUID{Bytes: memberID, Valid: true},
 		CardID:           primaryCardID,
 		TransactionTime:  txTime,
-		Summary:          strPtr(summary),
+		Summary:          pgtypex.StrPtr(summary),
 	})
 	if err != nil {
 		return mw.InternalError(c, "create settle tx: ", err)
@@ -565,7 +603,7 @@ func SettleCredit(c *echo.Context) error {
 			BalanceBefore: cardBefore,
 			BalanceAfter:  cardAfter,
 			TransactionID: pgtype.UUID{Bytes: trx.ID, Valid: true},
-			Note:          strPtr("clear pending credit"),
+			Note:          pgtypex.StrPtr("clear pending credit"),
 		}); err != nil {
 			return mw.InternalError(c, "log balance: ", err)
 		}
@@ -583,6 +621,49 @@ func SettleCredit(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, toDTO(trx))
 }
 
+// buildListETag 把 filter 指纹 + max(updated_at) + 分页 hash 成弱 ETag
+//
+// filter 任意一项变 → ETag 变（避免不同 filter 共用旧 304）
+// 范围内有任何写入 → max_updated_at 变 → ETag 变
+func buildListETag(
+	start, end pgtype.Timestamptz,
+	kind, status *string,
+	includeVoided *bool,
+	page, limit int32,
+	maxUpdatedAt pgtype.Timestamptz,
+) string {
+	var b strings.Builder
+	if start.Valid {
+		b.WriteString(start.Time.UTC().Format(time.RFC3339Nano))
+	}
+	b.WriteByte('|')
+	if end.Valid {
+		b.WriteString(end.Time.UTC().Format(time.RFC3339Nano))
+	}
+	b.WriteByte('|')
+	if kind != nil {
+		b.WriteString(*kind)
+	}
+	b.WriteByte('|')
+	if status != nil {
+		b.WriteString(*status)
+	}
+	b.WriteByte('|')
+	if includeVoided != nil && *includeVoided {
+		b.WriteByte('1')
+	}
+	b.WriteByte('|')
+	b.WriteString(strconv.Itoa(int(page)))
+	b.WriteByte('|')
+	b.WriteString(strconv.Itoa(int(limit)))
+	b.WriteByte('|')
+	if maxUpdatedAt.Valid {
+		b.WriteString(strconv.FormatInt(maxUpdatedAt.Time.UnixNano(), 10))
+	}
+	sum := sha256.Sum256([]byte(b.String()))
+	return `W/"` + hex.EncodeToString(sum[:16]) + `"`
+}
+
 // ============ GET /api/transactions ============
 
 type ListResponse struct {
@@ -596,15 +677,15 @@ func List(c *echo.Context) error {
 	ctx := c.Request().Context()
 	q := sqlc.New(mw.TxFrom(c))
 
-	limit := parseInt32(c.QueryParam("limit"), 50, 200)
-	page := parseInt32(c.QueryParam("page"), 1, 100000)
+	limit := echox.ParseInt32(c.QueryParam("limit"), 50, 200)
+	page := echox.ParseInt32(c.QueryParam("page"), 1, 100000)
 	offset := (page - 1) * limit
 
-	start, err := parseTimestamp(strPtrOrNil(c.QueryParam("start_date")))
+	start, err := timex.ParseRFC3339Tz(pgtypex.StrPtr(c.QueryParam("start_date")))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid start_date")
 	}
-	end, err := parseTimestamp(strPtrOrNil(c.QueryParam("end_date")))
+	end, err := timex.ParseRFC3339Tz(pgtypex.StrPtr(c.QueryParam("end_date")))
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid end_date")
 	}
@@ -639,6 +720,25 @@ func List(c *echo.Context) error {
 			limit = 50
 		}
 	}
+
+	// ETag：filter 指纹 + 当前 filter 范围的 MAX(updated_at) + page/limit
+	// 命中 If-None-Match → 304，避开主查询 + JSON marshal 开销（POS 60s 轮询时大幅省带宽）
+	maxUpdatedAt, err := q.MaxTransactionsUpdatedAt(ctx, sqlc.MaxTransactionsUpdatedAtParams{
+		StartDate:     start,
+		EndDate:       end,
+		Kind:          kind,
+		IncludeVoided: includeVoided,
+		Status:        status,
+	})
+	if err != nil {
+		return mw.InternalError(c, "list.max_updated_at", err)
+	}
+	etag := buildListETag(start, end, kind, status, includeVoided, page, limit, maxUpdatedAt)
+	if match := c.Request().Header.Get("If-None-Match"); match != "" && match == etag {
+		c.Response().Header().Set("ETag", etag)
+		return c.NoContent(http.StatusNotModified)
+	}
+	c.Response().Header().Set("ETag", etag)
 
 	rows, err := q.ListTransactions(ctx, sqlc.ListTransactionsParams{
 		Limit:         limit,
@@ -788,52 +888,6 @@ func toDTO(m sqlc.Transaction) DTO {
 		dto.VoidReason = m.VoidReason
 	}
 	return dto
-}
-
-func optUUID(p *uuid.UUID) pgtype.UUID {
-	if p == nil || *p == uuid.Nil {
-		return pgtype.UUID{Valid: false}
-	}
-	return pgtype.UUID{Bytes: *p, Valid: true}
-}
-
-func strPtr(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func strPtrOrNil(s string) *string {
-	if s == "" {
-		return nil
-	}
-	return &s
-}
-
-func parseTimestamp(s *string) (pgtype.Timestamptz, error) {
-	if s == nil || *s == "" {
-		return pgtype.Timestamptz{Valid: false}, nil
-	}
-	t, err := time.Parse(time.RFC3339, *s)
-	if err != nil {
-		return pgtype.Timestamptz{}, err
-	}
-	return pgtype.Timestamptz{Time: t, Valid: true}, nil
-}
-
-func parseInt32(s string, def, max int32) int32 {
-	if s == "" {
-		return def
-	}
-	v, err := strconv.Atoi(s)
-	if err != nil || v <= 0 {
-		return def
-	}
-	if int32(v) > max {
-		return max
-	}
-	return int32(v)
 }
 
 func joinSummary(parts []string, maxN int) string {

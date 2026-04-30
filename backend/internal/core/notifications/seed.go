@@ -13,7 +13,10 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
 //go:embed announcements.json
@@ -37,21 +40,19 @@ func SeedAnnouncements(ctx context.Context, pool *pgxpool.Pool) {
 		return
 	}
 
+	q := sqlc.New(pool)
 	for _, e := range entries {
 		if e.Version == "" {
 			continue
 		}
-		_, err := pool.Exec(ctx, `
-			INSERT INTO system_announcements
-				(version, type, title, summary, body_markdown, published_at)
-			VALUES ($1, $2, $3, $4, $5, $6)
-			ON CONFLICT (version) DO UPDATE SET
-				type          = EXCLUDED.type,
-				title         = EXCLUDED.title,
-				summary       = EXCLUDED.summary,
-				body_markdown = EXCLUDED.body_markdown,
-				published_at  = EXCLUDED.published_at
-		`, e.Version, e.Type, e.Title, e.Summary, e.BodyMarkdown, e.PublishedAt)
+		err := q.UpsertSystemAnnouncement(ctx, sqlc.UpsertSystemAnnouncementParams{
+			Version:      e.Version,
+			Type:         e.Type,
+			Title:        e.Title,
+			Summary:      e.Summary,
+			BodyMarkdown: e.BodyMarkdown,
+			PublishedAt:  pgtype.Timestamptz{Time: e.PublishedAt, Valid: true},
+		})
 		if err != nil {
 			slog.Warn("seed announcement failed", "version", e.Version, "err", err)
 			continue

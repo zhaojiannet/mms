@@ -485,3 +485,45 @@ func (q *Queries) ReportSleepingMembers(ctx context.Context, arg ReportSleepingM
 	}
 	return items, nil
 }
+
+const reportTodayBirthdays = `-- name: ReportTodayBirthdays :many
+SELECT id, name, phone, birthday
+FROM members
+WHERE status = 'active'
+  AND birthday IS NOT NULL
+  AND to_char(birthday, 'MM-DD') = to_char(CURRENT_DATE, 'MM-DD')
+ORDER BY name
+`
+
+type ReportTodayBirthdaysRow struct {
+	ID       uuid.UUID   `json:"id"`
+	Name     string      `json:"name"`
+	Phone    *string     `json:"phone"`
+	Birthday pgtype.Date `json:"birthday"`
+}
+
+// 今日生日：铃铛通知用，比 15 天窗口少拉 14 天数据
+func (q *Queries) ReportTodayBirthdays(ctx context.Context) ([]ReportTodayBirthdaysRow, error) {
+	rows, err := q.db.Query(ctx, reportTodayBirthdays)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ReportTodayBirthdaysRow
+	for rows.Next() {
+		var i ReportTodayBirthdaysRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Name,
+			&i.Phone,
+			&i.Birthday,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
