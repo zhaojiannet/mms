@@ -124,18 +124,6 @@ docker compose up -d
 
 **当前版本未实现**，规划中。已有"顶部铃铛 + 站内通知"作为替代。
 
-## 生产部署（1Panel）
-
-推荐用 [1Panel](https://1panel.cn/) 管理：
-
-1. 1Panel 应用商店装 OpenResty
-2. 在 1Panel "网站" 新建反向代理站点：
-   - 域名：`vip.zhaojian.net` → 反代到 `127.0.0.1:3001`（Nuxt 前端）
-   - 通配域名：`*.vip.zhaojian.net` → 同上（前端按 Host 解析 tenant slug）
-   - API 子域：`api.vip.zhaojian.net` → 反代到 `127.0.0.1:8081`（Go 后端）
-3. 1Panel "证书" 申请 Let's Encrypt 通配符证书，自动续期
-4. 1Panel "容器"里跑 docker-compose（backend + frontend，PG 复用全局 `postgres-server`）
-
 ## 开发
 
 ```bash
