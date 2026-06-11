@@ -18,9 +18,10 @@ SELECT count(*) FROM transactions
 WHERE ($1::timestamptz IS NULL OR transaction_time >= $1::timestamptz)
   AND ($2::timestamptz   IS NULL OR transaction_time <  $2::timestamptz)
   AND ($3::text              IS NULL OR kind              =  $3::text)
+  AND ($4::uuid         IS NULL OR member_id        =  $4::uuid)
   AND (
-    $4::text IS NOT NULL AND status = $4::text
-    OR $4::text IS NULL AND ($5::bool IS TRUE OR status = 'completed')
+    $5::text IS NOT NULL AND status = $5::text
+    OR $5::text IS NULL AND ($6::bool IS TRUE OR status = 'completed')
   )
 `
 
@@ -28,6 +29,7 @@ type CountTransactionsByParams struct {
 	StartDate     pgtype.Timestamptz `json:"start_date"`
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
+	MemberID      pgtype.UUID        `json:"member_id"`
 	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
@@ -37,6 +39,7 @@ func (q *Queries) CountTransactionsBy(ctx context.Context, arg CountTransactions
 		arg.StartDate,
 		arg.EndDate,
 		arg.Kind,
+		arg.MemberID,
 		arg.Status,
 		arg.IncludeVoided,
 	)
@@ -176,9 +179,10 @@ LEFT JOIN card_types ct ON ct.id = c.card_type_id
 WHERE ($3::timestamptz IS NULL OR t.transaction_time >= $3::timestamptz)
   AND ($4::timestamptz   IS NULL OR t.transaction_time <  $4::timestamptz)
   AND ($5::text              IS NULL OR t.kind             =  $5::text)
+  AND ($6::uuid         IS NULL OR t.member_id       =  $6::uuid)
   AND (
-    $6::text IS NOT NULL AND t.status = $6::text
-    OR $6::text IS NULL AND ($7::bool IS TRUE OR t.status = 'completed')
+    $7::text IS NOT NULL AND t.status = $7::text
+    OR $7::text IS NULL AND ($8::bool IS TRUE OR t.status = 'completed')
   )
 ORDER BY t.transaction_time DESC, t.id DESC
 LIMIT $1 OFFSET $2
@@ -190,6 +194,7 @@ type ListTransactionsParams struct {
 	StartDate     pgtype.Timestamptz `json:"start_date"`
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
+	MemberID      pgtype.UUID        `json:"member_id"`
 	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
@@ -212,6 +217,7 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 		arg.StartDate,
 		arg.EndDate,
 		arg.Kind,
+		arg.MemberID,
 		arg.Status,
 		arg.IncludeVoided,
 	)
@@ -336,9 +342,10 @@ FROM transactions
 WHERE ($1::timestamptz IS NULL OR transaction_time >= $1::timestamptz)
   AND ($2::timestamptz   IS NULL OR transaction_time <  $2::timestamptz)
   AND ($3::text              IS NULL OR kind              =  $3::text)
+  AND ($4::uuid         IS NULL OR member_id        =  $4::uuid)
   AND (
-    $4::text IS NOT NULL AND status = $4::text
-    OR $4::text IS NULL AND ($5::bool IS TRUE OR status = 'completed')
+    $5::text IS NOT NULL AND status = $5::text
+    OR $5::text IS NULL AND ($6::bool IS TRUE OR status = 'completed')
   )
 `
 
@@ -346,6 +353,7 @@ type MaxTransactionsUpdatedAtParams struct {
 	StartDate     pgtype.Timestamptz `json:"start_date"`
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
+	MemberID      pgtype.UUID        `json:"member_id"`
 	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
@@ -357,6 +365,7 @@ func (q *Queries) MaxTransactionsUpdatedAt(ctx context.Context, arg MaxTransacti
 		arg.StartDate,
 		arg.EndDate,
 		arg.Kind,
+		arg.MemberID,
 		arg.Status,
 		arg.IncludeVoided,
 	)

@@ -163,7 +163,17 @@ func Get(c *echo.Context) error {
 		}
 		return mw.InternalError(c, "get member: ", err)
 	}
-	return c.JSON(http.StatusOK, toDTO(m))
+	dto := toDTO(m)
+	// POS 经 ?member= 入口直接用详情接口的余额/挂账，必须是真实聚合而非占位 0
+	stats, err := q.GetMemberStats(c.Request().Context(), id)
+	if err != nil {
+		return mw.InternalError(c, "get member stats: ", err)
+	}
+	dto.TotalBalance = stats.TotalBalance.String()
+	dto.TotalPending = stats.TotalPending.String()
+	dto.CardCount = stats.CardCount
+	dto.ActiveCardCount = stats.ActiveCardCount
+	return c.JSON(http.StatusOK, dto)
 }
 
 // Update PUT /api/members/:id
@@ -215,9 +225,32 @@ func Delete(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid id")
 	}
+	ctx := c.Request().Context()
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
-	if err := q.DeleteMember(c.Request().Context(), id); err != nil {
+
+	// 有资金痕迹的会员只能停用不能删：cards.member_id 是 ON DELETE CASCADE，
+	// 物理删除会连带删卡，进而触碰资金流水（00031 起 RESTRICT 会直接报 FK 错）
+	cards, err := q.ListCardsByMember(ctx, id)
+	if err != nil {
+		return mw.InternalError(c, "delete member.check_cards: ", err)
+	}
+	if len(cards) > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "该会员名下有会员卡，不能删除，建议改为停用")
+	}
+	includeVoided := true
+	txCount, err := q.CountTransactionsBy(ctx, sqlc.CountTransactionsByParams{
+		MemberID:      pgtype.UUID{Bytes: id, Valid: true},
+		IncludeVoided: &includeVoided,
+	})
+	if err != nil {
+		return mw.InternalError(c, "delete member.check_tx: ", err)
+	}
+	if txCount > 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "该会员有交易记录，不能删除，建议改为停用")
+	}
+
+	if err := q.DeleteMember(ctx, id); err != nil {
 		return mw.InternalError(c, "delete member: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
