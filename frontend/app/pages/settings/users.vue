@@ -6,7 +6,7 @@
     </div>
 
     <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
-      <table class="w-full min-w-[640px] text-base">
+      <table class="w-full min-w-[640px] text-sm">
         <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
           <tr>
             <th class="text-left px-4 py-3 font-medium">姓名</th>
@@ -20,12 +20,12 @@
         <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
           <tr v-for="u in items" :key="u.id" class="hover:bg-stone-50/60 dark:hover:bg-stone-800/40">
             <td class="px-4 py-3 font-medium">{{ u.name }}</td>
-            <td class="px-4 py-3 text-stone-600 tabular-nums">{{ u.email }}</td>
+            <td class="px-4 py-3 text-stone-600 dark:text-stone-400 tabular-nums">{{ u.email }}</td>
             <td class="px-4 py-3 text-center">
-              <UBadge :label="roleLabel(u.role)" :color="roleColor(u.role)" variant="soft" size="sm" />
+              <UBadge :label="roleLabel(u.role)" :color="roleColor(u.role)" variant="soft" size="md" />
             </td>
             <td class="px-4 py-3 text-center">
-              <UBadge :label="u.status === 'active' ? '启用' : '停用'" :color="u.status === 'active' ? 'success' : 'neutral'" variant="soft" size="sm" />
+              <UBadge :label="u.status === 'active' ? '启用' : '停用'" :color="u.status === 'active' ? 'success' : 'neutral'" variant="soft" size="md" />
             </td>
             <td class="px-4 py-3 text-stone-500 text-sm tabular-nums">
               {{ u.last_login_at ? formatTime(u.last_login_at) : '—' }}

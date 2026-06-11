@@ -6,7 +6,7 @@
     </div>
 
     <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
-      <table class="w-full min-w-[520px] text-base">
+      <table class="w-full min-w-[520px] text-sm">
         <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
           <tr>
             <th class="text-left px-4 py-3 font-medium">名称</th>
@@ -20,7 +20,7 @@
             <td class="px-4 py-3 font-medium">{{ m.name }}</td>
             <td class="px-4 py-3 text-center text-stone-500 tabular-nums">{{ m.sort_order }}</td>
             <td class="px-4 py-3 text-center">
-              <UBadge :label="m.is_active ? '启用' : '停用'" :color="m.is_active ? 'success' : 'neutral'" variant="soft" size="sm" />
+              <UBadge :label="m.is_active ? '启用' : '停用'" :color="m.is_active ? 'success' : 'neutral'" variant="soft" size="md" />
             </td>
             <td class="px-4 py-3 text-right">
               <RowActions @edit="openEdit(m)" @delete="confirmDelete(m)" />

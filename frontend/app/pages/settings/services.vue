@@ -9,7 +9,7 @@
       v-if="!loading && items.length > 0"
       class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto"
     >
-      <table class="w-full min-w-[640px] text-base">
+      <table class="w-full min-w-[640px] text-sm">
         <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
           <tr>
             <th class="text-left px-4 py-3 font-medium">名称</th>
@@ -25,12 +25,12 @@
             <td class="px-4 py-3 font-medium">{{ s.name }}</td>
             <td class="px-4 py-3 text-right tabular-nums">¥{{ s.price }}</td>
             <td class="px-4 py-3 text-center">
-              <UBadge v-if="s.no_discount" label="不打折" color="warning" variant="soft" size="sm" />
+              <UBadge v-if="s.no_discount" label="不打折" color="warning" variant="soft" size="md" />
               <span v-else class="text-stone-400">—</span>
             </td>
             <td class="px-4 py-3 text-center text-stone-500 tabular-nums text-sm">{{ s.sort_order }}</td>
             <td class="px-4 py-3 text-center">
-              <UBadge :label="s.status === 'active' ? '上架' : '下架'" :color="s.status === 'active' ? 'success' : 'neutral'" variant="soft" size="sm" />
+              <UBadge :label="s.status === 'active' ? '上架' : '下架'" :color="s.status === 'active' ? 'success' : 'neutral'" variant="soft" size="md" />
             </td>
             <td class="px-4 py-3 text-right">
               <RowActions @edit="openEdit(s)" @delete="confirmDelete(s)" />

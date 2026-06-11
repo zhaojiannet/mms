@@ -6,14 +6,12 @@
     </div>
 
     <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
-      <table class="w-full min-w-[720px] text-base">
+      <table class="w-full min-w-[640px] text-sm">
         <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
           <tr>
             <th class="text-left px-4 py-3 font-medium">姓名</th>
             <th class="text-left px-4 py-3 font-medium">职位</th>
             <th class="text-left px-4 py-3 font-medium">手机</th>
-            <th class="text-center px-4 py-3 font-medium">计提</th>
-            <th class="text-center px-4 py-3 font-medium">提成率</th>
             <th class="text-center px-4 py-3 font-medium">排序</th>
             <th class="text-center px-4 py-3 font-medium">状态</th>
             <th class="text-right px-4 py-3 font-medium">操作</th>
@@ -24,21 +22,9 @@
             <td class="px-4 py-3 font-medium">{{ s.name }}</td>
             <td class="px-4 py-3 text-stone-600 dark:text-stone-400">{{ s.position }}</td>
             <td class="px-4 py-3 text-stone-500 tabular-nums">{{ s.phone || '—' }}</td>
-            <td class="px-4 py-3 text-center">
-              <UBadge
-                :label="s.counts_commission ? '计' : '不计'"
-                :color="s.counts_commission ? 'success' : 'neutral'"
-                variant="soft"
-                size="sm"
-              />
-            </td>
-            <td class="px-4 py-3 text-center text-sm tabular-nums">
-              <span v-if="s.counts_commission">{{ (parseFloat(s.default_commission_rate) * 100).toFixed(1) }}%</span>
-              <span v-else class="text-stone-400">—</span>
-            </td>
             <td class="px-4 py-3 text-center text-stone-500 tabular-nums text-sm">{{ s.sort_order }}</td>
             <td class="px-4 py-3 text-center">
-              <UBadge :label="s.status === 'active' ? '在职' : '离职'" :color="s.status === 'active' ? 'success' : 'neutral'" variant="soft" size="sm" />
+              <UBadge :label="s.status === 'active' ? '在职' : '离职'" :color="s.status === 'active' ? 'success' : 'neutral'" variant="soft" size="md" />
             </td>
             <td class="px-4 py-3 text-right">
               <RowActions @edit="openEdit(s)" @delete="confirmDelete(s)" />
@@ -73,22 +59,10 @@
             </div>
           </div>
 
-          <!-- 提成 + 状态：一行两列 -->
-          <div class="grid gap-4" :class="editingId ? 'grid-cols-2' : 'grid-cols-1'">
-            <!-- 提成 -->
-            <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900 space-y-3">
-              <SectionTitle>提成</SectionTitle>
-              <UCheckbox v-model="form.counts_commission" label="参与提成核算" />
-              <UFormField v-if="form.counts_commission" label="默认提成率" help="小数表示，如 0.5 = 5 成 / 50%">
-                <UInput v-model="form.default_commission_rate" type="number" step="0.01" min="0" max="1" placeholder="0.5" size="md" class="w-full" />
-              </UFormField>
-            </div>
-
-            <!-- 状态（仅编辑） -->
-            <div v-if="editingId" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900 space-y-3">
-              <SectionTitle>状态</SectionTitle>
-              <URadioGroup v-model="form.status" :items="[{label:'在职', value:'active'},{label:'离职', value:'inactive'}]" orientation="horizontal" />
-            </div>
+          <!-- 状态（仅编辑） -->
+          <div v-if="editingId" class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900 space-y-3">
+            <SectionTitle>状态</SectionTitle>
+            <URadioGroup v-model="form.status" :items="[{label:'在职', value:'active'},{label:'离职', value:'inactive'}]" orientation="horizontal" />
           </div>
 
           <UAlert v-if="formError" :description="formError" color="error" variant="soft" icon="i-lucide-alert-circle" />
@@ -112,10 +86,12 @@
 </template>
 
 <script setup lang="ts">
+// 后端仍有 counts_commission / default_commission_rate 字段（可选入参），
+// 提成核算链路尚未实现，前端不收集不展示，避免给出不存在的功能预期
 interface Staff {
   id: string; name: string; position: string; phone: string | null
   status: 'active' | 'inactive'
-  counts_commission: boolean; default_commission_rate: string; sort_order: number
+  sort_order: number
 }
 
 const {
@@ -127,21 +103,17 @@ const {
 
 const form = reactive({
   name: '', position: '', phone: '',
-  counts_commission: true, default_commission_rate: '0',
   sort_order: 99, status: 'active' as 'active' | 'inactive',
 })
 
 function resetForm() {
   form.name = ''; form.position = ''; form.phone = ''
-  form.counts_commission = true; form.default_commission_rate = '0'
   form.sort_order = 99; form.status = 'active'
 }
 const onOpenCreate = () => { resetForm(); openCreate() }
 function openEdit(s: Staff) {
   form.name = s.name; form.position = s.position
   form.phone = s.phone ?? ''
-  form.counts_commission = s.counts_commission
-  form.default_commission_rate = s.default_commission_rate
   form.sort_order = s.sort_order; form.status = s.status
   baseOpenEdit(s)
 }
@@ -150,8 +122,6 @@ async function onSubmit() {
   const body: Record<string, unknown> = {
     name: form.name, position: form.position,
     phone: form.phone || null,
-    counts_commission: form.counts_commission,
-    default_commission_rate: parseFloat(form.default_commission_rate) || 0,
     sort_order: Number(form.sort_order) || 99,
   }
   if (editingId.value) body.status = form.status

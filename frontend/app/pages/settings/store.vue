@@ -85,7 +85,7 @@
           </div>
           <div
             v-if="current === t.key"
-            class="absolute top-2 right-2 size-6 rounded-full bg-primary-500 text-white flex items-center justify-center shadow"
+            class="absolute top-2 right-2 size-6 rounded-full bg-primary-500 text-white flex items-center justify-center shadow-sm"
           >
             <UIcon name="i-lucide-check" class="size-3.5" />
           </div>

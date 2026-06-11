@@ -32,7 +32,7 @@
               </td>
               <td class="px-4 py-2">
                 <span class="inline-flex items-center gap-1.5">
-                  <UBadge :label="d.methodLabel" :color="d.methodColor" variant="soft" size="sm" />
+                  <UBadge :label="d.methodLabel" :color="d.methodColor" variant="soft" size="md" />
                   <span class="truncate">{{ d.actionLabel }}</span>
                 </span>
               </td>
@@ -47,7 +47,7 @@
                 <UBadge
                   :label="d.outcome === 'ok' ? '成功' : '失败'"
                   :color="d.outcome === 'ok' ? 'success' : 'error'"
-                  variant="soft" size="sm"
+                  variant="soft" size="md"
                 />
               </td>
               <td class="px-4 py-2 text-stone-500 tabular-nums text-xs">{{ d.raw.ip_address || '—' }}</td>
@@ -157,11 +157,11 @@ const actionMap: Record<string, string> = {
   'POST /api/members':                              '新建会员',
   'PUT /api/members/:id':                           '编辑会员',
   'DELETE /api/members/:id':                        '删除会员',
-  // 会员卡
-  'POST /api/members/:id/cards':                    '办卡',
+  // 会员卡（前 3 个端点已从后端移除，标签保留仅为回看历史日志）
+  'POST /api/members/:id/cards':                    '办卡（已废弃端点）',
+  'PUT /api/cards/:id':                             '编辑会员卡（已废弃端点）',
+  'DELETE /api/cards/:id':                          '删除会员卡（已废弃端点）',
   'POST /api/members/:id/cards/with-transaction':   '办卡并收款',
-  'PUT /api/cards/:id':                             '编辑会员卡',
-  'DELETE /api/cards/:id':                          '删除会员卡',
   // 挂账
   'POST /api/members/:id/pending':                  '新增挂账',
   'DELETE /api/members/:id/pending/:id':            '撤消挂账',

@@ -118,10 +118,15 @@
         <tbody>
           <tr v-for="v in voidItems" :key="v.id" class="border-t border-stone-100 dark:border-stone-800/60 even:bg-stone-50/40 dark:even:bg-stone-950/30 hover:bg-primary-50/30 dark:hover:bg-primary-950/10 transition-colors">
             <td class="px-4 py-2 text-stone-500 tabular-nums whitespace-nowrap">{{ formatTime(v.voided_at || v.transaction_time) }}</td>
-            <td class="px-4 py-2"><UBadge :label="kindLabel(v.kind)" size="sm" variant="soft" color="neutral" /></td>
+            <td class="px-4 py-2"><UBadge :label="kindLabel(v.kind)" size="md" variant="soft" color="neutral" /></td>
             <td class="px-4 py-2">{{ v.member_name || '—' }}</td>
             <td class="px-4 py-2 text-right tabular-nums font-medium">¥{{ v.actual_paid_amount }}</td>
-            <td class="px-4 py-2 text-stone-500 truncate max-w-64" :title="v.void_reason || ''">{{ v.void_reason || '—' }}</td>
+            <td class="px-4 py-2 text-stone-500">
+              <UTooltip v-if="v.void_reason" :text="v.void_reason" :delay-duration="200" :ui="{ content: 'max-w-xs whitespace-normal' }">
+                <span class="block truncate max-w-64">{{ v.void_reason }}</span>
+              </UTooltip>
+              <span v-else>—</span>
+            </td>
             <td class="px-4 py-2 text-stone-500">{{ v.voided_by_name || '—' }}</td>
           </tr>
         </tbody>

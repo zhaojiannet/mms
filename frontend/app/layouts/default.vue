@@ -43,16 +43,7 @@
         </div>
       </header>
 
-      <main
-        class="flex-1 overflow-y-auto
-               [&::-webkit-scrollbar]:w-1.5
-               [&::-webkit-scrollbar-track]:bg-transparent
-               [&::-webkit-scrollbar-thumb]:bg-stone-300/70
-               [&::-webkit-scrollbar-thumb]:rounded-full
-               hover:[&::-webkit-scrollbar-thumb]:bg-stone-400
-               dark:[&::-webkit-scrollbar-thumb]:bg-stone-700/70
-               dark:hover:[&::-webkit-scrollbar-thumb]:bg-stone-600"
-      >
+      <main class="flex-1 overflow-y-auto">
         <slot />
       </main>
     </div>
