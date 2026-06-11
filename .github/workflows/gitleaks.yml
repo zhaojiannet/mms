@@ -1,0 +1,22 @@
+# 密钥泄露扫描：全历史 + 每日定时（新检测规则可追溯旧提交）
+# 配置自动读取仓库根 .gitleaks.toml
+name: gitleaks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 4 * * *"
+
+jobs:
+  scan:
+    name: gitleaks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+      - uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
