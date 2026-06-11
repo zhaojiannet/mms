@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
+	"github.com/zhaojiannet/mms/backend/internal/platform/events"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
@@ -129,10 +130,41 @@ func Create(c *echo.Context) error {
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid appointment_time: "+err.Error())
 	}
+	// 创建只允许排程态：completed/cancelled 属状态变更，走 adminAndAbove 的
+	// PATCH /appointments/:id/status，否则 staff 可绕过该守卫直接建"已完成"预约
+	if req.Status != nil && *req.Status != "" && *req.Status != "pending" && *req.Status != "confirmed" {
+		return echo.NewHTTPError(http.StatusBadRequest, "status 只能是 pending 或 confirmed")
+	}
 
 	ctx := c.Request().Context()
 	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
+
+	// 归属校验走 RLS 范围内的 SELECT：FK 检查不受 RLS 约束，
+	// 跨租户 UUID 能通过 FK 但查不到行 → 这里报 400
+	if req.MemberID != nil {
+		if _, err := q.GetMemberByID(ctx, *req.MemberID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusBadRequest, "member not found")
+			}
+			return mw.InternalError(c, "check member: ", err)
+		}
+	}
+	if req.AssignedStaffID != nil {
+		if _, err := q.GetStaffByID(ctx, *req.AssignedStaffID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusBadRequest, "staff not found")
+			}
+			return mw.InternalError(c, "check staff: ", err)
+		}
+	}
+	svcRows, err := q.GetServicesByIDs(ctx, req.ServiceIDs)
+	if err != nil {
+		return mw.InternalError(c, "check services: ", err)
+	}
+	if len(svcRows) != len(uniqueIDs(req.ServiceIDs)) {
+		return echo.NewHTTPError(http.StatusBadRequest, "所选服务不存在")
+	}
 
 	appt, err := q.CreateAppointment(ctx, sqlc.CreateAppointmentParams{
 		TenantID:        t.ID,
@@ -157,7 +189,25 @@ func Create(c *echo.Context) error {
 		return mw.InternalError(c, "add services: ", err)
 	}
 
+	events.DefaultBus.Publish(events.TopicAppointmentCreated, map[string]any{
+		"appointment_id": appt.ID, "tenant_id": t.ID, "source": "staff",
+	})
+
 	return c.JSON(http.StatusCreated, toDTO(appt, req.ServiceIDs))
+}
+
+// uniqueIDs 去重（入参允许重复 service_id，与 AddAppointmentServicesBulk 的 ON CONFLICT 行为一致）
+func uniqueIDs(ids []uuid.UUID) []uuid.UUID {
+	seen := make(map[uuid.UUID]struct{}, len(ids))
+	out := make([]uuid.UUID, 0, len(ids))
+	for _, id := range ids {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		out = append(out, id)
+	}
+	return out
 }
 
 // UpdateStatus PATCH /api/appointments/:id/status
@@ -170,8 +220,12 @@ func UpdateStatus(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
 	}
-	if req.Status == "" {
+	switch req.Status {
+	case "pending", "confirmed", "completed", "cancelled", "no_show":
+	case "":
 		return echo.NewHTTPError(http.StatusBadRequest, "status required")
+	default:
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid status: "+req.Status)
 	}
 
 	q := sqlc.New(mw.TxFrom(c))
