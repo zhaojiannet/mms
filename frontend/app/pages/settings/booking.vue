@@ -3,7 +3,7 @@
     <div class="p-6 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs">
       <h2 class="text-base font-medium mb-2">公开预约码</h2>
       <p class="text-sm text-stone-500 mb-4">
-        生成预约码分享给客人，访问 <code class="px-1 py-0.5 rounded bg-stone-100 dark:bg-stone-800 text-xs">/b/预约码</code> 或扫码即可在线预约。
+        生成预约码分享给客人，访问 <code class="px-1 py-0.5 rounded-sm bg-stone-100 dark:bg-stone-800 text-xs">/b/预约码</code> 或扫码即可在线预约。
       </p>
 
       <div v-if="code" class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -58,7 +58,6 @@ import QRCode from 'qrcode'
 
 const api = useApi()
 const toast = useToast()
-const cfg = useRuntimeConfig().public
 const code = ref<string | null>(null)
 const updatedAt = ref<string | null>(null)
 const customCode = ref('')
@@ -67,8 +66,8 @@ const qrDataUrl = ref('')
 
 const bookingUrl = computed(() => {
   if (!code.value) return ''
-  const base = cfg.appUrl || window.location.origin
-  return `${base}/b/${code.value}`
+  // SPA 纯客户端渲染，自建部署的预约域名即当前访问域名
+  return `${window.location.origin}/b/${code.value}`
 })
 
 watch(bookingUrl, async (url) => {
