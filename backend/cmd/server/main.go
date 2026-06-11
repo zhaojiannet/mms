@@ -131,17 +131,6 @@ func main() {
 	api.Use(mw.TenantTx(pool))
 	api.Use(mw.AuditLog(pool))
 
-	// 验证端点：返回当前请求解析到的租户
-	api.GET("/me", func(c *echo.Context) error {
-		t := mw.TenantFrom(c)
-		return c.JSON(http.StatusOK, map[string]any{
-			"tenant_id": t.ID,
-			"slug":      t.Slug,
-			"name":      t.Name,
-			"status":    t.Status,
-		})
-	})
-
 	// 登录端点：用 tenant 上下文 + RLS 验证 users 表
 	// per-IP 限流：每分钟 10 次（防暴力穷举）
 	loginLimit := mw.RateLimit(10, time.Minute)
