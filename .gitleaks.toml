@@ -1,8 +1,8 @@
 # gitleaks 配置：扫描 git 历史 + 工作区，禁止泄露密钥
 # https://github.com/gitleaks/gitleaks
 #
-# 本地手动扫描：
-#   docker run --rm -v $(pwd):/repo zricethezav/gitleaks:latest detect --source /repo --config /repo/.gitleaks.toml --verbose
+# 本地手动扫描（配置自动读取 /repo/.gitleaks.toml）：
+#   docker run --rm -v $(pwd):/repo ghcr.io/gitleaks/gitleaks:latest git /repo
 #
 # CI 集成在 .github/workflows/gitleaks.yml
 
