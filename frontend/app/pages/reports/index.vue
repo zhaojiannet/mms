@@ -21,21 +21,16 @@
           </template>
         </UPopover>
 
-        <!-- Preset 分段按钮组：老 demo 的横向分段，配色用新系统 stone + teal -->
-        <div class="inline-flex items-center h-8 rounded-md ring-1 ring-stone-200 dark:ring-stone-700 bg-white dark:bg-stone-900 overflow-hidden">
-          <button
-            v-for="(p, i) in presets"
-            :key="p.key"
-            type="button"
-            :class="[
-              'h-full px-3.5 text-sm transition-colors cursor-pointer',
-              preset === p.key
-                ? 'bg-primary-500 text-white dark:bg-primary-400 dark:text-stone-900'
-                : 'text-stone-600 hover:text-stone-900 hover:bg-stone-50 dark:text-stone-300 dark:hover:text-white dark:hover:bg-stone-800',
-              i > 0 ? 'border-l border-stone-200 dark:border-stone-700' : ''
-            ]"
+        <!-- Preset 快捷范围：独立按钮 + gap-1，与撤销记录页的分段控件统一 -->
+        <div class="flex items-center gap-1">
+          <UButton
+            v-for="p in presets" :key="p.key"
+            size="xs"
+            :variant="preset === p.key ? 'soft' : 'ghost'"
+            :color="preset === p.key ? 'primary' : 'neutral'"
+            class="active:scale-95 transition-transform"
             @click="applyPreset(p)"
-          >{{ p.label }}</button>
+          >{{ p.label }}</UButton>
         </div>
       </div>
     </header>
@@ -72,7 +67,7 @@
                 <UIcon :name="k.icon" class="size-3.5" :class="k.iconColor" />
                 <span>{{ k.label }}</span>
               </div>
-              <div v-if="overviewLoading" class="h-7 mt-1.5 w-20 rounded bg-stone-100 dark:bg-stone-800 animate-pulse" />
+              <div v-if="overviewLoading" class="h-7 mt-1.5 w-20 rounded-md bg-stone-100 dark:bg-stone-800 animate-pulse" />
               <div v-else class="text-2xl font-semibold tabular-nums mt-1 tracking-tight">{{ k.value }}</div>
             </div>
           </div>
@@ -143,7 +138,7 @@
                   </td>
                   <!-- 类型 -->
                   <td class="px-4 py-2 whitespace-nowrap">
-                    <UBadge :label="kindLabel(t.kind)" :color="kindColor(t.kind)" variant="soft" size="sm" />
+                    <UBadge :label="kindLabel(t.kind)" :color="kindColor(t.kind)" variant="soft" size="md" />
                   </td>
                   <!-- 服务项目（允许换行） -->
                   <td class="px-4 py-2 text-stone-600 dark:text-stone-400 break-words">{{ t.summary || '—' }}</td>
@@ -214,7 +209,7 @@
             </div>
           </div>
           <USkeleton v-if="txLoading && txItems.length === 0" class="h-64 rounded-2xl" />
-          <div v-else-if="!txLoading && txItems.length === 0" class="py-16 text-center text-sm text-stone-400">当前条件下无交易</div>
+          <EmptyState v-else-if="!txLoading && txItems.length === 0" icon="i-lucide-list" text="当前条件下无交易" />
         </div>
     </div>
 
@@ -228,7 +223,7 @@
               <h3 class="text-sm font-medium text-stone-700 dark:text-stone-300">项目排行</h3>
             </div>
             <USkeleton v-if="svcLoading && svcRanking.length === 0" class="h-64 rounded-2xl" />
-            <div v-else-if="svcRanking.length === 0" class="py-16 text-center text-sm text-stone-400 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800">无项目销售数据</div>
+            <EmptyState v-else-if="svcRanking.length === 0" icon="i-lucide-package" text="无项目销售数据" />
             <div v-else class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
               <table class="w-full text-sm">
                 <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -261,7 +256,7 @@
               <h3 class="text-sm font-medium text-stone-700 dark:text-stone-300">会员排行</h3>
             </div>
             <USkeleton v-if="memLoading && memberRanking.length === 0" class="h-64 rounded-2xl" />
-            <div v-else-if="memberRanking.length === 0" class="py-16 text-center text-sm text-stone-400 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800">无会员消费数据</div>
+            <EmptyState v-else-if="memberRanking.length === 0" icon="i-lucide-users" text="无会员消费数据" />
             <div v-else class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
               <table class="w-full text-sm">
                 <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -293,7 +288,7 @@
     <div v-show="activeTab === 'cards'">
         <div class="space-y-4 mt-4">
           <USkeleton v-if="cardLoading" class="h-64 rounded-2xl" />
-          <div v-else-if="cardSales.length === 0" class="py-16 text-center text-sm text-stone-400">区间内无会员卡销售</div>
+          <EmptyState v-else-if="cardSales.length === 0" icon="i-lucide-credit-card" text="区间内无会员卡销售" />
           <div v-else class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
             <div class="px-5 py-3.5 border-b border-stone-200/60 dark:border-stone-800 flex items-baseline gap-3">
               <span class="text-xs text-stone-500">销售总额</span>
@@ -333,7 +328,7 @@
     <div v-show="activeTab === 'payment'">
         <div class="space-y-4 mt-4">
           <USkeleton v-if="payLoading" class="h-64 rounded-2xl" />
-          <div v-else-if="paymentSum.length === 0" class="py-16 text-center text-sm text-stone-400">区间内无支付记录</div>
+          <EmptyState v-else-if="paymentSum.length === 0" icon="i-lucide-wallet" text="区间内无支付记录" />
           <div v-else class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
             <div class="px-5 py-3.5 border-b border-stone-200/60 dark:border-stone-800 flex items-baseline gap-3">
               <span class="text-xs text-stone-500">收款总额</span>
@@ -379,13 +374,13 @@
               class="p-4 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800"
             >
               <div class="text-xs text-stone-500">{{ k.label }}</div>
-              <div v-if="pendingLoading && !pendingStats" class="h-7 mt-1 w-20 rounded bg-stone-100 dark:bg-stone-800 animate-pulse" />
+              <div v-if="pendingLoading && !pendingStats" class="h-7 mt-1 w-20 rounded-md bg-stone-100 dark:bg-stone-800 animate-pulse" />
               <div v-else class="text-2xl font-semibold tabular-nums mt-1" :class="k.accent">{{ k.value }}</div>
             </div>
           </div>
 
           <USkeleton v-if="pendingLoading && !pendingStats" class="h-64 rounded-2xl" />
-          <div v-else-if="pendingStats && pendingStats.data.length === 0" class="py-16 text-center text-sm text-stone-400">当前无挂账记录</div>
+          <EmptyState v-else-if="pendingStats && pendingStats.data.length === 0" icon="i-lucide-clock" text="当前无挂账记录" />
           <div v-else-if="pendingStats" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
             <table class="w-full text-sm">
               <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -420,10 +415,7 @@
               <span class="text-xs text-stone-400">未来 15 天</span>
             </div>
             <USkeleton v-if="birthdayLoading" class="h-40 rounded-2xl" />
-            <div v-else-if="birthdays.length === 0" class="py-16 text-center rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800">
-              <UIcon name="i-lucide-cake" class="size-8 text-stone-300 mx-auto mb-2" />
-              <div class="text-sm text-stone-400">近期无生日会员</div>
-            </div>
+            <EmptyState v-else-if="birthdays.length === 0" icon="i-lucide-cake" text="近期无生日会员" />
             <div v-else class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
               <table class="w-full text-sm">
                 <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -452,10 +444,7 @@
               <span class="text-xs text-stone-400">90 天未消费</span>
             </div>
             <USkeleton v-if="sleepingLoading && sleeping.length === 0" class="h-40 rounded-2xl" />
-            <div v-else-if="sleeping.length === 0" class="py-16 text-center rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800">
-              <UIcon name="i-lucide-moon" class="size-8 text-stone-300 mx-auto mb-2" />
-              <div class="text-sm text-stone-400">无沉睡会员</div>
-            </div>
+            <EmptyState v-else-if="sleeping.length === 0" icon="i-lucide-moon" text="无沉睡会员" />
             <div v-else class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
               <table class="w-full text-sm">
                 <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
@@ -485,7 +474,7 @@
     <UModal v-model:open="voidOpen" title="撤销交易" :ui="{ content: 'sm:max-w-md' }">
       <template #body>
         <div class="space-y-3">
-          <p class="text-sm text-stone-600">将交易 <strong>{{ voiding?.id.slice(0, 8) }}</strong> 设为已撤销，关联的卡余额 / 挂账会自动恢复。</p>
+          <p class="text-sm text-stone-600 dark:text-stone-400">将交易 <strong>{{ voiding?.id.slice(0, 8) }}</strong> 设为已撤销，关联的卡余额 / 挂账会自动恢复。</p>
           <UFormField label="撤销原因" required>
             <UTextarea v-model="voidReason" :rows="2" class="w-full" />
           </UFormField>
@@ -515,8 +504,8 @@ onMounted(() => { ensureVoidFetched() })
 
 // ===== 日期与 Preset =====
 const today = new Date()
-const startDate = ref(fmtDate(today))
-const endDate = ref(fmtDate(today))
+const startDate = ref(formatDateOnly(today))
+const endDate = ref(formatDateOnly(today))
 const preset = ref<string>('day')
 
 // 列表默认/加载更多条数：参考 2025 桌面 SaaS 基准（15–30），取中位偏大 20
@@ -530,7 +519,6 @@ const presets = [
   { key: 'year',    label: '当年' },
 ]
 function firstDayOfMonth(d: Date) { return new Date(d.getFullYear(), d.getMonth(), 1) }
-function fmtDate(d: Date) { return d.toISOString().slice(0, 10) }
 function formatDate(s: string) { return s ? s.slice(0, 10) : '' }
 function fmtMoney(n: string | number | undefined | null) {
   if (n == null || n === '') return '¥0.00'
@@ -568,18 +556,18 @@ function onRangeUpdate(v: any) {
 function applyPreset(p: typeof presets[number]) {
   preset.value = p.key
   const now = new Date()
-  endDate.value = fmtDate(now)
-  if (p.key === 'day') startDate.value = fmtDate(now)
+  endDate.value = formatDateOnly(now)
+  if (p.key === 'day') startDate.value = formatDateOnly(now)
   else if (p.key === 'week') {
     const s = new Date(now); s.setDate(s.getDate() - (s.getDay() === 0 ? 6 : s.getDay() - 1))
-    startDate.value = fmtDate(s)
+    startDate.value = formatDateOnly(s)
   }
-  else if (p.key === 'month') startDate.value = fmtDate(firstDayOfMonth(now))
+  else if (p.key === 'month') startDate.value = formatDateOnly(firstDayOfMonth(now))
   else if (p.key === 'quarter') {
     const q = Math.floor(now.getMonth() / 3) * 3
-    startDate.value = fmtDate(new Date(now.getFullYear(), q, 1))
+    startDate.value = formatDateOnly(new Date(now.getFullYear(), q, 1))
   }
-  else if (p.key === 'year') startDate.value = fmtDate(new Date(now.getFullYear(), 0, 1))
+  else if (p.key === 'year') startDate.value = formatDateOnly(new Date(now.getFullYear(), 0, 1))
   onQuery()
 }
 
@@ -605,13 +593,14 @@ watch(activeTab, (v) => {
 // ===== Overview =====
 const biz = ref<any>(null)
 const overviewLoading = ref(false)
+// 图标配色：主 KPI（营业总额）primary，其余 stone；指标区分靠图标本身
 const overviewKpis = computed(() => [
   { label: '营业总额', value: fmtMoney(biz.value?.total_revenue),        icon: 'i-lucide-coins',         iconColor: 'text-primary-500' },
-  { label: '实收',     value: fmtMoney(biz.value?.sale_revenue),         icon: 'i-lucide-banknote',      iconColor: 'text-emerald-500' },
-  { label: '卡耗',     value: fmtMoney(biz.value?.card_consumption),     icon: 'i-lucide-credit-card',   iconColor: 'text-sky-500' },
-  { label: '充值',     value: fmtMoney(biz.value?.recharge_amount),      icon: 'i-lucide-arrow-up-right',iconColor: 'text-violet-500' },
-  { label: '客数',     value: biz.value ? String(biz.value.customer_count) : '—', icon: 'i-lucide-users',         iconColor: 'text-amber-500' },
-  { label: '客单价',   value: fmtMoney(biz.value?.average_order_value),  icon: 'i-lucide-trending-up',   iconColor: 'text-rose-500' },
+  { label: '实收',     value: fmtMoney(biz.value?.sale_revenue),         icon: 'i-lucide-banknote',      iconColor: 'text-stone-400' },
+  { label: '卡耗',     value: fmtMoney(biz.value?.card_consumption),     icon: 'i-lucide-credit-card',   iconColor: 'text-stone-400' },
+  { label: '充值',     value: fmtMoney(biz.value?.recharge_amount),      icon: 'i-lucide-arrow-up-right',iconColor: 'text-stone-400' },
+  { label: '客数',     value: biz.value ? String(biz.value.customer_count) : '—', icon: 'i-lucide-users',         iconColor: 'text-stone-400' },
+  { label: '客单价',   value: fmtMoney(biz.value?.average_order_value),  icon: 'i-lucide-trending-up',   iconColor: 'text-stone-400' },
 ])
 async function fetchBiz() {
   overviewLoading.value = true
@@ -652,9 +641,12 @@ async function fetchTx(reset = false) {
   if (reset) { txPage.value = 1; txItems.value = [] }
   txLoading.value = true
   try {
+    // 日界按本地时区（与后端 Asia/Shanghai 业务日一致）；后端区间左闭右开，终点取次日本地 0 点
+    const endNext = new Date(`${endDate.value}T00:00:00`)
+    endNext.setDate(endNext.getDate() + 1)
     const q = new URLSearchParams({
-      start_date: `${startDate.value}T00:00:00Z`,
-      end_date: `${endDate.value}T23:59:59Z`,
+      start_date: new Date(`${startDate.value}T00:00:00`).toISOString(),
+      end_date: endNext.toISOString(),
       page: String(txPage.value),
       limit: String(PAGE_SIZE),
       include_voided: '1',
