@@ -25,6 +25,7 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v5"
+	"golang.org/x/image/webp"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/sqlc"
@@ -92,10 +93,14 @@ func UploadLogo(c *echo.Context) error {
 	// 清理同一 tenant 的所有旧 logo（不再用 tenant_id 前缀；扫 tenant_prefix_*）
 	_ = removeOldLogos(dir, t.ID.String())
 
-	// 目标扩展名：PNG/JPEG 统一重编码（剥离 polyglot payload），WebP 保留原字节
+	// 目标扩展名：三种输入全部解码重编码（剥离 polyglot payload）；
+	// 标准库无 WebP encoder，WebP 解码后转存为 PNG
 	targetExt := ext
-	if ext == ".jpg" || ext == ".jpeg" {
+	switch ext {
+	case ".jpg", ".jpeg":
 		targetExt = ".jpg"
+	case ".webp":
+		targetExt = ".png"
 	}
 	// 文件名加 8 字节随机后缀：防路径直接用 tenant_id 猜测暴露租户列表
 	// 格式：<tenant_id>_<rand16hex><ext>；tenant_id 仍存在以便 removeOldLogos 清理
@@ -158,10 +163,9 @@ func DeleteLogo(c *echo.Context) error {
 
 // writeSanitized 把图片数据写到 out，剥离 polyglot payload
 //
-// 策略：
-//   - PNG / JPEG：用标准库 image.Decode 解出像素 → image/png 或 image/jpeg 编码回去
-//     Decode 过程不保留非图像 chunk/APP segment，附加在尾部的恶意字节会被丢弃
-//   - WebP：标准库不支持 encode；保留原字节（前面已有 magic bytes + nosniff 响应头兜底）
+// 策略：解码出像素再重编码。Decode 过程不保留非图像 chunk/APP segment，
+// 附加在尾部的恶意字节会被丢弃。WebP 标准库无 encoder，解码后转 PNG
+// （调用方已把目标扩展名改为 .png）
 func writeSanitized(out io.Writer, src io.Reader, mime string) error {
 	switch mime {
 	case "image/png":
@@ -177,11 +181,11 @@ func writeSanitized(out io.Writer, src io.Reader, mime string) error {
 		}
 		return jpeg.Encode(out, img, &jpeg.Options{Quality: 85})
 	case "image/webp":
-		// 暂不重编码（标准库无 WebP encoder）；nosniff + CSP 响应头兜底
-		if _, err := io.Copy(out, src); err != nil {
-			return fmt.Errorf("copy webp: %w", err)
+		img, err := webp.Decode(src)
+		if err != nil {
+			return fmt.Errorf("decode webp: %w", err)
 		}
-		return nil
+		return png.Encode(out, img)
 	default:
 		return fmt.Errorf("unsupported mime: %s", mime)
 	}
