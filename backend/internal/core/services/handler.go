@@ -144,6 +144,9 @@ func Update(c *echo.Context) error {
 
 	var priceNull decimal.NullDecimal
 	if req.Price != nil {
+		if req.Price.IsNegative() {
+			return echo.NewHTTPError(http.StatusBadRequest, "price must be non-negative")
+		}
 		priceNull = decimal.NullDecimal{Decimal: *req.Price, Valid: true}
 	}
 

@@ -122,6 +122,12 @@ func Create(c *echo.Context) error {
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
 
+	// 0. 归属校验：FK 检查不受 RLS 约束，跨租户 UUID 能过 FK；
+	// 必须用 RLS 范围内的 SELECT 显式确认归属本租户
+	if err := checkRefsBelongToTenant(c, q, req.PaymentMethodID, req.StaffID, req.MemberID); err != nil {
+		return err
+	}
+
 	// 1. 查 services + 算 total_amount（总应收，按标价）
 	// 一次性批量取所有 service，避免 N+1：原 for 循环 GetServiceByID
 	if len(req.Items) == 0 {
@@ -171,8 +177,18 @@ func Create(c *echo.Context) error {
 	if req.PendingMode != nil {
 		pendingMode = *req.PendingMode
 	}
+	if pendingMode != "" && pendingMode != "full" && pendingMode != "use_balance" {
+		return echo.NewHTTPError(http.StatusBadRequest, "pending_mode 只能是 full 或 use_balance")
+	}
 	if pendingMode != "" && req.MemberID == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "挂账必须指定会员")
+	}
+	// 互斥：manual_price 接管实收后若仍按 allocations 扣卡，账面实收与实际扣卡可任意背离
+	if req.ManualPrice != nil && (len(req.CardAllocations) > 0 || pendingMode != "") {
+		return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能与卡支付或挂账同时使用")
+	}
+	if len(req.CardAllocations) > 0 && req.MemberID == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "卡支付必须指定会员")
 	}
 
 	actualPaid := total
@@ -187,6 +203,9 @@ func Create(c *echo.Context) error {
 		if req.ManualPrice.GreaterThan(total) {
 			return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能超过应收金额")
 		}
+		if !req.ManualPrice.Equal(req.ManualPrice.Round(2)) {
+			return echo.NewHTTPError(http.StatusBadRequest, "手动定价最多两位小数")
+		}
 		actualPaid = *req.ManualPrice
 	} else if len(req.CardAllocations) > 0 {
 		actualPaid = decimal.Zero
@@ -194,7 +213,13 @@ func Create(c *echo.Context) error {
 			if a.Deduct.IsNegative() {
 				return echo.NewHTTPError(http.StatusBadRequest, "card_allocations.deduct must be non-negative")
 			}
+			if !a.Deduct.Equal(a.Deduct.Round(2)) {
+				return echo.NewHTTPError(http.StatusBadRequest, "扣卡金额最多两位小数")
+			}
 			actualPaid = actualPaid.Add(a.Deduct)
+		}
+		if actualPaid.GreaterThan(total) {
+			return echo.NewHTTPError(http.StatusBadRequest, "卡支付总额不能超过应收金额")
 		}
 	}
 	if actualPaid.IsNegative() {
@@ -243,6 +268,9 @@ func Create(c *echo.Context) error {
 			}
 			if card.Status != "active" {
 				return echo.NewHTTPError(http.StatusBadRequest, "card is not active: "+card.Status)
+			}
+			if card.ExpiresAt.Valid && card.ExpiresAt.Time.Before(time.Now()) {
+				return echo.NewHTTPError(http.StatusBadRequest, "卡已过期："+card.CardTypeName)
 			}
 			if card.Balance.LessThan(a.Deduct) {
 				return echo.NewHTTPError(http.StatusBadRequest, "insufficient balance on card "+card.CardTypeName)
@@ -362,6 +390,36 @@ func Create(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, toDTO(trx))
 }
 
+// checkRefsBelongToTenant 用 RLS 范围内的 SELECT 校验外键引用归属本租户。
+// FK 约束检查绕过 RLS：跨租户的 payment_method/staff/member UUID 能通过 FK
+// 落库，造成跨租户引用污染，必须在写入前显式查一次
+func checkRefsBelongToTenant(c *echo.Context, q *sqlc.Queries, paymentMethodID uuid.UUID, staffID, memberID *uuid.UUID) error {
+	ctx := c.Request().Context()
+	if _, err := q.GetPaymentMethodByID(ctx, paymentMethodID); err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return echo.NewHTTPError(http.StatusBadRequest, "payment method not found")
+		}
+		return mw.InternalError(c, "check payment method: ", err)
+	}
+	if staffID != nil {
+		if _, err := q.GetStaffByID(ctx, *staffID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusBadRequest, "staff not found")
+			}
+			return mw.InternalError(c, "check staff: ", err)
+		}
+	}
+	if memberID != nil {
+		if _, err := q.GetMemberByID(ctx, *memberID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusBadRequest, "member not found")
+			}
+			return mw.InternalError(c, "check member: ", err)
+		}
+	}
+	return nil
+}
+
 // ============ POST /api/members/:memberId/cards/with-transaction  办卡 ============
 
 type IssueCardRequest struct {
@@ -397,6 +455,10 @@ func IssueCard(c *echo.Context) error {
 	t := mw.TenantFrom(c)
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
+
+	if err := checkRefsBelongToTenant(c, q, req.PaymentMethodID, req.StaffID, &memberID); err != nil {
+		return err
+	}
 
 	ct, err := q.GetCardTypeByID(ctx, req.CardTypeID)
 	if err != nil {
@@ -520,6 +582,10 @@ func SettleCredit(c *echo.Context) error {
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
 
+	if err := checkRefsBelongToTenant(c, q, req.PaymentMethodID, nil, nil); err != nil {
+		return err
+	}
+
 	// FOR UPDATE 锁定本条挂账：防并发双清
 	credit, err := q.LockCreditForUpdate(ctx, pendingID)
 	if err != nil {
@@ -552,6 +618,9 @@ func SettleCredit(c *echo.Context) error {
 		}
 		if card.Status != "active" {
 			return echo.NewHTTPError(http.StatusBadRequest, "card not active")
+		}
+		if card.ExpiresAt.Valid && card.ExpiresAt.Time.Before(time.Now()) {
+			return echo.NewHTTPError(http.StatusBadRequest, "卡已过期")
 		}
 		if card.Balance.LessThan(credit.Amount) {
 			return echo.NewHTTPError(http.StatusBadRequest, "insufficient balance to settle credit")
