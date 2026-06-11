@@ -231,12 +231,14 @@ func parseDateRange(c *echo.Context) (pgtype.Timestamptz, pgtype.Timestamptz, er
 		return pgtype.Timestamptz{}, pgtype.Timestamptz{},
 			echo.NewHTTPError(http.StatusBadRequest, "start_date and end_date required (YYYY-MM-DD)")
 	}
-	start, err := time.Parse("2006-01-02", startStr)
+	// 业务日界用进程时区（容器 TZ 环境变量，默认 Asia/Shanghai）：
+	// 按 UTC 解析会让 UTC+8 商户的"今日营收"偏移 8 小时
+	start, err := time.ParseInLocation("2006-01-02", startStr, time.Local)
 	if err != nil {
 		return pgtype.Timestamptz{}, pgtype.Timestamptz{},
 			echo.NewHTTPError(http.StatusBadRequest, "invalid start_date")
 	}
-	end, err := time.Parse("2006-01-02", endStr)
+	end, err := time.ParseInLocation("2006-01-02", endStr, time.Local)
 	if err != nil {
 		return pgtype.Timestamptz{}, pgtype.Timestamptz{},
 			echo.NewHTTPError(http.StatusBadRequest, "invalid end_date")
