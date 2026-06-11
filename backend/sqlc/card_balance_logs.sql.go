@@ -106,45 +106,6 @@ func (q *Queries) CreateCardBalanceLog(ctx context.Context, arg CreateCardBalanc
 	return i, err
 }
 
-const listCardBalanceLogs = `-- name: ListCardBalanceLogs :many
-SELECT id, tenant_id, card_id, transaction_id, change_type, delta, balance_before, balance_after, operator_user_id, note, occurred_at, created_at FROM card_balance_logs
-WHERE card_id = $1
-ORDER BY occurred_at DESC
-`
-
-func (q *Queries) ListCardBalanceLogs(ctx context.Context, cardID uuid.UUID) ([]CardBalanceLog, error) {
-	rows, err := q.db.Query(ctx, listCardBalanceLogs, cardID)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var items []CardBalanceLog
-	for rows.Next() {
-		var i CardBalanceLog
-		if err := rows.Scan(
-			&i.ID,
-			&i.TenantID,
-			&i.CardID,
-			&i.TransactionID,
-			&i.ChangeType,
-			&i.Delta,
-			&i.BalanceBefore,
-			&i.BalanceAfter,
-			&i.OperatorUserID,
-			&i.Note,
-			&i.OccurredAt,
-			&i.CreatedAt,
-		); err != nil {
-			return nil, err
-		}
-		items = append(items, i)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return items, nil
-}
-
 const listCardBalanceLogsByTx = `-- name: ListCardBalanceLogsByTx :many
 SELECT id, tenant_id, card_id, transaction_id, change_type, delta, balance_before, balance_after, operator_user_id, note, occurred_at, created_at FROM card_balance_logs
 WHERE transaction_id = $1

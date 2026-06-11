@@ -13,23 +13,6 @@ import (
 	"github.com/shopspring/decimal"
 )
 
-const addAppointmentService = `-- name: AddAppointmentService :exec
-INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
-VALUES ($1, $2, $3)
-ON CONFLICT DO NOTHING
-`
-
-type AddAppointmentServiceParams struct {
-	TenantID      uuid.UUID `json:"tenant_id"`
-	AppointmentID uuid.UUID `json:"appointment_id"`
-	ServiceID     uuid.UUID `json:"service_id"`
-}
-
-func (q *Queries) AddAppointmentService(ctx context.Context, arg AddAppointmentServiceParams) error {
-	_, err := q.db.Exec(ctx, addAppointmentService, arg.TenantID, arg.AppointmentID, arg.ServiceID)
-	return err
-}
-
 const addAppointmentServicesBulk = `-- name: AddAppointmentServicesBulk :exec
 INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
 SELECT $1::uuid, $2::uuid, sid

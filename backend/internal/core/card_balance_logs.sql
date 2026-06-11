@@ -20,11 +20,6 @@ WHERE id = $1
   AND balance + $2 >= 0
 RETURNING *;
 
--- name: ListCardBalanceLogs :many
-SELECT * FROM card_balance_logs
-WHERE card_id = $1
-ORDER BY occurred_at DESC;
-
 -- name: ListCardBalanceLogsByTx :many
 SELECT * FROM card_balance_logs
 WHERE transaction_id = $1
