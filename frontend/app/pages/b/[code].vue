@@ -7,14 +7,14 @@
       </div>
 
       <!-- 无效 code -->
-      <div v-if="invalidCode" class="p-8 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 text-center">
+      <div v-if="invalidCode" class="p-8 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 text-center">
         <UIcon name="i-lucide-link-off" class="size-10 mx-auto text-stone-400" />
         <p class="mt-3 text-base">预约链接无效或已过期</p>
         <p class="text-sm text-stone-500 mt-1">请联系商户获取新链接</p>
       </div>
 
       <!-- 成功 -->
-      <div v-else-if="submitted" class="p-8 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 text-center">
+      <div v-else-if="submitted" class="p-8 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 text-center">
         <UIcon name="i-lucide-check-circle" class="size-12 mx-auto text-primary-500" />
         <p class="mt-3 text-xl font-medium text-stone-900 dark:text-stone-100">预约成功</p>
         <p class="text-sm text-stone-500 mt-1">我们会尽快与您确认，到店见</p>
@@ -23,7 +23,7 @@
 
       <!-- 表单 -->
       <div v-else class="space-y-4">
-        <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 space-y-3">
+        <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 space-y-3">
           <UFormField label="姓名" required>
             <UInput v-model="form.customer_name" placeholder="如：张女士" class="w-full" size="lg" />
           </UFormField>
@@ -45,7 +45,7 @@
           </div>
         </div>
 
-        <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5">
+        <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800">
           <SectionTitle class="mb-3">
             预约项目
             <template #suffix>
@@ -91,7 +91,7 @@
           </div>
         </div>
 
-        <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 space-y-3">
+        <div class="p-5 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 space-y-3">
           <UFormField label="备注（可选）">
             <UTextarea v-model="form.notes" :rows="2" placeholder="任何想告诉商户的事" class="w-full" />
           </UFormField>
@@ -200,7 +200,6 @@ async function submit() {
       customer_phone: form.customer_phone,
       appointment_time: new Date(form.appointment_time).toISOString(),
       service_ids: form.service_ids,
-      status: 'pending',
     }
     if (form.assigned_staff_id) body.assigned_staff_id = form.assigned_staff_id
     if (form.notes) body.notes = form.notes
