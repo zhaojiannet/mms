@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
+	"github.com/zhaojiannet/mms/backend/internal/platform/events"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
@@ -101,6 +102,12 @@ func Void(c *echo.Context) error {
 		return mw.InternalError(c, "void.mark_voided", err)
 	}
 
+	// 内存事件总线，订阅者只做日志/通知类副作用；事务在 handler 返回后才提交，
+	// 极端情况下提交失败会多发一条事件，订阅方不得依赖其做强一致逻辑
+	events.DefaultBus.Publish(events.TopicTransactionVoided, map[string]any{
+		"transaction_id": id, "tenant_id": t.ID, "kind": trx.Kind,
+	})
+
 	return c.JSON(http.StatusOK, map[string]any{"message": "transaction voided", "id": id})
 }
 
@@ -177,9 +184,25 @@ func checkVoidEnabled(c *echo.Context, q *sqlc.Queries, tenantID, currentUserID 
 	return nil
 }
 
-// reverseSale：对每条 card_balance_log 反向还原
+// reverseSale：对每条 card_balance_log 反向还原 + 回滚本交易产生的挂账
 func reverseSale(c *echo.Context, q *sqlc.Queries, tenantID uuid.UUID, trx sqlc.Transaction, operatorID uuid.UUID) error {
 	ctx := c.Request().Context()
+
+	// 先处理挂账：未清的直接删；已清的说明被后续清账交易引用，必须先撤那笔，
+	// 否则交易撤了挂账还在，会员仍背着已撤销交易的欠款（重复收款风险）
+	credits, err := q.ListCreditsByChargedTx(ctx, pgtype.UUID{Bytes: trx.ID, Valid: true})
+	if err != nil {
+		return mw.InternalError(c, "void.sale.list_credits", err)
+	}
+	for _, cr := range credits {
+		if cr.SettledAt.Valid {
+			return echo.NewHTTPError(http.StatusBadRequest, "该交易产生的挂账已被清账，请先撤销对应的清账交易")
+		}
+		if err := q.DeleteCredit(ctx, cr.ID); err != nil {
+			return mw.InternalError(c, "void.sale.delete_credit", err)
+		}
+	}
+
 	logs, err := q.ListCardBalanceLogsByTx(ctx, pgtype.UUID{Bytes: trx.ID, Valid: true})
 	if err != nil {
 		return mw.InternalError(c, "void.sale.list_logs", err)
@@ -196,12 +219,15 @@ func reverseSale(c *echo.Context, q *sqlc.Queries, tenantID uuid.UUID, trx sqlc.
 		if err != nil {
 			return mw.InternalError(c, "void.sale.restore_balance", err)
 		}
+		// balance_before 必须从回补后的当前余额倒推：原 log 的 balance_after 是
+		// 历史快照，卡在消费与撤单之间有任何变动都会违反 DB 的
+		// CHECK (balance_before + delta = balance_after)
 		if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
 			TenantID:       tenantID,
 			CardID:         l.CardID,
 			ChangeType:     "void_restore",
 			Delta:          restore,
-			BalanceBefore:  l.BalanceAfter,
+			BalanceBefore:  card.Balance.Sub(restore),
 			BalanceAfter:   card.Balance,
 			TransactionID:  pgtype.UUID{Bytes: trx.ID, Valid: true},
 			OperatorUserID: pgtype.UUID{Bytes: operatorID, Valid: true},
@@ -297,12 +323,13 @@ func reverseSettlement(c *echo.Context, q *sqlc.Queries, tenantID uuid.UUID, trx
 			if err != nil {
 				return mw.InternalError(c, "void.settle.restore", err)
 			}
+			// balance_before 从当前余额倒推，理由同 reverseSale
 			if _, err := q.CreateCardBalanceLog(ctx, sqlc.CreateCardBalanceLogParams{
 				TenantID:       tenantID,
 				CardID:         l.CardID,
 				ChangeType:     "void_restore",
 				Delta:          restore,
-				BalanceBefore:  l.BalanceAfter,
+				BalanceBefore:  card.Balance.Sub(restore),
 				BalanceAfter:   card.Balance,
 				TransactionID:  pgtype.UUID{Bytes: trx.ID, Valid: true},
 				OperatorUserID: pgtype.UUID{Bytes: operatorID, Valid: true},

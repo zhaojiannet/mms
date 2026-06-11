@@ -1,12 +1,14 @@
 package transactions
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 	"github.com/shopspring/decimal"
@@ -42,6 +44,10 @@ func SettleAllCredits(c *echo.Context) error {
 	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 
+	if err := checkRefsBelongToTenant(c, q, req.PaymentMethodID, nil, nil); err != nil {
+		return err
+	}
+
 	// FOR UPDATE 锁定该会员所有未清挂账：防并发双扣（同一会员两个请求同时"一键清账"）
 	credits, err := q.LockPendingCreditsByMember(ctx, memberID)
 	if err != nil {
@@ -67,6 +73,9 @@ func SettleAllCredits(c *echo.Context) error {
 	if req.CardID != nil {
 		card, err := q.LockCardForUpdate(ctx, *req.CardID)
 		if err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusNotFound, "card not found")
+			}
 			return mw.InternalError(c, "get card: ", err)
 		}
 		if card.MemberID != memberID {
@@ -74,6 +83,9 @@ func SettleAllCredits(c *echo.Context) error {
 		}
 		if card.Status != "active" {
 			return echo.NewHTTPError(http.StatusBadRequest, "card not active")
+		}
+		if card.ExpiresAt.Valid && card.ExpiresAt.Time.Before(time.Now()) {
+			return echo.NewHTTPError(http.StatusBadRequest, "卡已过期")
 		}
 		if card.Balance.LessThan(total) {
 			return echo.NewHTTPError(http.StatusBadRequest, "insufficient balance for batch settle")
@@ -129,9 +141,14 @@ func SettleAllCredits(c *echo.Context) error {
 		}
 	}
 
-	// 批量标记已清
-	if err := q.MarkCreditsSettledByMember(ctx, sqlc.MarkCreditsSettledByMemberParams{
-		MemberID:       memberID,
+	// 批量标记已清：只更新前面 FOR UPDATE 锁定的那批 id。
+	// 按 member_id 谓词全量更新会把锁定后并发插入的新挂账也标记已清（金额不在 total 里）
+	creditIDs := make([]uuid.UUID, len(credits))
+	for i, cr := range credits {
+		creditIDs[i] = cr.ID
+	}
+	if err := q.MarkCreditsSettledByIDs(ctx, sqlc.MarkCreditsSettledByIDsParams{
+		Ids:            creditIDs,
 		SettledAt:      pgtype.Timestamptz{Time: time.Now(), Valid: true},
 		SettlementTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 	}); err != nil {
