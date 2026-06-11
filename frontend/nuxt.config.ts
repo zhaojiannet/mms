@@ -35,4 +35,13 @@ export default defineNuxtConfig({
       ],
     },
   },
+
+  vite: {
+    optimizeDeps: {
+      // reka-ui 经 @nuxt/ui 运行时从 node_modules 内引入，开发态按源码直出、
+      // 不参与预打包；应用侧 import 的 @internationalized/date 若被预打包，
+      // 会产生第二份类实例，reka-ui 的 instanceof 判断失败，DateField 时分段丢失。
+      exclude: ['@internationalized/date'],
+    },
+  },
 })
