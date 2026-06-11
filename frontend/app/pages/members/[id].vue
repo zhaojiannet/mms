@@ -88,21 +88,21 @@
           <UButton v-if="pendings.length > 1" size="sm" variant="soft" @click="openSettleAll">批量清账</UButton>
         </div>
         <div v-if="pendings.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
-          <table class="w-full text-base">
+          <table class="w-full text-sm">
             <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
               <tr>
-                <th class="text-left px-4 py-3 font-medium">事由</th>
-                <th class="text-right px-4 py-3 font-medium">金额</th>
-                <th class="text-left px-4 py-3 font-medium">挂账日</th>
-                <th class="text-right px-4 py-3 font-medium">操作</th>
+                <th class="text-left px-3.5 py-2.5 font-medium">事由</th>
+                <th class="text-right px-3.5 py-2.5 font-medium">金额</th>
+                <th class="text-left px-3.5 py-2.5 font-medium">挂账日</th>
+                <th class="text-right px-3.5 py-2.5 font-medium">操作</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
-              <tr v-for="p in pendings" :key="p.id">
-                <td class="px-4 py-3">{{ p.summary || '—' }}</td>
-                <td class="px-4 py-3 text-right tabular-nums">¥{{ p.amount }}</td>
-                <td class="px-4 py-3 text-stone-500 text-sm tabular-nums">{{ formatDate(p.charged_at) }}</td>
-                <td class="px-4 py-3 text-right">
+              <tr v-for="p in pendings" :key="p.id" class="even:bg-stone-50 dark:even:bg-stone-800/30 hover:bg-stone-100/60 dark:hover:bg-stone-800/40 transition-colors">
+                <td class="px-3.5 py-3">{{ p.summary || '—' }}</td>
+                <td class="px-3.5 py-3 text-right tabular-nums">¥{{ p.amount }}</td>
+                <td class="px-3.5 py-3 text-stone-500 tabular-nums">{{ formatDate(p.charged_at) }}</td>
+                <td class="px-3.5 py-3 text-right">
                   <div class="inline-flex items-center gap-1.5">
                     <UButton
                       size="xs" variant="soft" color="primary"
@@ -129,23 +129,23 @@
       <section>
         <SectionTitle as="h2" class="mb-3">最近交易</SectionTitle>
         <div v-if="recentTx.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">
-          <table class="w-full text-base">
+          <table class="w-full text-sm">
             <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
               <tr>
-                <th class="text-left px-4 py-3 font-medium">时间</th>
-                <th class="text-left px-4 py-3 font-medium">类型</th>
-                <th class="text-left px-4 py-3 font-medium">摘要</th>
-                <th class="text-right px-4 py-3 font-medium">金额</th>
+                <th class="text-left px-3.5 py-2.5 font-medium">时间</th>
+                <th class="text-left px-3.5 py-2.5 font-medium">类型</th>
+                <th class="text-left px-3.5 py-2.5 font-medium">摘要</th>
+                <th class="text-right px-3.5 py-2.5 font-medium">金额</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
-              <tr v-for="t in recentTx" :key="t.id">
-                <td class="px-4 py-3 text-stone-500 text-sm tabular-nums">{{ formatDate(t.transaction_time) }}</td>
-                <td class="px-4 py-3">
-                  <UBadge :label="kindLabel(t.kind)" variant="soft" size="sm" />
+              <tr v-for="t in recentTx" :key="t.id" class="even:bg-stone-50 dark:even:bg-stone-800/30 hover:bg-stone-100/60 dark:hover:bg-stone-800/40 transition-colors">
+                <td class="px-3.5 py-3 text-stone-500 tabular-nums">{{ formatTime(t.transaction_time) }}</td>
+                <td class="px-3.5 py-3">
+                  <UBadge :label="kindLabel(t.kind)" variant="soft" size="md" />
                 </td>
-                <td class="px-4 py-3 max-w-md truncate">{{ t.summary || '—' }}</td>
-                <td class="px-4 py-3 text-right tabular-nums font-medium">¥{{ t.actual_paid_amount }}</td>
+                <td class="px-3.5 py-3 max-w-md truncate">{{ t.summary || '—' }}</td>
+                <td class="px-3.5 py-3 text-right tabular-nums font-medium">¥{{ t.actual_paid_amount }}</td>
               </tr>
             </tbody>
           </table>
@@ -233,6 +233,7 @@
 const api = useApi()
 const route = useRoute()
 const router = useRouter()
+const toast = useToast()
 const id = route.params.id as string
 const ops = useMemberOps(() => id)
 
@@ -268,7 +269,7 @@ async function fetchAll() {
       api<Member>(`/api/members/${id}`),
       api<{ items: Card[] }>(`/api/members/${id}/cards`),
       api<{ items: Pending[]; total_amount: string }>(`/api/members/${id}/pending`),
-      api<{ items: Tx[] }>(`/api/transactions?limit=10`),
+      api<{ items: Tx[] }>(`/api/transactions?member_id=${id}&limit=10`),
       api<{ items: { id: string; name: string }[] }>('/api/payment-methods?active=1'),
       api<{ items: { id: string; name: string; price: string; discount_rate: string }[] }>('/api/card-types?status=active'),
     ])
@@ -276,7 +277,7 @@ async function fetchAll() {
     cards.value = cs.items
     pendings.value = ps.items
     totalPending.value = ps.total_amount
-    recentTx.value = tx.items.filter((t: any) => t.member_id === id).slice(0, 10)
+    recentTx.value = tx.items
     paymentMethods.value = pm.items
     cardTypes.value = ct.items
   } finally { loading.value = false }
@@ -285,7 +286,6 @@ async function fetchAll() {
 function genderLabel(g: string) { return { male: '男', female: '女', unknown: '—' }[g] ?? '—' }
 function statusLabel(s: string) { return (CARD_STATUS_LABEL as Record<string, string>)[s] ?? s }
 function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
-function formatDate(s: string) { return new Date(s).toLocaleString('zh-CN', { hour12: false }).slice(0, 16) }
 function displayRate(r: string) { const n = parseFloat(r); return (Math.round(n * 100) / 10).toFixed(1) + '折' }
 
 // ---- 挂账 ----
@@ -294,14 +294,21 @@ const pendSaving = ref(false)
 const pendForm = reactive({ amount: '', summary: '' })
 function openPending() { pendForm.amount = ''; pendForm.summary = ''; pendOpen.value = true }
 async function submitPending() {
+  const amt = pendForm.amount.trim()
+  // 后端金额列为 NUMERIC(10,2)，超过 2 位小数会被静默舍入，前端先拦
+  if (!/^\d+(\.\d{1,2})?$/.test(amt) || parseFloat(amt) <= 0) {
+    toast.add({ title: '金额无效', description: '请输入大于 0 的金额，最多 2 位小数', color: 'error', icon: 'i-lucide-alert-circle' })
+    return
+  }
   pendSaving.value = true
   try {
-    await ops.addPending({ amount: pendForm.amount, summary: pendForm.summary || null })
+    await ops.addPending({ amount: amt, summary: pendForm.summary || null })
     pendOpen.value = false
-    await fetchAll()
-  } catch (e) {
-    console.warn('addPending failed', e)
+  } catch (e: any) {
+    toast.add({ title: '挂账失败', description: e?.data?.message || e?.message || '请稍后重试', color: 'error' })
+    return
   } finally { pendSaving.value = false }
+  await fetchAll()
 }
 const removePendOpen = ref(false)
 const removePendTarget = ref<Pending | null>(null)
@@ -316,8 +323,11 @@ async function confirmRemovePending() {
   try {
     await ops.removePending(removePendTarget.value.id)
     removePendOpen.value = false
-    await fetchAll()
+  } catch (e: any) {
+    toast.add({ title: '撤消挂账失败', description: e?.data?.message || e?.message || '请稍后重试', color: 'error' })
+    return
   } finally { removePendLoading.value = false }
+  await fetchAll()
 }
 
 // ---- 清账 ----
@@ -344,9 +354,9 @@ async function submitSettle() {
     if (settleAll.value) await ops.settleAll(body)
     else await ops.settleOne(settleTarget.value!.id, body)
     settleOpen.value = false
-    await fetchAll()
-  } catch (e: any) { settleErr.value = e?.data?.message || '清账失败' }
+  } catch (e: any) { settleErr.value = e?.data?.message || '清账失败'; return }
   finally { settleSaving.value = false }
+  await fetchAll()
 }
 
 // ---- 办卡 ----
@@ -366,9 +376,9 @@ async function submitIssue() {
     if (issueForm.finalPrice) body.final_price = issueForm.finalPrice
     await ops.issueCard(body)
     issueOpen.value = false
-    await fetchAll()
-  } catch (e: any) { issueErr.value = e?.data?.message || '办卡失败' }
+  } catch (e: any) { issueErr.value = e?.data?.message || '办卡失败'; return }
   finally { issueSaving.value = false }
+  await fetchAll()
 }
 
 function goPos() { router.push(`/pos?member=${id}`) }

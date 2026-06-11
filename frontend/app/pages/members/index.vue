@@ -74,12 +74,12 @@
             <UIcon
               v-if="row.original.gender === 'female'"
               name="i-lucide-venus"
-              class="size-3.5 text-pink-500 shrink-0"
+              class="size-3.5 text-pink-500 dark:text-pink-400 shrink-0"
             />
             <UIcon
               v-else-if="row.original.gender === 'male'"
               name="i-lucide-mars"
-              class="size-3.5 text-sky-500 shrink-0"
+              class="size-3.5 text-sky-500 dark:text-sky-400 shrink-0"
             />
           </UButton>
         </template>
@@ -216,8 +216,8 @@
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5">
               <span class="font-medium truncate">{{ m.name }}</span>
-              <UIcon v-if="m.gender === 'female'" name="i-lucide-venus" class="size-3.5 text-pink-500 shrink-0" />
-              <UIcon v-else-if="m.gender === 'male'" name="i-lucide-mars" class="size-3.5 text-sky-500 shrink-0" />
+              <UIcon v-if="m.gender === 'female'" name="i-lucide-venus" class="size-3.5 text-pink-500 dark:text-pink-400 shrink-0" />
+              <UIcon v-else-if="m.gender === 'male'" name="i-lucide-mars" class="size-3.5 text-sky-500 dark:text-sky-400 shrink-0" />
             </div>
             <div class="text-sm text-stone-500 tabular-nums">{{ m.phone || '未留手机' }}</div>
           </div>
@@ -294,8 +294,8 @@
               <div>
                 <div class="flex items-center gap-2">
                   <h2 class="text-xl font-semibold">{{ detailMember.name }}</h2>
-                  <UIcon v-if="detailMember.gender === 'female'" name="i-lucide-venus" class="size-4 text-pink-500" />
-                  <UIcon v-else-if="detailMember.gender === 'male'" name="i-lucide-mars" class="size-4 text-sky-500" />
+                  <UIcon v-if="detailMember.gender === 'female'" name="i-lucide-venus" class="size-4 text-pink-500 dark:text-pink-400" />
+                  <UIcon v-else-if="detailMember.gender === 'male'" name="i-lucide-mars" class="size-4 text-sky-500 dark:text-sky-400" />
                   <UBadge
                     :label="detailMember.status === 'active' ? '正常' : '停用'"
                     :color="detailMember.status === 'active' ? 'success' : 'neutral'"
@@ -545,7 +545,7 @@
           <!-- 默认会员卡扣款 -->
           <div v-if="!settleUseOther">
             <UFormField label="会员卡扣款" required>
-              <USelect v-model="settleForm.cardId" :items="settleCardOptions" placeholder="选择会员卡" class="w-full" />
+              <USelect v-model="settleForm.cardId" :items="settleCardOptions" :loading="settleCardsLoading" :placeholder="settleCardsLoading ? '加载会员卡…' : '选择会员卡'" class="w-full" />
             </UFormField>
             <div class="mt-2.5">
               <UButton size="xs" variant="soft" color="neutral" icon="i-lucide-arrow-left-right" @click="settleUseOther = true">改用其他支付方式</UButton>
@@ -621,6 +621,14 @@
             <UFormField v-else-if="issueForm.discountMode === 'custom'" label="自定义折扣率" required>
               <UInput v-model="issueForm.discountRate" type="number" step="0.01" min="0.01" max="1" placeholder="如:0.8 表示 8 折" class="w-full" />
             </UFormField>
+
+            <p
+              v-if="customPriceFloor"
+              class="text-xs"
+              :class="customPriceTooLow ? 'text-error-600 dark:text-error-400' : 'text-stone-500 dark:text-stone-400'"
+            >
+              最低 ¥{{ customPriceFloor.min.toFixed(2) }}（参照「{{ customPriceFloor.name }}」售价的 50%），低于此金额需超级管理员操作
+            </p>
           </div>
 
           <!-- 常驻：服务员工 + 支付方式 -->
@@ -749,7 +757,11 @@ function buildQuery(offset: number) {
   return params.toString()
 }
 
+// 请求序号守卫：快速切换搜索/筛选时旧的慢响应可能后到，只允许最新请求写状态
+let fetchSeq = 0
+
 async function fetchFirst() {
+  const seq = ++fetchSeq
   // staff 角色 + 未输入 ≥3 字符搜索时，不发请求，避免 400 噪音
   if (isStaff.value && search.value.trim().length < 3) {
     loaded.value = []
@@ -760,20 +772,32 @@ async function fetchFirst() {
   loading.value = true
   try {
     const data = await api<ListResponse>(`/api/members?${buildQuery(0)}`)
+    if (seq !== fetchSeq) return
     loaded.value = data.items
     total.value = data.total
+  } catch {
+    // 401 已由 useApi 全局登出+跳转；其余错误置空列表，避免 unhandled rejection
+    if (seq === fetchSeq) {
+      loaded.value = []
+      total.value = 0
+    }
   } finally {
-    loading.value = false
+    if (seq === fetchSeq) loading.value = false
   }
 }
 
 async function loadMore() {
   if (loadingMore.value || !hasMore.value) return
+  const seq = fetchSeq
   loadingMore.value = true
   try {
     const data = await api<ListResponse>(`/api/members?${buildQuery(loaded.value.length)}`)
+    // 期间筛选/搜索已变化（fetchSeq 自增），这页数据属于旧条件，丢弃
+    if (seq !== fetchSeq) return
     loaded.value = loaded.value.concat(data.items)
     total.value = data.total
+  } catch {
+    // 加载更多失败保留已有数据即可
   } finally {
     loadingMore.value = false
   }
@@ -928,6 +952,8 @@ const pendingTotal = computed(() =>
 )
 
 const settleUseOther = ref(false)
+// 行菜单清账时重拉当前会员卡列表的加载态（卡下拉转圈）
+const settleCardsLoading = ref(false)
 
 const nonCardPaymentOptions = computed(() =>
   paymentMethods.value
@@ -1032,6 +1058,22 @@ const cardTypeOptions = computed(() =>
   }))
 )
 
+// 后端（非超管）强制自定义面值不得低于参照卡型售价的 50%；未选参照时后端隐式挂靠第一个卡型，
+// 这里按同样规则提前算出下限，避免提交后才收到 400
+const customPriceFloor = computed(() => {
+  if (issueMode.value !== 'custom' || auth.user?.role === 'super_admin') return null
+  const refId = issueForm.cardTypeId || cardTypes.value[0]?.id
+  const ct = cardTypes.value.find(c => c.id === refId)
+  if (!ct) return null
+  return { name: ct.name, min: parseFloat(ct.price) * 0.5 }
+})
+const customPriceTooLow = computed(() => {
+  const f = customPriceFloor.value
+  if (!f) return false
+  const p = parseFloat(issueForm.finalPrice)
+  return p > 0 && p < f.min
+})
+
 const staffList = ref<{ id: string; name: string; position: string | null }[]>([])
 const staffOptions = computed(() =>
   staffList.value.map(s => ({
@@ -1081,6 +1123,10 @@ async function submitIssue() {
     // 自定义面值
     const p = parseFloat(issueForm.finalPrice)
     if (!p || p <= 0) { issueError.value = '请输入自定义金额'; return }
+    if (customPriceTooLow.value && customPriceFloor.value) {
+      issueError.value = `金额低于参照卡型「${customPriceFloor.value.name}」售价的 50%（最低 ¥${customPriceFloor.value.min.toFixed(2)}），需超级管理员操作`
+      return
+    }
     if (issueForm.discountMode === 'inherit') {
       if (!issueForm.cardTypeId) { issueError.value = '请选择参照卡类型'; return }
     } else {
@@ -1114,6 +1160,7 @@ async function submitIssue() {
     await fetchFirst()
   } catch (e: any) {
     issueError.value = e?.data?.message || e?.message || '办卡失败'
+    toast.add({ title: '办卡失败', description: issueError.value, color: 'error' })
   } finally {
     issueSaving.value = false
   }
@@ -1224,8 +1271,20 @@ async function actOnMember(m: Member, action: 'issue' | 'credit' | 'settle') {
     openAddPending()
     return
   }
+  // settle：清账弹窗的卡下拉读 detailCards，必须按当前行会员重拉，不能复用上次详情弹窗的残留
+  detailCards.value = []
+  settleCardsLoading.value = true
+  api<{ items: CardInfo[] }>(`/api/members/${m.id}/cards`)
+    .then((cards) => {
+      detailCards.value = cards.items
+      cardsCache.set(m.id, cards.items)
+    })
+    .catch((e: any) => {
+      toast.add({ title: '加载会员卡失败', description: e?.data?.message || e?.message, color: 'error' })
+    })
+    .finally(() => { settleCardsLoading.value = false })
   try {
-    const res = await api<{ items: PendingInfo[] }>(`/api/members/${m.id}/pending`).catch(() => ({ items: [] as PendingInfo[] }))
+    const res = await api<{ items: PendingInfo[] }>(`/api/members/${m.id}/pending`)
     detailPendings.value = res.items
     if (res.items.length === 0) {
       toast.add({ title: '该会员暂无待清挂账', color: 'neutral', icon: 'i-lucide-info' })
