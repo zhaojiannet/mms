@@ -51,11 +51,6 @@ SELECT count(*) FROM appointments
 WHERE appointment_time >= $1 AND appointment_time < $2
   AND status IN ('pending', 'confirmed');
 
--- name: AddAppointmentService :exec
-INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
-VALUES ($1, $2, $3)
-ON CONFLICT DO NOTHING;
-
 -- name: AddAppointmentServicesBulk :exec
 -- 一次插入多条 appointment_services；ON CONFLICT 兼容入参重复 id
 INSERT INTO appointment_services (tenant_id, appointment_id, service_id)
