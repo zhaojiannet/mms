@@ -97,6 +97,45 @@ func (q *Queries) GetCreditByID(ctx context.Context, id uuid.UUID) (MemberCredit
 	return i, err
 }
 
+const listCreditsByChargedTx = `-- name: ListCreditsByChargedTx :many
+SELECT id, tenant_id, member_id, amount, summary, charged_at, charged_tx_id, settled_at, settlement_tx_id, legacy_id, created_at, updated_at FROM member_credits
+WHERE charged_tx_id = $1
+`
+
+// 撤销消费交易时，查这笔交易产生的挂账（未清的删除，已清的阻止撤单）
+func (q *Queries) ListCreditsByChargedTx(ctx context.Context, chargedTxID pgtype.UUID) ([]MemberCredit, error) {
+	rows, err := q.db.Query(ctx, listCreditsByChargedTx, chargedTxID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []MemberCredit
+	for rows.Next() {
+		var i MemberCredit
+		if err := rows.Scan(
+			&i.ID,
+			&i.TenantID,
+			&i.MemberID,
+			&i.Amount,
+			&i.Summary,
+			&i.ChargedAt,
+			&i.ChargedTxID,
+			&i.SettledAt,
+			&i.SettlementTxID,
+			&i.LegacyID,
+			&i.CreatedAt,
+			&i.UpdatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listCreditsBySettlementTx = `-- name: ListCreditsBySettlementTx :many
 SELECT id, tenant_id, member_id, amount, summary, charged_at, charged_tx_id, settled_at, settlement_tx_id, legacy_id, created_at, updated_at FROM member_credits
 WHERE settlement_tx_id = $1
@@ -278,23 +317,25 @@ func (q *Queries) MarkCreditSettled(ctx context.Context, arg MarkCreditSettledPa
 	return i, err
 }
 
-const markCreditsSettledByMember = `-- name: MarkCreditsSettledByMember :exec
+const markCreditsSettledByIDs = `-- name: MarkCreditsSettledByIDs :exec
 UPDATE member_credits
-SET settled_at       = $2,
-    settlement_tx_id = $3,
+SET settled_at       = $1,
+    settlement_tx_id = $2,
     updated_at       = now()
-WHERE member_id = $1 AND settled_at IS NULL
+WHERE id = ANY($3::uuid[]) AND settled_at IS NULL
 `
 
-type MarkCreditsSettledByMemberParams struct {
-	MemberID       uuid.UUID          `json:"member_id"`
+type MarkCreditsSettledByIDsParams struct {
 	SettledAt      pgtype.Timestamptz `json:"settled_at"`
 	SettlementTxID pgtype.UUID        `json:"settlement_tx_id"`
+	Ids            []uuid.UUID        `json:"ids"`
 }
 
-// 批量清挂账：把会员当前所有未清挂账一次性标记已清
-func (q *Queries) MarkCreditsSettledByMember(ctx context.Context, arg MarkCreditsSettledByMemberParams) error {
-	_, err := q.db.Exec(ctx, markCreditsSettledByMember, arg.MemberID, arg.SettledAt, arg.SettlementTxID)
+// 批量清挂账：只更新调用方已 FOR UPDATE 锁定的那批 id。
+// 不能按 member_id+settled_at 谓词全量更新：READ COMMITTED 下锁定与
+// 更新之间并发插入的新挂账会被一并标记已清，金额却不在结算总额里
+func (q *Queries) MarkCreditsSettledByIDs(ctx context.Context, arg MarkCreditsSettledByIDsParams) error {
+	_, err := q.db.Exec(ctx, markCreditsSettledByIDs, arg.SettledAt, arg.SettlementTxID, arg.Ids)
 	return err
 }
 

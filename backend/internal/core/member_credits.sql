@@ -49,18 +49,25 @@ SELECT COALESCE(SUM(amount), 0)::numeric AS total_unsettled
 FROM member_credits
 WHERE member_id = $1 AND settled_at IS NULL;
 
--- name: MarkCreditsSettledByMember :exec
--- 批量清挂账：把会员当前所有未清挂账一次性标记已清
+-- name: MarkCreditsSettledByIDs :exec
+-- 批量清挂账：只更新调用方已 FOR UPDATE 锁定的那批 id。
+-- 不能按 member_id+settled_at 谓词全量更新：READ COMMITTED 下锁定与
+-- 更新之间并发插入的新挂账会被一并标记已清，金额却不在结算总额里
 UPDATE member_credits
-SET settled_at       = $2,
-    settlement_tx_id = $3,
+SET settled_at       = sqlc.arg('settled_at'),
+    settlement_tx_id = sqlc.arg('settlement_tx_id'),
     updated_at       = now()
-WHERE member_id = $1 AND settled_at IS NULL;
+WHERE id = ANY(sqlc.arg('ids')::uuid[]) AND settled_at IS NULL;
 
 -- name: ListCreditsBySettlementTx :many
 -- 撤销清账交易时，查哪些挂账被这笔清账清掉（用于恢复）
 SELECT * FROM member_credits
 WHERE settlement_tx_id = $1;
+
+-- name: ListCreditsByChargedTx :many
+-- 撤销消费交易时，查这笔交易产生的挂账（未清的删除，已清的阻止撤单）
+SELECT * FROM member_credits
+WHERE charged_tx_id = $1;
 
 -- name: UnsettleCredit :exec
 -- 撤销挂账清账：把 settled_at / settlement_tx_id 重置回 NULL
