@@ -67,7 +67,7 @@
             />
             <span
               v-if="hasUnread"
-              class="absolute top-1 right-1 size-2 rounded-full bg-red-500 ring-2 ring-stone-50 dark:ring-stone-950 pointer-events-none"
+              class="absolute top-1 right-1 size-2 rounded-full bg-error-500 ring-2 ring-stone-50 dark:ring-stone-950 pointer-events-none"
             />
           </div>
           <template #content>
@@ -134,9 +134,10 @@ const kpi = reactive({
 
 async function loadKpi() {
   try {
+    // 本地日期（非 toISOString 的 UTC 日期）：凌晨 0-8 点 UTC 日期是昨天，会查错业务日
     const now = new Date()
-    const todayStr = now.toISOString().slice(0, 10)
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).toISOString().slice(0, 10)
+    const todayStr = formatDateOnly(now)
+    const monthStart = formatDateOnly(new Date(now.getFullYear(), now.getMonth(), 1))
 
     const [today, month, pending, cardPool] = await Promise.all([
       api<any>(`/api/reports/business?start_date=${todayStr}&end_date=${todayStr}`).catch(() => null),

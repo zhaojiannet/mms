@@ -87,9 +87,12 @@
         </template>
 
         <template #services-cell="{ row }">
-          <div class="text-stone-600 dark:text-stone-400 truncate max-w-56" :title="serviceNames(row.original.service_ids).join('、')">
-            {{ serviceNames(row.original.service_ids).join('、') || '—' }}
-          </div>
+          <UTooltip v-if="serviceNames(row.original.service_ids).length" :text="serviceNames(row.original.service_ids).join('、')" :delay-duration="200" :ui="{ content: 'max-w-xs whitespace-normal' }">
+            <div class="text-stone-600 dark:text-stone-400 truncate max-w-56">
+              {{ serviceNames(row.original.service_ids).join('、') }}
+            </div>
+          </UTooltip>
+          <span v-else class="text-stone-400">—</span>
         </template>
 
         <template #staff-cell="{ row }">
@@ -223,7 +226,7 @@
               </template>
             </UInput>
             <div class="space-y-1 max-h-48 overflow-y-auto rounded-lg ring-1 ring-stone-200 dark:ring-stone-800 p-2">
-              <label v-for="s in filteredServices" :key="s.id" class="flex items-center gap-2 px-2 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800/40 rounded cursor-pointer">
+              <label v-for="s in filteredServices" :key="s.id" class="flex items-center gap-2 px-2 py-1.5 hover:bg-stone-50 dark:hover:bg-stone-800/40 rounded-md cursor-pointer">
                 <UCheckbox :model-value="form.service_ids.includes(s.id)" @update:model-value="v => toggleSvc(s.id, v)" />
                 <span class="text-sm flex-1">{{ s.name }}</span>
                 <span class="text-xs text-stone-400 tabular-nums">¥{{ s.price }}</span>
@@ -266,6 +269,7 @@ interface Staff { id: string; name: string }
 interface Service { id: string; name: string; price: string }
 
 const api = useApi()
+const toast = useToast()
 const items = ref<Appointment[]>([])
 const staff = ref<Staff[]>([])
 const services = ref<Service[]>([])
@@ -274,8 +278,8 @@ const todayCount = ref(0)
 
 // ---- 日期范围 ----
 const today = new Date()
-const startDate = ref(fmtDate(today))
-const endDate = ref(fmtDate(new Date(today.getTime() + 7 * 86400000)))
+const startDate = ref(formatDateOnly(today))
+const endDate = ref(formatDateOnly(new Date(today.getTime() + 7 * 86400000)))
 const datePreset = ref<'today' | 'week' | 'month' | 'custom'>('week')
 
 const datePresets = [
@@ -290,17 +294,17 @@ function applyDatePreset(key: 'today' | 'week' | 'month') {
   datePreset.value = key
   const now = new Date()
   if (key === 'today') {
-    startDate.value = fmtDate(now)
-    endDate.value = fmtDate(now)
+    startDate.value = formatDateOnly(now)
+    endDate.value = formatDateOnly(now)
   } else if (key === 'week') {
     const day = now.getDay() || 7
     const monday = new Date(now); monday.setDate(now.getDate() - day + 1)
     const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6)
-    startDate.value = fmtDate(monday)
-    endDate.value = fmtDate(sunday)
+    startDate.value = formatDateOnly(monday)
+    endDate.value = formatDateOnly(sunday)
   } else {
-    startDate.value = fmtDate(new Date(now.getFullYear(), now.getMonth(), 1))
-    endDate.value = fmtDate(new Date(now.getFullYear(), now.getMonth() + 1, 0))
+    startDate.value = formatDateOnly(new Date(now.getFullYear(), now.getMonth(), 1))
+    endDate.value = formatDateOnly(new Date(now.getFullYear(), now.getMonth() + 1, 0))
   }
   nextTick(() => { suppressRangeUpdate = false })
   fetchList()
@@ -332,7 +336,6 @@ const staffOptions = computed(() =>
   staff.value.map(s => ({ label: s.name, value: s.id }))
 )
 
-function fmtDate(d: Date) { return d.toISOString().slice(0, 10) }
 function formatDateTime(s: string) {
   const d = new Date(s)
   const m = String(d.getMonth() + 1).padStart(2, '0')
@@ -425,9 +428,12 @@ const filteredServices = computed(() => {
 async function fetchList() {
   loading.value = true
   try {
+    // 日界按本地时区（与后端 Asia/Shanghai 业务日一致）；后端区间左闭右开，终点取次日本地 0 点
+    const endNext = new Date(`${endDate.value}T00:00:00`)
+    endNext.setDate(endNext.getDate() + 1)
     const q = new URLSearchParams({
-      start_date: `${startDate.value}T00:00:00Z`,
-      end_date: `${endDate.value}T23:59:59Z`,
+      start_date: new Date(`${startDate.value}T00:00:00`).toISOString(),
+      end_date: endNext.toISOString(),
     })
     if (status.value) q.set('status', status.value)
     const data = await api<{ items: Appointment[] }>(`/api/appointments?${q}`)
@@ -456,7 +462,13 @@ function openDetail(a: Appointment) {
 }
 
 async function changeStatus(a: Appointment, st: string) {
-  await api(`/api/appointments/${a.id}/status`, { method: 'PATCH', body: { status: st } })
+  try {
+    await api(`/api/appointments/${a.id}/status`, { method: 'PATCH', body: { status: st } })
+  } catch (e: any) {
+    // 失败保持弹窗打开，便于重试
+    toast.add({ title: '状态更新失败', description: e?.data?.message || e?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
+    return
+  }
   detailOpen.value = false
   await fetchList()
 }
@@ -479,7 +491,7 @@ function openCreate() {
   const hh = String((now.getHours() + 1) % 24).padStart(2, '0')
   form.customer_name = ''
   form.customer_phone = ''
-  form.appointment_time = `${fmtDate(now)}T${hh}:00`
+  form.appointment_time = `${formatDateOnly(now)}T${hh}:00`
   form.assigned_staff_id = ''
   form.service_ids = []
   form.notes = ''
