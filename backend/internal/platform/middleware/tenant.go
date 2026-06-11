@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"errors"
+	"log/slog"
 	"net/http"
 	"os"
 	"strings"
@@ -78,7 +79,9 @@ func TenantResolver(pool *pgxpool.Pool) echo.MiddlewareFunc {
 				if errors.Is(err, pgx.ErrNoRows) {
 					return echo.NewHTTPError(http.StatusNotFound, "tenant not found")
 				}
-				return echo.NewHTTPError(http.StatusInternalServerError, "lookup tenant: "+err.Error())
+				// DB 原始错误只进日志，不回传客户端（可能含连接串/表结构细节）
+				slog.Error("tenant lookup failed", "slug", slug, "err", err)
+				return echo.NewHTTPError(http.StatusInternalServerError, "tenant lookup failed")
 			}
 			if row.Status != "active" {
 				return echo.NewHTTPError(http.StatusForbidden, "tenant is "+row.Status)

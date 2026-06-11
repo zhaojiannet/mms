@@ -128,30 +128,38 @@ func (q *Queries) ListUnreadAnnouncementsForUser(ctx context.Context, userID uui
 }
 
 const markAllAnnouncementsRead = `-- name: MarkAllAnnouncementsRead :exec
-INSERT INTO system_announcement_reads (user_id, announcement_id)
-SELECT $1, id FROM system_announcements
+INSERT INTO system_announcement_reads (tenant_id, user_id, announcement_id)
+SELECT $1, $2, id
+FROM system_announcements
 ON CONFLICT DO NOTHING
 `
 
-func (q *Queries) MarkAllAnnouncementsRead(ctx context.Context, userID uuid.UUID) error {
-	_, err := q.db.Exec(ctx, markAllAnnouncementsRead, userID)
+type MarkAllAnnouncementsReadParams struct {
+	TenantID uuid.UUID `json:"tenant_id"`
+	UserID   uuid.UUID `json:"user_id"`
+}
+
+func (q *Queries) MarkAllAnnouncementsRead(ctx context.Context, arg MarkAllAnnouncementsReadParams) error {
+	_, err := q.db.Exec(ctx, markAllAnnouncementsRead, arg.TenantID, arg.UserID)
 	return err
 }
 
 const markAnnouncementReadByVersion = `-- name: MarkAnnouncementReadByVersion :exec
-INSERT INTO system_announcement_reads (user_id, announcement_id)
-SELECT $1, id FROM system_announcements WHERE version = $2
+INSERT INTO system_announcement_reads (tenant_id, user_id, announcement_id)
+SELECT $1, $2, id
+FROM system_announcements WHERE version = $3
 ON CONFLICT DO NOTHING
 `
 
 type MarkAnnouncementReadByVersionParams struct {
-	UserID  uuid.UUID `json:"user_id"`
-	Version string    `json:"version"`
+	TenantID uuid.UUID `json:"tenant_id"`
+	UserID   uuid.UUID `json:"user_id"`
+	Version  string    `json:"version"`
 }
 
 // 按 version 字符串标记已读（前端传 version 更稳定，不用暴露内部 UUID）
 func (q *Queries) MarkAnnouncementReadByVersion(ctx context.Context, arg MarkAnnouncementReadByVersionParams) error {
-	_, err := q.db.Exec(ctx, markAnnouncementReadByVersion, arg.UserID, arg.Version)
+	_, err := q.db.Exec(ctx, markAnnouncementReadByVersion, arg.TenantID, arg.UserID, arg.Version)
 	return err
 }
 

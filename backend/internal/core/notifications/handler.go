@@ -123,11 +123,13 @@ func MarkRead(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "missing version")
 	}
 	claims := mw.ClaimsFrom(c)
+	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 	if err := q.MarkAnnouncementReadByVersion(c.Request().Context(),
 		sqlc.MarkAnnouncementReadByVersionParams{
-			UserID:  claims.UserID,
-			Version: version,
+			TenantID: t.ID,
+			UserID:   claims.UserID,
+			Version:  version,
 		}); err != nil {
 		return mw.InternalError(c, "mark read: ", err)
 	}
@@ -138,8 +140,12 @@ func MarkRead(c *echo.Context) error {
 // 把所有公告标为已读（业务通知自然消失无需操作）
 func MarkAllRead(c *echo.Context) error {
 	claims := mw.ClaimsFrom(c)
+	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
-	if err := q.MarkAllAnnouncementsRead(c.Request().Context(), claims.UserID); err != nil {
+	if err := q.MarkAllAnnouncementsRead(c.Request().Context(), sqlc.MarkAllAnnouncementsReadParams{
+		TenantID: t.ID,
+		UserID:   claims.UserID,
+	}); err != nil {
 		return mw.InternalError(c, "mark all: ", err)
 	}
 	return c.NoContent(http.StatusNoContent)
