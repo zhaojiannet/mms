@@ -87,13 +87,65 @@ export const useAuthStore = defineStore('auth', {
       this.expiresAt = data.expires_at
       this.persist()
     },
+    // 距过期不足 12 小时时静默续签；后端 refresh 保留原 iat，不会无限续命
+    async maybeRefresh() {
+      if (!this.isAuthenticated || !this.expiresAt) return
+      const exp = new Date(this.expiresAt).getTime()
+      if (isNaN(exp) || exp - Date.now() > 12 * 60 * 60 * 1000) return
+      const cfg = useRuntimeConfig().public
+      try {
+        const data = await $fetch<{ access_token: string; expires_at: string }>(
+          `${cfg.apiBase}/api/auth/refresh`,
+          {
+            method: 'POST',
+            headers: { 'X-Tenant-Slug': cfg.tenantSlug, Authorization: `Bearer ${this.token}` },
+          },
+        )
+        this.token = data.access_token
+        this.expiresAt = data.expires_at
+        this.persist()
+      } catch {
+        // 续签失败不打断使用：token 真过期时由 useApi 的 401 兜底登出
+      }
+    },
     logout() {
+      const token = this.token
+      // 核心清理放最前：后端通知/共享状态清理失败都不得阻断登出本身
       this.token = ''
       this.user = null
       this.expiresAt = ''
       if (typeof window !== 'undefined') {
         window.localStorage.removeItem(STORAGE_KEY)
       }
+      // 以下依赖 Nuxt 上下文（useRuntimeConfig/useState）：调用方若在 $fetch
+      // 回调等无上下文场景，需自行 runWithContext；这里再兜一层防异常外泄
+      try {
+        if (token) {
+          // 尽力通知后端吊销（token_version+1，所有已签发 token 含 7 天长 token 立即失效）；
+          // 用裸 $fetch 而非 useApi，避免 401 再次触发 onResponseError 递归 logout
+          const cfg = useRuntimeConfig().public
+          $fetch(`${cfg.apiBase}/api/auth/logout`, {
+            method: 'POST',
+            headers: { 'X-Tenant-Slug': cfg.tenantSlug, Authorization: `Bearer ${token}` },
+          }).catch(() => {})
+        }
+        if (typeof window !== 'undefined') {
+          this.resetShared()
+        }
+      } catch {
+        // 无 Nuxt 上下文：跳过吊销通知与共享状态清理，登出本身已完成
+      }
+    },
+    // 清理跨组件共享状态，避免下一个登录账号看到上一账号的残留
+    resetShared() {
+      // key 必须与 useVoidEnabled.ts 内的 useState key 一致（该 composable 未暴露 reset）
+      useState<{ fetched: boolean; enabled: boolean; enabledAt: number | null }>('void-enabled').value = {
+        fetched: false,
+        enabled: false,
+        enabledAt: null,
+      }
+      useGreeting().refresh()
+      resetStoreInfo()
     },
     persist() {
       if (typeof window === 'undefined') return

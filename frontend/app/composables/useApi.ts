@@ -11,6 +11,7 @@ export const useApi = () => {
   const auth = useAuthStore()
   const router = useRouter()
   const toast = useToast()
+  const nuxtApp = useNuxtApp()
 
   return $fetch.create({
     baseURL: cfg.apiBase,
@@ -26,10 +27,17 @@ export const useApi = () => {
       const status = response.status
       const msg = (response._data as any)?.message || ''
       if (status === 401) {
-        auth.logout()
-        if (typeof window !== 'undefined') {
-          router.push('/login')
-        }
+        // onResponseError 是 $fetch 异步回调，已脱离 Nuxt 上下文；
+        // logout 内部要用 useState/useRuntimeConfig，必须 runWithContext 恢复，
+        // 否则抛 "nuxt instance unavailable" 中断回调、跳转永远不执行
+        void nuxtApp.runWithContext(() => {
+          auth.logout()
+          const current = router.currentRoute.value
+          // /b/ 是 C 端公开页不踢商户登录页；已在 /login 时避免自跳产生 redirect=/login
+          if (current.path !== '/login' && !current.path.startsWith('/b/')) {
+            return navigateTo({ path: '/login', query: { redirect: current.fullPath } })
+          }
+        })
         return
       }
       if (status === 403) {

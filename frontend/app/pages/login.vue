@@ -151,6 +151,7 @@ definePageMeta({ layout: 'public' })
 const cfg = useRuntimeConfig().public
 const auth = useAuthStore()
 const router = useRouter()
+const route = useRoute()
 const { info: storeInfo, refresh } = useStoreInfo()
 
 const form = reactive({ email: '', password: '', remember: false, captchaAnswer: '' })
@@ -189,7 +190,13 @@ async function onSubmit() {
       ? { id: captchaId.value, answer: form.captchaAnswer }
       : undefined
     await auth.login(form.email, form.password, form.remember, captcha)
-    await router.push('/')
+    // 回跳被守卫拦截前的目标页；只接受站内路径（// 开头是协议相对外链，防开放重定向）
+    const redirect = route.query.redirect
+    const target =
+      typeof redirect === 'string' && redirect.startsWith('/') && !redirect.startsWith('//')
+        ? redirect
+        : '/'
+    await router.push(target)
   } catch (e: any) {
     failCount.value++
     errorMsg.value = e?.data?.message || e?.message || '登录失败，请检查账号密码'
