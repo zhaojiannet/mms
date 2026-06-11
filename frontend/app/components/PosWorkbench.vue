@@ -97,7 +97,7 @@
                       <span class="text-sm font-medium truncate">{{ m.name }}</span>
                       <UBadge v-if="m.status && m.status !== 'active'" :label="memberStatusLabel(m.status)" color="warning" variant="soft" size="xs" />
                     </div>
-                    <div class="text-xs text-stone-400 tabular-nums">{{ formatPhone(m.phone) }}</div>
+                    <div class="text-xs text-stone-500 dark:text-stone-400 tabular-nums">{{ formatPhone(m.phone) }}</div>
                   </div>
                   <div class="shrink-0 text-right">
                     <div v-if="parseFloat(m.total_balance ?? '0') > 0" class="text-sm font-semibold tabular-nums text-primary-600 dark:text-primary-400">
@@ -445,7 +445,7 @@
                     <div class="tabular-nums text-sm font-medium">¥{{ lineSubtotal(it).toFixed(2) }}</div>
                     <button
                       type="button"
-                      class="text-xs text-stone-300 hover:text-error-500 mt-0.5 transition"
+                      class="text-xs text-stone-500 dark:text-stone-400 hover:text-error-600 dark:hover:text-error-400 mt-0.5 transition"
                       @click="items.splice(idx, 1)"
                     >移除</button>
                   </td>
@@ -464,41 +464,35 @@
               <span class="text-stone-500">总优惠</span>
               <span class="tabular-nums text-base font-semibold text-error-600 dark:text-error-400">- ¥{{ discount.toFixed(2) }}</span>
             </div>
-            <div v-else-if="discount < 0" class="flex justify-between items-baseline text-sm">
-              <span class="text-stone-500">加价</span>
-              <span class="tabular-nums text-base font-semibold text-warning-600">+ ¥{{ Math.abs(discount).toFixed(2) }}</span>
-            </div>
             <!-- 实付金额：可点击改价；金额本身大字，旁边明显"改价"按钮提示可操作 -->
             <div class="flex items-baseline justify-between pt-2 mt-1 border-t border-stone-200/60 dark:border-stone-800">
               <div class="flex items-center gap-2">
                 <span class="text-sm font-medium text-stone-700 dark:text-stone-300">实付金额</span>
                 <UBadge v-if="useManualPrice" label="已改价" color="warning" variant="soft" size="xs" />
               </div>
-              <div class="relative inline-flex group">
-                <UPopover :ui="{ content: 'p-3 w-64' }">
+              <UPopover :ui="{ content: 'p-3 w-64' }">
+                <UTooltip :text="useManualPrice ? '已自定义，点击重新调整' : '点击自定义实付金额（折扣 / 抹零）'" :delay-duration="200">
                   <button
                     type="button"
-                    class="inline-flex items-end gap-1.5 cursor-pointer"
+                    class="group inline-flex items-end gap-1.5 cursor-pointer"
                   >
                     <UIcon name="i-lucide-pencil-line" class="size-3.5 mb-1 text-stone-400 group-hover:text-primary-600 dark:group-hover:text-primary-400 transition" />
-                    <span class="text-3xl font-bold tabular-nums text-primary-600 dark:text-primary-400 leading-none group-hover:underline group-hover:decoration-dotted group-hover:underline-offset-4">¥{{ actualPaid.toFixed(2) }}</span>
+                    <span class="text-3xl font-semibold tabular-nums text-primary-600 dark:text-primary-400 leading-none group-hover:underline group-hover:decoration-dotted group-hover:underline-offset-4">¥{{ actualPaid.toFixed(2) }}</span>
                   </button>
+                </UTooltip>
                 <template #content>
                   <div class="space-y-2">
                     <div class="text-xs text-stone-500">自定义实付金额</div>
-                    <UInput v-model="manualPrice" type="number" step="0.01" :placeholder="`原 ¥${(total - (discount > 0 ? discount : 0)).toFixed(2)}`" size="sm" class="w-full" autofocus />
+                    <UInput v-model="manualPrice" type="number" step="0.01" min="0" :max="total.toFixed(2)" :placeholder="`原 ¥${(total - (discount > 0 ? discount : 0)).toFixed(2)}`" size="sm" class="w-full" autofocus />
                     <UInput v-model="manualReason" placeholder="原因（必填）" size="sm" class="w-full" />
+                    <p v-if="manualPriceError" class="text-xs text-error-600 dark:text-error-400">{{ manualPriceError }}</p>
                     <div class="flex gap-1.5 pt-1">
-                      <UButton size="xs" color="primary" :disabled="!manualPrice || !manualReason" @click="useManualPrice = true">应用</UButton>
+                      <UButton size="xs" color="primary" :disabled="!manualPrice || !manualReason || !!manualPriceError" @click="useManualPrice = true">应用</UButton>
                       <UButton v-if="useManualPrice" size="xs" variant="ghost" color="neutral" @click="useManualPrice = false; manualPrice = ''; manualReason = ''">恢复</UButton>
                     </div>
                   </div>
                 </template>
               </UPopover>
-                <span class="pointer-events-none absolute right-0 top-full mt-1 px-2.5 py-1 rounded-md bg-stone-900/90 dark:bg-stone-100/90 text-white dark:text-stone-900 text-xs whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity duration-150 shadow-md z-20">
-                  {{ useManualPrice ? '已自定义，点击重新调整' : '点击自定义实付金额（折扣 / 抹零 / 加价）' }}
-                </span>
-              </div>
             </div>
           </div>
 
@@ -565,6 +559,7 @@
           <span v-if="todayTx.total > 0" class="text-xs text-stone-500">
             共 {{ todayTx.total }} 笔 · 实收 ¥{{ todayTx.actualSum }}
           </span>
+          <span v-if="todayTx.truncated" class="text-xs text-warning-600 dark:text-warning-400">合计仅含最近 200 笔</span>
           <button
             v-if="todayTx.voidedCount > 0"
             type="button"
@@ -579,13 +574,13 @@
       <div v-if="todayTx.loading && todayTx.items.length === 0" class="px-6 py-10 text-center text-sm text-stone-400">加载中…</div>
       <div v-else-if="todayTx.items.length === 0" class="px-6 py-10 text-center text-sm text-stone-400">今日暂无消费记录</div>
       <div v-else class="overflow-x-auto">
-      <table class="w-full min-w-[720px] text-sm table-fixed">
+      <table class="w-full min-w-[720px] text-sm">
         <thead class="bg-stone-50/60 dark:bg-stone-950/30 text-stone-500 text-xs tracking-wide">
           <tr>
             <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-32">姓名</th>
             <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-40">会员卡</th>
             <th class="text-left px-4 py-2.5 font-medium">服务项目</th>
-            <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-14">数量</th>
+            <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-20">数量</th>
             <th class="text-right px-4 py-2.5 font-medium w-40">金额</th>
             <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-20">时间</th>
             <th v-if="canVoid" class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-28">操作</th>
@@ -594,7 +589,7 @@
         <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
           <tr
             v-for="t in visibleTx" :key="t.id"
-            :class="['even:bg-stone-50/40 dark:even:bg-stone-800/20 hover:bg-stone-100/60! dark:hover:bg-stone-800/30! transition-colors', t.status === 'voided' ? 'opacity-50' : '']"
+            :class="['even:bg-stone-50/40 dark:even:bg-stone-800/20 hover:bg-stone-100/60! dark:hover:bg-stone-800/30! transition-colors', t.status === 'voided' ? 'opacity-60' : '']"
           >
             <td class="px-4 py-1.5 whitespace-nowrap truncate">
               <span v-if="t.member_name" class="inline-flex items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium">
@@ -614,38 +609,49 @@
             <td class="px-4 py-1.5 text-stone-600 dark:text-stone-400 break-words">{{ t.summary || '—' }}</td>
             <td class="px-4 py-1.5 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || '—' }}</td>
             <td class="px-4 py-1.5 text-right align-middle">
-              <!-- 实付金额：有卡余额变化时下加虚线，hover 展示快照 -->
-              <div class="relative inline-block group">
-                <div
-                  class="flex items-baseline justify-end gap-1.5 leading-tight"
-                  :class="t.card_snapshots && t.card_snapshots.length > 0 ? 'cursor-help border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5' : ''"
-                >
+              <!-- 实付金额：有卡余额变化时下加虚线，hover 弹出快照（UPopover hover 模式，富结构内容不适合 UTooltip） -->
+              <UPopover
+                v-if="t.card_snapshots && t.card_snapshots.length > 0"
+                mode="hover"
+                :open-delay="150"
+                :ui="{ content: 'px-3 py-2.5 min-w-64' }"
+              >
+                <div class="inline-block cursor-help">
+                  <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
+                    <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                    <span class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
+                  </div>
+                  <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
+                    <span v-if="parseFloat(t.discount_amount) > 0" class="text-error-600">省 ¥{{ t.discount_amount }}</span>
+                    <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
+                  </div>
+                </div>
+                <template #content>
+                  <div>
+                    <div class="text-xs text-stone-500 dark:text-stone-400 mb-1.5">余额快照</div>
+                    <div v-for="s in t.card_snapshots" :key="s.card_id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+                      <span class="truncate text-left text-stone-900 dark:text-stone-100">
+                        {{ s.card_type_name }}
+                        <span v-if="s.change_type === 'void_restore'" class="text-xs text-warning-600 dark:text-warning-400 ml-1">还原</span>
+                        <span v-else-if="s.change_type === 'issue'" class="text-xs text-primary-600 dark:text-primary-400 ml-1">办卡</span>
+                      </span>
+                      <span class="tabular-nums shrink-0">
+                        <span class="text-stone-500 dark:text-stone-400">¥{{ s.balance_before }}</span>
+                        <span class="text-stone-400 dark:text-stone-500 mx-1">→</span>
+                        <span class="font-semibold text-stone-900 dark:text-stone-100">¥{{ s.balance_after }}</span>
+                      </span>
+                    </div>
+                  </div>
+                </template>
+              </UPopover>
+              <div v-else class="inline-block">
+                <div class="flex items-baseline justify-end gap-1.5 leading-tight">
                   <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
                   <span class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                 </div>
                 <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                   <span v-if="parseFloat(t.discount_amount) > 0" class="text-error-600">省 ¥{{ t.discount_amount }}</span>
                   <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
-                </div>
-
-                <!-- 余额快照 tooltip -->
-                <div
-                  v-if="t.card_snapshots && t.card_snapshots.length > 0"
-                  class="pointer-events-none absolute right-0 top-full mt-1 z-30 min-w-64 px-3 py-2.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                >
-                  <div class="text-xs text-stone-400 dark:text-stone-500 mb-1.5">余额快照</div>
-                  <div v-for="s in t.card_snapshots" :key="s.card_id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
-                    <span class="truncate text-left">
-                      {{ s.card_type_name }}
-                      <span v-if="s.change_type === 'void_restore'" class="text-xs text-warning-500 ml-1">还原</span>
-                      <span v-else-if="s.change_type === 'issue'" class="text-xs text-primary-400 ml-1">办卡</span>
-                    </span>
-                    <span class="tabular-nums shrink-0">
-                      <span class="text-stone-400 dark:text-stone-500">¥{{ s.balance_before }}</span>
-                      <span class="text-stone-300 dark:text-stone-600 mx-1">→</span>
-                      <span class="font-semibold">¥{{ s.balance_after }}</span>
-                    </span>
-                  </div>
                 </div>
               </div>
             </td>
@@ -829,6 +835,7 @@ const todayTx = reactive({
   loading: false,
   showVoided: false,
   displayCount: PAGE_SIZE,
+  truncated: false, // 今日交易数超过单次拉取上限（200），合计只覆盖最近 200 笔
 })
 const filteredTx = computed(() =>
   todayTx.showVoided ? todayTx.items : todayTx.items.filter(t => t.status !== 'voided'),
@@ -851,11 +858,17 @@ let todayTxEtag = ''
 async function fetchTodayTx() {
   todayTx.loading = true
   try {
-    const todayStr = new Date().toISOString().slice(0, 10)
+    // 本地日界：formatDateOnly 取本地 YYYY-MM-DD（无偏移字符串按本地时区解析），
+    // 再 toISOString 转成对应 UTC 时刻；后端区间是 transaction_time < end_date 左闭右开，
+    // end 必须传次日本地 0 点而非 23:59:59（否则漏最后一秒）
+    const todayStr = formatDateOnly(new Date())
+    const dayStart = new Date(`${todayStr}T00:00:00`)
+    const dayEnd = new Date(dayStart)
+    dayEnd.setDate(dayEnd.getDate() + 1)
     const q = new URLSearchParams({
-      start_date: `${todayStr}T00:00:00Z`,
-      end_date:   `${todayStr}T23:59:59Z`,
-      limit: '50',
+      start_date: dayStart.toISOString(),
+      end_date: dayEnd.toISOString(),
+      limit: '200', // 后端单次上限 200，超出由 truncated 提示兜底
       include_voided: '1',
     })
     const headers: Record<string, string> = {}
@@ -876,6 +889,7 @@ async function fetchTodayTx() {
     const valid = res._data.items.filter(t => t.status !== 'voided')
     todayTx.total = valid.length
     todayTx.voidedCount = res._data.items.length - valid.length
+    todayTx.truncated = (res._data.total ?? 0) > res._data.items.length
     todayTx.actualSum = valid
       .reduce((s, t) => s + parseFloat(t.actual_paid_amount), 0)
       .toFixed(2)
@@ -905,9 +919,13 @@ async function doVoid() {
     todayTx.voidedCount = todayTx.items.filter(t => t.status === 'voided').length
     todayTx.total = todayTx.items.length - todayTx.voidedCount
     voidOpen.value = false
+    // 撤销改变实收合计与卡余额：整体重拉今日记录（撤单后 updated_at 变化，ETag 必失效拿到新数据）
+    fetchTodayTx()
     if (member.value) {
       const cards = await api<{ items: Card[] }>(`/api/members/${member.value.id}/cards`)
       memberCards.value = cards.items.filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
+      const sum = memberCards.value.reduce((s, c) => s + parseFloat(c.balance), 0)
+      member.value = { ...member.value, total_balance: sum.toFixed(2) }
     }
   } catch (e: any) {
     voidErr.value = e?.data?.message || '撤销失败（请确认在"设置 → 交易撤销"里开启）'
@@ -998,7 +1016,24 @@ const actualPaid = computed(() => {
   return total.value - discount.value
 })
 
+// 改价校验：后端拒绝 manual_price 超过应收金额（不支持加价），且库内金额是 NUMERIC(10,2)，
+// 前端先拦 0 ≤ 值 ≤ 应收、最多 2 位小数
+const manualPriceError = computed(() => {
+  if (!manualPrice.value) return ''
+  if (!/^\d+(\.\d{1,2})?$/.test(manualPrice.value.trim())) return '金额需为不小于 0 的数字，最多 2 位小数'
+  if (parseFloat(manualPrice.value) > total.value) return `不能超过应收 ¥${total.value.toFixed(2)}`
+  return ''
+})
+
 const pendingMode = ref('')
+
+// 挂账决定只对「当时的购物车 / 会员 / 卡分配」有效；任一变化后余额可能重新够扣，
+// 残留的挂账标记会把可正常扣卡的单提交成 0 实收全额挂账，故一律重置
+watch(
+  [items, member, memberCards, selectedPm, manualCardMode, manualCardId],
+  () => { pendingMode.value = '' },
+  { deep: true },
+)
 
 const discountedTotal = computed(() => {
   if (!isMemberCardPay.value || previewRate.value >= 1) return total.value
@@ -1158,19 +1193,20 @@ async function fetchBase() {
   }
 }
 
-// 会员搜索：useDebounceFn 150ms（POS 响应敏捷感）+ 取消旧请求避免乱序
-let searchAbort: AbortController | null = null
+// 会员搜索：useDebounceFn 150ms（POS 响应敏捷感）。
+// 序号 + 当前关键词双守卫：乱序返回 / 清空后才返回的旧响应一律丢弃。
+// 不用 AbortController：ofetch 中断时抛 FetchError（AbortError 只挂在 cause 上），靠 catch 判错不可靠
+let searchSeq = 0
 const debouncedSearch = useDebounceFn(async () => {
+  const seq = ++searchSeq
   const q = memberSearch.value.trim()
   if (!q) { memberOptions.value = []; return }
-  // 取消上一次未完成的请求
-  if (searchAbort) searchAbort.abort()
-  searchAbort = new AbortController()
   try {
-    const d = await api<{ items: Member[] }>(`/api/members?search=${encodeURIComponent(q)}&limit=8`, { signal: searchAbort.signal })
+    const d = await api<{ items: Member[] }>(`/api/members?search=${encodeURIComponent(q)}&limit=8`)
+    if (seq !== searchSeq || memberSearch.value.trim() !== q) return
     memberOptions.value = d.items || []
-  } catch (e: any) {
-    if (e?.name !== 'AbortError') memberOptions.value = []
+  } catch {
+    if (seq === searchSeq) memberOptions.value = []
   }
 }, 150)
 
@@ -1237,6 +1273,8 @@ async function submit() {
 
   if (useManualPrice.value) {
     if (!manualReason.value) { err.value = '手动改价需要填原因'; return }
+    // 应用改价后购物车可能又变了（应收变小），提交前按当前应收重新校验
+    if (manualPriceError.value) { err.value = `改价无效：${manualPriceError.value}`; return }
     body.manual_price = manualPrice.value
   }
 
@@ -1250,6 +1288,8 @@ async function submit() {
   }
 
   if (isMemberCardPay.value) {
+    // 双保险：余额已够扣（allocationPlan 非空）时绝不挂账，兜住 watch 之外的任何状态残留
+    if (pendingMode.value && allocationPlan.value.length > 0) pendingMode.value = ''
     if (pendingMode.value === 'full') {
       body.pending_mode = 'full'
       body.manual_price = '0'
@@ -1313,7 +1353,4 @@ onMounted(() => {
   ensureVoidFetched()
 })
 useIntervalFn(fetchTodayTx, 60_000)
-onBeforeUnmount(() => {
-  searchAbort?.abort()
-})
 </script>
