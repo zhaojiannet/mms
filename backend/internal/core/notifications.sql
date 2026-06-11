@@ -20,13 +20,15 @@ ORDER BY a.published_at DESC;
 
 -- name: MarkAnnouncementReadByVersion :exec
 -- 按 version 字符串标记已读（前端传 version 更稳定，不用暴露内部 UUID）
-INSERT INTO system_announcement_reads (user_id, announcement_id)
-SELECT $1, id FROM system_announcements WHERE version = $2
+INSERT INTO system_announcement_reads (tenant_id, user_id, announcement_id)
+SELECT sqlc.arg('tenant_id'), sqlc.arg('user_id'), id
+FROM system_announcements WHERE version = sqlc.arg('version')
 ON CONFLICT DO NOTHING;
 
 -- name: MarkAllAnnouncementsRead :exec
-INSERT INTO system_announcement_reads (user_id, announcement_id)
-SELECT $1, id FROM system_announcements
+INSERT INTO system_announcement_reads (tenant_id, user_id, announcement_id)
+SELECT sqlc.arg('tenant_id'), sqlc.arg('user_id'), id
+FROM system_announcements
 ON CONFLICT DO NOTHING;
 
 -- name: UpsertSystemAnnouncement :exec

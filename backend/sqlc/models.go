@@ -198,9 +198,9 @@ type Staff struct {
 	Position string      `json:"position"`
 	Phone    *string     `json:"phone"`
 	HireDate pgtype.Date `json:"hire_date"`
-	// 是否参与提成核算（老板/前台可关闭）
+	// 是否参与提成核算（老板/前台可关闭；提成核算功能未上线，字段预留）
 	CountsCommission bool `json:"counts_commission"`
-	// 默认提成率 [0,1]，commission_rules 无匹配时兜底
+	// 默认提成率 [0,1]（提成核算功能未上线，字段预留）
 	DefaultCommissionRate decimal.Decimal    `json:"default_commission_rate"`
 	SortOrder             int32              `json:"sort_order"`
 	Status                string             `json:"status"`
@@ -241,6 +241,7 @@ type SystemAnnouncementRead struct {
 	UserID         uuid.UUID          `json:"user_id"`
 	AnnouncementID uuid.UUID          `json:"announcement_id"`
 	ReadAt         pgtype.Timestamptz `json:"read_at"`
+	TenantID       uuid.UUID          `json:"tenant_id"`
 }
 
 type Tenant struct {

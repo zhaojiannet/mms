@@ -61,7 +61,29 @@ func NewPool(ctx context.Context) (*pgxpool.Pool, error) {
 		return nil, fmt.Errorf("ping pool: %w", err)
 	}
 
+	if err := verifyRLSEnforceable(pingCtx, pool); err != nil {
+		pool.Close()
+		return nil, err
+	}
+
 	return pool, nil
+}
+
+// verifyRLSEnforceable 启动即拦截会绕过 RLS 的连接角色。
+// superuser 和 BYPASSRLS 角色对所有租户行可见，运维一旦把 DB_USER 配成
+// postgres 之类的角色，多租户隔离会静默失效——必须 fail-fast 而不是带病启动
+func verifyRLSEnforceable(ctx context.Context, pool *pgxpool.Pool) error {
+	var super, bypass bool
+	err := pool.QueryRow(ctx,
+		"SELECT rolsuper, rolbypassrls FROM pg_roles WHERE rolname = current_user",
+	).Scan(&super, &bypass)
+	if err != nil {
+		return fmt.Errorf("check db role rls: %w", err)
+	}
+	if super || bypass {
+		return fmt.Errorf("db user %q has SUPERUSER/BYPASSRLS; tenant RLS would be silently bypassed — use a plain role", getenv("DB_USER", "mms"))
+	}
+	return nil
 }
 
 func getenv(k, def string) string {
