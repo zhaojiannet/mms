@@ -53,6 +53,7 @@ LEFT JOIN card_types ct ON ct.id = c.card_type_id
 WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR t.transaction_time >= sqlc.narg('start_date')::timestamptz)
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR t.transaction_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('kind')::text              IS NULL OR t.kind             =  sqlc.narg('kind')::text)
+  AND (sqlc.narg('member_id')::uuid         IS NULL OR t.member_id       =  sqlc.narg('member_id')::uuid)
   AND (
     sqlc.narg('status')::text IS NOT NULL AND t.status = sqlc.narg('status')::text
     OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR t.status = 'completed')
@@ -68,6 +69,7 @@ FROM transactions
 WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.narg('start_date')::timestamptz)
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR transaction_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('kind')::text              IS NULL OR kind              =  sqlc.narg('kind')::text)
+  AND (sqlc.narg('member_id')::uuid         IS NULL OR member_id        =  sqlc.narg('member_id')::uuid)
   AND (
     sqlc.narg('status')::text IS NOT NULL AND status = sqlc.narg('status')::text
     OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR status = 'completed')
@@ -78,6 +80,7 @@ SELECT count(*) FROM transactions
 WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.narg('start_date')::timestamptz)
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR transaction_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('kind')::text              IS NULL OR kind              =  sqlc.narg('kind')::text)
+  AND (sqlc.narg('member_id')::uuid         IS NULL OR member_id        =  sqlc.narg('member_id')::uuid)
   AND (
     sqlc.narg('status')::text IS NOT NULL AND status = sqlc.narg('status')::text
     OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR status = 'completed')

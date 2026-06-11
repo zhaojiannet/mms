@@ -1,6 +1,14 @@
 -- name: GetMemberByID :one
 SELECT * FROM members WHERE id = $1;
 
+-- name: GetMemberStats :one
+-- 单查会员的聚合字段，口径与 ListMembers 一致（active 卡余额 + 未清挂账）
+SELECT
+  COALESCE((SELECT SUM(c.balance) FROM cards c WHERE c.member_id = sqlc.arg('member_id') AND c.status = 'active'), 0)::numeric AS total_balance,
+  COALESCE((SELECT SUM(mc.amount) FROM member_credits mc WHERE mc.member_id = sqlc.arg('member_id') AND mc.settled_at IS NULL), 0)::numeric AS total_pending,
+  (SELECT COUNT(*) FROM cards c WHERE c.member_id = sqlc.arg('member_id') AND c.status = 'active')::bigint AS card_count,
+  (SELECT COUNT(*) FROM cards c WHERE c.member_id = sqlc.arg('member_id') AND c.status = 'active' AND c.balance > 0)::bigint AS active_card_count;
+
 -- name: ListMembers :many
 SELECT
   m.id, m.tenant_id, m.name, m.phone, m.gender, m.birthday, m.notes, m.status,

@@ -698,6 +698,7 @@ func buildListETag(
 	start, end pgtype.Timestamptz,
 	kind, status *string,
 	includeVoided *bool,
+	memberID pgtype.UUID,
 	page, limit int32,
 	maxUpdatedAt pgtype.Timestamptz,
 ) string {
@@ -720,6 +721,10 @@ func buildListETag(
 	b.WriteByte('|')
 	if includeVoided != nil && *includeVoided {
 		b.WriteByte('1')
+	}
+	b.WriteByte('|')
+	if memberID.Valid {
+		b.WriteString(uuid.UUID(memberID.Bytes).String())
 	}
 	b.WriteByte('|')
 	b.WriteString(strconv.Itoa(int(page)))
@@ -772,6 +777,14 @@ func List(c *echo.Context) error {
 	if v := c.QueryParam("status"); v != "" {
 		status = &v
 	}
+	var memberID pgtype.UUID
+	if v := c.QueryParam("member_id"); v != "" {
+		mid, err := uuid.Parse(v)
+		if err != nil {
+			return echo.NewHTTPError(http.StatusBadRequest, "invalid member_id")
+		}
+		memberID = pgtype.UUID{Bytes: mid, Valid: true}
+	}
 
 	// staff 强制仅今日 + 强制 status=completed：忽略客户端 start_date/end_date/status/include_voided
 	// 不让员工看撤销记录（敏感操作，admin 通过操作日志查）
@@ -796,13 +809,14 @@ func List(c *echo.Context) error {
 		StartDate:     start,
 		EndDate:       end,
 		Kind:          kind,
+		MemberID:      memberID,
 		IncludeVoided: includeVoided,
 		Status:        status,
 	})
 	if err != nil {
 		return mw.InternalError(c, "list.max_updated_at", err)
 	}
-	etag := buildListETag(start, end, kind, status, includeVoided, page, limit, maxUpdatedAt)
+	etag := buildListETag(start, end, kind, status, includeVoided, memberID, page, limit, maxUpdatedAt)
 	if match := c.Request().Header.Get("If-None-Match"); match != "" && match == etag {
 		c.Response().Header().Set("ETag", etag)
 		return c.NoContent(http.StatusNotModified)
@@ -815,6 +829,7 @@ func List(c *echo.Context) error {
 		StartDate:     start,
 		EndDate:       end,
 		Kind:          kind,
+		MemberID:      memberID,
 		IncludeVoided: includeVoided,
 		Status:        status,
 	})
@@ -825,6 +840,7 @@ func List(c *echo.Context) error {
 		StartDate:     start,
 		EndDate:       end,
 		Kind:          kind,
+		MemberID:      memberID,
 		IncludeVoided: includeVoided,
 		Status:        status,
 	})

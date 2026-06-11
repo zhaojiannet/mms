@@ -128,6 +128,34 @@ func (q *Queries) GetMemberByID(ctx context.Context, id uuid.UUID) (Member, erro
 	return i, err
 }
 
+const getMemberStats = `-- name: GetMemberStats :one
+SELECT
+  COALESCE((SELECT SUM(c.balance) FROM cards c WHERE c.member_id = $1 AND c.status = 'active'), 0)::numeric AS total_balance,
+  COALESCE((SELECT SUM(mc.amount) FROM member_credits mc WHERE mc.member_id = $1 AND mc.settled_at IS NULL), 0)::numeric AS total_pending,
+  (SELECT COUNT(*) FROM cards c WHERE c.member_id = $1 AND c.status = 'active')::bigint AS card_count,
+  (SELECT COUNT(*) FROM cards c WHERE c.member_id = $1 AND c.status = 'active' AND c.balance > 0)::bigint AS active_card_count
+`
+
+type GetMemberStatsRow struct {
+	TotalBalance    decimal.Decimal `json:"total_balance"`
+	TotalPending    decimal.Decimal `json:"total_pending"`
+	CardCount       int64           `json:"card_count"`
+	ActiveCardCount int64           `json:"active_card_count"`
+}
+
+// 单查会员的聚合字段，口径与 ListMembers 一致（active 卡余额 + 未清挂账）
+func (q *Queries) GetMemberStats(ctx context.Context, memberID uuid.UUID) (GetMemberStatsRow, error) {
+	row := q.db.QueryRow(ctx, getMemberStats, memberID)
+	var i GetMemberStatsRow
+	err := row.Scan(
+		&i.TotalBalance,
+		&i.TotalPending,
+		&i.CardCount,
+		&i.ActiveCardCount,
+	)
+	return i, err
+}
+
 const listMembers = `-- name: ListMembers :many
 SELECT
   m.id, m.tenant_id, m.name, m.phone, m.gender, m.birthday, m.notes, m.status,
