@@ -8,13 +8,17 @@ FROM cards WHERE status = 'active';
 -- 营业报表：区间内的综合统计（对齐老系统口径）
 --   sale_revenue     : kind='sale' 实收合计（含挂账场景）
 --   credit_charged   : 区间内新增的挂账金额（老口径"挂账也算营业"）
---   card_consumption : sale 中走会员卡部分
+--   card_consumption : sale 中走会员卡部分（按扣卡流水判定：多卡支付时
+--                      transactions.card_id 为 NULL，不能按 card_id 判）
 --   recharge_amount  : kind='recharge' 实收合计（办卡/充值）
 --   customer_count   : 客数（有 member_id 按会员去重；无 member_id 按 tx id 去重）
 SELECT
   COALESCE(SUM(CASE WHEN kind='sale'     AND status='completed' THEN actual_paid_amount ELSE 0 END), 0)::numeric AS sale_revenue,
   COALESCE(SUM(CASE WHEN kind='recharge' AND status='completed' THEN actual_paid_amount ELSE 0 END), 0)::numeric AS recharge_amount,
-  COALESCE(SUM(CASE WHEN kind='sale' AND status='completed' AND card_id IS NOT NULL THEN actual_paid_amount ELSE 0 END), 0)::numeric AS card_consumption,
+  COALESCE(SUM(CASE WHEN kind='sale' AND status='completed'
+    AND EXISTS (SELECT 1 FROM card_balance_logs l
+                WHERE l.transaction_id = transactions.id AND l.change_type = 'consume')
+    THEN actual_paid_amount ELSE 0 END), 0)::numeric AS card_consumption,
   COUNT(DISTINCT CASE WHEN kind='sale' AND status='completed' THEN COALESCE(member_id::text, id::text) END)::bigint AS customer_count
 FROM transactions
 WHERE transaction_time >= $1 AND transaction_time < $2;
@@ -124,6 +128,11 @@ SELECT
 FROM cards c
 JOIN card_types ct ON ct.id = c.card_type_id
 WHERE c.issued_at >= $1 AND c.issued_at < $2
+  -- 排除办卡交易已撤销的卡（卡已冻结清零，不应计入销售）
+  AND NOT EXISTS (
+    SELECT 1 FROM transactions t
+    WHERE t.card_id = c.id AND t.kind = 'recharge' AND t.status = 'voided'
+  )
 GROUP BY 1, 2
 ORDER BY total DESC;
 

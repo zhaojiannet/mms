@@ -20,6 +20,9 @@ services:
       - "8081:8080"   # 宿主机 8081 → 容器 8080（避开 anydeli-api 占用的 8080）
     env_file:
       - .env
+    environment:
+      # 业务日界时区：报表"今日/本月"、员工当日窗口都按此时区切日
+      TZ: ${TZ:-Asia/Shanghai}
     restart: unless-stopped
     command: >
       sh -c "
