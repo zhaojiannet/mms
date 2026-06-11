@@ -9,7 +9,7 @@ ARG UID=1000
 ARG GID=1000
 
 # 启用 Corepack
-RUN corepack enable && corepack prepare pnpm@latest --activate
+RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
 
 # 【关键】调整 node 用户 UID/GID 与宿主机一致
 USER root
