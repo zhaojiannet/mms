@@ -217,12 +217,10 @@ func main() {
 	adminAndAbove.DELETE("/card-types/:id", cardtypes.Delete)
 
 	// --------------- 会员卡 ---------------
-	// staff 可查+办卡（业务需要），不可改不可删（防篡改卡次/过期时间）
+	// 只读列表；写操作唯一入口是下方 /cards/with-transaction（办卡+收款+流水联动）。
+	// 裸发卡 / 卡级 GET/PUT/DELETE 已移除：裸发卡可凭空充值（无交易无流水），
+	// 删卡会级联销毁 card_balance_logs 资金流水，且均无前端调用
 	secured.GET("/members/:memberId/cards", cards.ListByMember)
-	secured.POST("/members/:memberId/cards", cards.Issue)
-	secured.GET("/cards/:id", cards.Get)
-	adminAndAbove.PUT("/cards/:id", cards.Update)
-	adminAndAbove.DELETE("/cards/:id", cards.Delete)
 
 	// --------------- 挂账 ---------------
 	// staff 可建挂账、可清账（业务需要）；撤消（删挂账）需 admin（防员工消除痕迹）

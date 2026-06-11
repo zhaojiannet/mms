@@ -13,19 +13,6 @@ JOIN card_types ct ON ct.id = c.card_type_id
 WHERE c.member_id = $1
 ORDER BY c.issued_at DESC;
 
--- name: GetCardByID :one
-SELECT
-  c.id, c.tenant_id, c.member_id, c.card_type_id,
-  c.final_price, c.final_discount_rate, c.balance,
-  c.issued_at, c.expires_at, c.status, c.notes,
-  c.legacy_id, c.created_at, c.updated_at,
-  ct.name          AS card_type_name,
-  ct.price         AS card_type_price,
-  ct.discount_rate AS card_type_discount_rate
-FROM cards c
-JOIN card_types ct ON ct.id = c.card_type_id
-WHERE c.id = $1;
-
 -- name: LockCardForUpdate :one
 -- 扣款路径专用：SELECT FOR UPDATE 锁单行，防并发双扣
 -- 注：JOIN 的 card_types 不加锁（只读关联）
@@ -86,9 +73,3 @@ SET final_price         = COALESCE(sqlc.narg('final_price')::numeric,         fi
     updated_at          = now()
 WHERE id = $1
 RETURNING *;
-
--- name: DeleteCard :exec
-DELETE FROM cards WHERE id = $1;
-
--- name: CountCardUsage :one
-SELECT count(*) FROM transactions WHERE card_id = $1;
