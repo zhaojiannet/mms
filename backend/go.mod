@@ -10,12 +10,13 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx-shopspring-decimal v0.0.0-20220624020537-1d36b5a1853e
-	github.com/jackc/pgx/v5 v5.9.1
-	github.com/labstack/echo/v5 v5.1.0
+	github.com/jackc/pgx/v5 v5.10.0
+	github.com/labstack/echo/v5 v5.1.1
 	github.com/mojocn/base64Captcha v1.3.8
-	github.com/pressly/goose/v3 v3.27.0
+	github.com/pressly/goose/v3 v3.27.1
 	github.com/shopspring/decimal v1.4.0
-	golang.org/x/crypto v0.48.0
+	golang.org/x/crypto v0.53.0
+	golang.org/x/image v0.42.0
 )
 
 require (
@@ -26,9 +27,8 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/sethvargo/go-retry v0.3.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
-	golang.org/x/image v0.23.0 // indirect
-	golang.org/x/sync v0.19.0 // indirect
-	golang.org/x/sys v0.41.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/sync v0.21.0 // indirect
+	golang.org/x/sys v0.46.0 // indirect
+	golang.org/x/text v0.38.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 )
