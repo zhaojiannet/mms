@@ -7,6 +7,11 @@ import { useState } from '#imports'
 
 const VOID_WINDOW_SECONDS = 600
 
+// 模块级标记：ticker 必须脱离组件 effect scope。
+// 之前用 useIntervalFn 绑在首个调用组件上，该组件卸载后 interval 被销毁，
+// 其他页面的倒计时永久冻结。SPA 纯客户端运行，模块级 setInterval 安全。
+let tickerStarted = false
+
 interface VoidState {
   fetched: boolean
   enabled: boolean
@@ -23,12 +28,9 @@ export function useVoidEnabled() {
   const _now = useState<number>('void-enabled-now', () => Date.now())
 
   // 全局只启动一个 ticker（用于撤销窗口剩余秒数倒计时显示）
-  if (import.meta.client) {
-    const started = useState<boolean>('void-enabled-ticker', () => false)
-    if (!started.value) {
-      started.value = true
-      useIntervalFn(() => { _now.value = Date.now() }, 1000)
-    }
+  if (import.meta.client && !tickerStarted) {
+    tickerStarted = true
+    setInterval(() => { _now.value = Date.now() }, 1000)
   }
 
   const remainingSec = computed(() => {

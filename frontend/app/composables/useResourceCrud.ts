@@ -18,6 +18,7 @@ export function useResourceCrud<T extends BaseEntity>(
   opts: CrudOptions = {},
 ) {
   const api = useApi()
+  const toast = useToast()
 
   const items = ref<T[]>([])
   const loading = ref(true)
@@ -39,6 +40,9 @@ export function useResourceCrud<T extends BaseEntity>(
     try {
       const data = await api<{ items: T[] }>(endpoint)
       items.value = data.items
+    } catch (e: any) {
+      items.value = []
+      toast.add({ title: '加载失败', description: e?.data?.message || e?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
     } finally { loading.value = false }
   }
 
