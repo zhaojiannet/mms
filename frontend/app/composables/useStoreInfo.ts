@@ -14,6 +14,11 @@ const globalInfo = reactive<StoreInfo>({
   logo_url: '',
 })
 
+// 模块级缓存跨账号常驻，登出时由 auth store 调用清空
+export function resetStoreInfo() {
+  Object.assign(globalInfo, { name: '', slug: '', login_bg: 'beauty', logo_url: '' })
+}
+
 export function useStoreInfo() {
   const api = useApi()
 
