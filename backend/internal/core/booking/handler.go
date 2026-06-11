@@ -1,8 +1,9 @@
 // Package booking 提供公开的预约 C 端接口（无需登录，但要 booking_code 校验）
 //
 // 对应老 demo routes/booking.js：
-//   GET /api/booking/options?code=xxx      拿可选服务+员工
-//   POST /api/booking?code=xxx             创建预约
+//
+//	GET /api/booking/options?code=xxx      拿可选服务+员工
+//	POST /api/booking?code=xxx             创建预约
 //
 // 所有路由挂在 api group（经过 TenantResolver + TxBegin，但不需要 RequireAuth）
 package booking
@@ -11,6 +12,7 @@ import (
 	"context"
 	"crypto/subtle"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -18,10 +20,12 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/zhaojiannet/mms/backend/internal/platform/events"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
@@ -40,8 +44,8 @@ var (
 )
 
 const (
-	rateLimitWindow  = 30 * time.Second
-	rateMapMaxSize   = 10_000 // 满则拒绝新 key（攻击者已经很难穿透外层 RateLimit 了）
+	rateLimitWindow   = 30 * time.Second
+	rateMapMaxSize    = 10_000 // 满则拒绝新 key（攻击者已经很难穿透外层 RateLimit 了）
 	rateMapGCInterval = 5 * time.Minute
 )
 
@@ -223,6 +227,14 @@ func Create(c *echo.Context) error {
 	}
 
 	if req.AssignedStaffID != nil {
+		// 归属校验走 RLS 范围内的 SELECT：FK 不受 RLS 约束，
+		// 跨租户 staff UUID 能过 FK，这里必须显式查一次拦下
+		if _, err := q.GetStaffByID(ctx, *req.AssignedStaffID); err != nil {
+			if errors.Is(err, pgx.ErrNoRows) {
+				return echo.NewHTTPError(http.StatusBadRequest, "所选员工不存在")
+			}
+			return mw.InternalError(c, "booking.check-staff", err)
+		}
 		staffCount, err := q.CountStaffConflicts(ctx, sqlc.CountStaffConflictsParams{
 			AssignedStaffID:   pgtype.UUID{Bytes: *req.AssignedStaffID, Valid: true},
 			AppointmentTime:   windowStart,
@@ -279,10 +291,13 @@ func Create(c *echo.Context) error {
 		return mw.InternalError(c, "booking.add-services", err)
 	}
 
+	events.DefaultBus.Publish(events.TopicAppointmentCreated, map[string]any{
+		"appointment_id": appt.ID, "tenant_id": t.ID, "source": "booking",
+	})
+
 	return c.JSON(http.StatusCreated, map[string]any{
 		"success":        true,
 		"message":        "预约成功，我们会尽快与您确认",
 		"appointment_id": appt.ID,
 	})
 }
-
