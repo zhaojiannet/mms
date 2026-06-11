@@ -231,6 +231,20 @@ func RefreshHandler(c *echo.Context) error {
 	})
 }
 
+// LogoutHandler POST /api/auth/logout
+//
+// 服务端吊销：token_version +1，该用户所有已签发 token（含被盗的 remember
+// 7 天长 token）立即失效。语义是"登出所有设备"——无状态 JWT 下不引入
+// refresh_token 存储的最小吊销手段
+func LogoutHandler(c *echo.Context) error {
+	u := mw.UserFrom(c)
+	q := sqlc.New(mw.TxFrom(c))
+	if err := q.IncrementUserTokenVersion(c.Request().Context(), u.ID); err != nil {
+		return mw.InternalError(c, "logout: ", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"message": "logged out"})
+}
+
 // ChangePasswordRequest 修改当前登录用户的密码
 type ChangePasswordRequest struct {
 	OldPassword string `json:"old_password"`

@@ -253,8 +253,9 @@ func main() {
 	adminAndAbove.PUT("/tenant-settings/:key", tenantsettings.Upsert)
 	adminAndAbove.DELETE("/tenant-settings/:key", tenantsettings.Delete)
 	// 开启/关闭撤单 + 设置超级密码：仅 super_admin
-	superOnly.POST("/tenant-settings/enable-void", tenantsettings.EnableVoid)
-	superOnly.POST("/tenant-settings/disable-void", tenantsettings.DisableVoid)
+	// enable-void 校验超级密码，必须与其他密码类端点同档限流（防暴力穷举）
+	superOnly.POST("/tenant-settings/enable-void", tenantsettings.EnableVoid, pwdLimit)
+	superOnly.POST("/tenant-settings/disable-void", tenantsettings.DisableVoid, pwdLimit)
 	adminAndAbove.POST("/tenant-settings/booking-code", tenantsettings.RegenerateBookingCode)
 	superOnly.POST("/tenant-settings/super-password", tenantsettings.SetSuperPassword, pwdLimit)
 	secured.GET("/tenant-settings/super-password/status", tenantsettings.SuperPasswordStatus)
@@ -273,9 +274,11 @@ func main() {
 	// 批量 ID→名字解析：给日志对象列显示"会员·张三 / 交易·¥128 / 预约·王女士"
 	adminAndAbove.GET("/audit-logs/lookup", auditlogs.Lookup)
 
-	// --------------- 自助修改密码 / 续签 ---------------
+	// --------------- 自助修改密码 / 续签 / 登出 ---------------
 	secured.POST("/auth/change-password", auth.ChangePasswordHandler, pwdLimit)
 	secured.POST("/auth/refresh", auth.RefreshHandler)
+	// 登出 = token_version+1，吊销该用户所有已签发 token（含 remember 长 token）
+	secured.POST("/auth/logout", auth.LogoutHandler)
 
 	// --------------- 店铺 logo（admin 及以上） ---------------
 	adminAndAbove.POST("/store/logo", uploads.UploadLogo)
