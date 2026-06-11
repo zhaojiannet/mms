@@ -35,7 +35,7 @@
 
 | 模式 | 适用 | 说明 |
 |---|---|---|
-| **官方托管**（`hosted`） | 普通商户 | 访问 https://demo.example.com 自助注册，按套餐付费 |
+| **官方托管**（`hosted`） | 普通商户 | 官方运营的托管服务（自助注册与计费订阅在阶段 4+ 开放） |
 | **社区自建**（`self-hosted`） | 技术用户 / 个人店面 | 开源免费，自己搭服务器 |
 | **企业私有部署**（`enterprise`） | 连锁品牌 / 合规客户 | 合同定制，支持定制开发和 SLA |
 
@@ -130,7 +130,7 @@ go mod tidy                    # 刷新依赖
 go run ./cmd/server            # 手动启动
 
 # 进入数据库
-docker compose exec postgres psql -U mms -d mms
+docker exec -it postgres-server psql -U mms -d mms
 ```
 
 ## 项目结构

@@ -63,7 +63,7 @@ services:
 
 # ============================================================
 # 外部网络（预先创建：docker network create docker-net）
-# 通用 postgres 容器也在此网络内，容器名 "postgres"，DB_HOST=postgres
+# 通用 postgres 容器也在此网络内，容器名 "postgres-server"，DB_HOST=postgres-server
 # ============================================================
 networks:
   docker-net:
