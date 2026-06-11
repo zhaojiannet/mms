@@ -53,11 +53,10 @@ func (b *Bus) Publish(topic string, payload any) {
 }
 
 // ---- 约定好的事件常量 ----
+// 只保留有发布方+订阅方的事件；新事件等真实需求出现再加
 const (
 	TopicAppointmentCreated = "appointment.created"
-	TopicTransactionCreated = "transaction.created"
 	TopicTransactionVoided  = "transaction.voided"
-	TopicMemberRegistered   = "member.registered"
 )
 
 // DefaultBus 全局单例（main 启动时注册订阅者，业务代码 Publish）
