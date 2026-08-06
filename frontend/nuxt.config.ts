@@ -19,7 +19,8 @@ export default defineNuxtConfig({
 
   runtimeConfig: {
     public: {
-      apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:8081',
+      // 默认同源相对路径（生产各商户域名下由反代按 /api 路径分流）；开发在 .env 指到 localhost:8081
+      apiBase: process.env.NUXT_PUBLIC_API_BASE || '',
       appDomain: process.env.NUXT_PUBLIC_APP_DOMAIN || 'vip.example.com',
       deploymentMode: process.env.NUXT_PUBLIC_DEPLOYMENT_MODE || 'self-hosted',
       tenantSlug: process.env.NUXT_PUBLIC_TENANT_SLUG || 'demo',
