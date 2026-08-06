@@ -51,7 +51,6 @@ services:
       - mms-node-modules:/app/node_modules
       - mms-pnpm-store:/home/node/.local/share/pnpm/store
       - mms-nuxt-cache:/app/.nuxt
-      - mms-nuxt-output:/app/.output
     ports:
       - "3001:3000"   # 宿主机 3001 → 容器 3000
     env_file:
@@ -78,5 +77,4 @@ volumes:
   mms-node-modules:
   mms-pnpm-store:
   mms-nuxt-cache:
-  mms-nuxt-output:
   mms-uploads:

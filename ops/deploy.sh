@@ -12,7 +12,7 @@
 # 与 QingSi 版的差异（按 MMS 实际调整）：
 #   - 后端推源码，服务器容器 go run 重新编译；goose 迁移在启动时自动执行，
 #     所以部署前先 pg_dump 快照——迁移出问题时代码和数据都能回滚
-#   - 前端在本机容器内 nuxi build，产物在具名卷里，docker cp 出来再 rsync
+#   - 前端在本机容器内 nuxi build，产物经 bind mount 落在 frontend/.output 直接 rsync
 #
 # 安全边界：
 #   - 服务器地址、域名等私域信息只在 ops/deploy.env（gitignore，不入库）
@@ -35,12 +35,9 @@ if [ "${PART}" != "backend" ]; then
 	echo "== 前端：本机容器内构建"
 	docker exec mms_frontend sh -c 'cd /app && pnpm install --frozen-lockfile && npx nuxi build'
 
-	echo "== 前端：从容器取出产物并推送"
-	STAGE="$(mktemp -d)"
-	trap 'rm -rf "${STAGE}"' EXIT
-	docker cp mms_frontend:/app/.output "${STAGE}/"
+	echo "== 前端：推送产物"
 	rsync -az --delete --exclude '.DS_Store' --exclude '._*' \
-		"${STAGE}/.output/" "${SERVER}:${APP_DIR}/frontend/.output/"
+		frontend/.output/ "${SERVER}:${APP_DIR}/frontend/.output/"
 
 	echo "== 前端：重启"
 	ssh "${SERVER}" "docker restart mms_frontend"
