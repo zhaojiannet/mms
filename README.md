@@ -122,15 +122,43 @@ docker compose up -d
 
 ## 生产部署（1Panel）
 
-推荐用 [1Panel](https://1panel.cn/) 管理：
+推荐用 [1Panel](https://1panel.cn/) 管理。
+
+### 服务器初始化（一次性）
 
 1. 1Panel 应用商店装 OpenResty
-2. 在 1Panel "网站" 新建反向代理站点：
-   - 域名：`vip.zhaojian.net` → 反代到 `127.0.0.1:3001`（Nuxt 前端）
-   - 通配域名：`*.vip.zhaojian.net` → 同上（前端按 Host 解析 tenant slug）
-   - API 子域：`api.vip.zhaojian.net` → 反代到 `127.0.0.1:8081`（Go 后端）
-3. 1Panel "证书" 申请 Let's Encrypt 通配符证书，自动续期
-4. 1Panel "容器"里跑 docker-compose（backend + frontend，PG 复用全局 `postgres-server`）
+2. 在 1Panel "网站" 给**每个商户**建一个反代站点（`<slug>.vip.zhaojian.net`，DNS 手动加 A 记录），站点配置内按路径分流，后端按 Host 子域解析租户：
+
+   ```nginx
+   location /api/     { proxy_pass http://127.0.0.1:8081; }   # Go 后端
+   location /uploads/ { proxy_pass http://127.0.0.1:8081; }   # 店铺 logo 等上传资产
+   location = /health { proxy_pass http://127.0.0.1:8081; access_log off; }
+   location /         { proxy_pass http://127.0.0.1:3001; }   # Nuxt 前端
+   ```
+
+3. 每个站点单独申请 Let's Encrypt 证书（HTTP 验证，自动续期）。有意不用通配符证书：通配须 DNS 验证，等于把域名解析的 API 密钥存进服务器；单域手动建站每商户约 5 分钟，规模上来（约 30 商户/月）再考虑自动化
+4. clone 仓库到服务器（如 `/opt/mms`），`cp .env.example .env` 填好配置，然后生产模式启动（PG 复用全局 `postgres-server`）：
+
+   ```bash
+   mkdir -p frontend/.output   # 前端产物占位，首次推送前容器起不来属正常
+   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+   ```
+
+5. 备份定时任务：`crontab -e` 加 `0 3 * * * /opt/mms/ops/backup_pg.sh >> /var/log/mms_backup.log 2>&1`
+
+### 日常发布
+
+在**本机**执行（首次先 `cp ops/deploy.env.example ops/deploy.env` 填服务器地址）：
+
+```bash
+./ops/deploy.sh            # 全量（前端 + 后端）
+./ops/deploy.sh frontend   # 只改了前端
+./ops/deploy.sh backend    # 只改了后端
+```
+
+脚本自动完成：本机容器内构建（前端 `nuxi build`、后端编译检查）→ 服务器留回滚快照（后端代码 tar + `pg_dump`）→ rsync 推送（永不触碰服务器 `.env` 和商户上传文件）→ 重启（后端启动时 goose 自动迁移）→ 轮询 `/health` 健康检查。失败时打印回滚命令。
+
+前端回滚不靠快照：本机 checkout 上一个正常 commit 重新 `./ops/deploy.sh frontend` 即可。
 
 ## 开发
 

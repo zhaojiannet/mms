@@ -1,0 +1,15 @@
+# 生产叠加配置（服务器端用），覆盖开发命令：
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# 覆盖点：
+#   - backend：去掉 go mod tidy（依赖以仓库 go.sum 为准，服务器不改动依赖）
+#   - frontend：跑构建产物而非 dev server；.output 由 ops/deploy.sh 从本机推送，
+#     用 bind mount 覆盖开发用的具名卷，推送的文件才能被容器看到
+services:
+  backend:
+    command: sh -c "go run ./cmd/server"
+
+  frontend:
+    command: node .output/server/index.mjs
+    volumes:
+      - ./frontend/.output:/app/.output

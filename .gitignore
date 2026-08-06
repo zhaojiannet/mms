@@ -50,3 +50,4 @@ docs/
 /ops/cutover.md
 /ops/cutover.sh
 /ops/openresty/demo.conf
+/ops/deploy.env
