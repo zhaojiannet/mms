@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -26,6 +27,41 @@ type SettingDTO struct {
 	UpdatedAt time.Time       `json:"updated_at"`
 }
 
+// 通用 KV 端点的 key 闸门：本表混存了安全敏感项与普通配置，
+// 而 List/Get 对 staff 开放、Upsert/Delete 对 admin 开放，
+// 不设闸则低权限角色可绕过专用端点的校验直接读写它们。
+
+// secretKeys 凭据类：任何角色都不得经通用端点读取（写入亦禁），只能走专用端点
+// 后缀 _hash 一并视为凭据，新增同类 key 自动受保护
+var secretKeys = map[string]struct{}{
+	"super_password_hash": {},
+}
+
+// guardedKeys 受专用端点管辖的状态项：可读（前端要展示），但禁止经通用端点写/删，
+// 否则 admin 可绕过 super_admin 专属校验篡改撤单授权状态或预约码
+var guardedKeys = map[string]struct{}{
+	"void_enabled_at":         {},
+	"void_enabled_by":         {},
+	"enable_transaction_void": {},
+	"booking_code":            {},
+	"booking_code_updated_at": {},
+}
+
+func isSecret(key string) bool {
+	if _, ok := secretKeys[key]; ok {
+		return true
+	}
+	return strings.HasSuffix(key, "_hash")
+}
+
+func isWriteGuarded(key string) bool {
+	if isSecret(key) {
+		return true
+	}
+	_, ok := guardedKeys[key]
+	return ok
+}
+
 // List GET /api/tenant-settings
 func List(c *echo.Context) error {
 	t := mw.TenantFrom(c)
@@ -36,6 +72,9 @@ func List(c *echo.Context) error {
 	}
 	items := make([]SettingDTO, 0, len(rows))
 	for _, r := range rows {
+		if isSecret(r.Key) {
+			continue
+		}
 		items = append(items, SettingDTO{Key: r.Key, Value: r.Value, UpdatedAt: r.UpdatedAt.Time})
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": items})
@@ -43,10 +82,15 @@ func List(c *echo.Context) error {
 
 // Get GET /api/tenant-settings/:key
 func Get(c *echo.Context) error {
+	key := c.Param("key")
+	// 与不存在的 key 返回同一响应：不确认凭据是否已设置（状态查询走 /super-password/status）
+	if isSecret(key) {
+		return echo.NewHTTPError(http.StatusNotFound, "setting not found")
+	}
 	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 	row, err := q.GetTenantSetting(c.Request().Context(), sqlc.GetTenantSettingParams{
-		TenantID: t.ID, Key: c.Param("key"),
+		TenantID: t.ID, Key: key,
 	})
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -63,6 +107,9 @@ func Upsert(c *echo.Context) error {
 	key := c.Param("key")
 	if key == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "key required")
+	}
+	if isWriteGuarded(key) {
+		return echo.NewHTTPError(http.StatusForbidden, "该配置项须通过专用接口修改")
 	}
 	var body struct {
 		Value json.RawMessage `json:"value"`
@@ -83,10 +130,14 @@ func Upsert(c *echo.Context) error {
 
 // Delete DELETE /api/tenant-settings/:key
 func Delete(c *echo.Context) error {
+	key := c.Param("key")
+	if isWriteGuarded(key) {
+		return echo.NewHTTPError(http.StatusForbidden, "该配置项须通过专用接口修改")
+	}
 	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
 	if err := q.DeleteTenantSetting(c.Request().Context(), sqlc.DeleteTenantSettingParams{
-		TenantID: t.ID, Key: c.Param("key"),
+		TenantID: t.ID, Key: key,
 	}); err != nil {
 		return mw.InternalError(c, "delete: ", err)
 	}
