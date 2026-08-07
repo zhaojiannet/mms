@@ -11,6 +11,7 @@ import (
 	"github.com/labstack/echo/v5"
 	"github.com/shopspring/decimal"
 
+	"github.com/zhaojiannet/mms/backend/internal/core/quota"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
@@ -97,6 +98,9 @@ func Create(c *echo.Context) error {
 	if req.Name == "" || req.Position == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name and position are required")
 	}
+	if err := quota.Enforce(c, "max_staff"); err != nil {
+		return err
+	}
 
 	hireDate, err := timex.ParseDate(req.HireDate)
 	if err != nil {
@@ -141,6 +145,12 @@ func Update(c *echo.Context) error {
 	hireDate, err := timex.ParseDate(req.HireDate)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid hire_date: "+err.Error())
+	}
+	// 恢复 active 按新增计限额（同 members.Update，堵归档绕过）
+	if req.Status != nil && *req.Status == "active" {
+		if err := quota.EnforceOnActivate(c, "max_staff", id); err != nil {
+			return err
+		}
 	}
 	var commNull decimal.NullDecimal
 	if req.DefaultCommissionRate != nil {

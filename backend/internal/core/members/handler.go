@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgtype"
 	"github.com/labstack/echo/v5"
 
+	"github.com/zhaojiannet/mms/backend/internal/core/quota"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
@@ -120,6 +121,9 @@ func Create(c *echo.Context) error {
 	if req.Phone == nil || *req.Phone == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "phone is required")
 	}
+	if err := quota.Enforce(c, "max_members"); err != nil {
+		return err
+	}
 
 	tenant := mw.TenantFrom(c)
 	tx := mw.TxFrom(c)
@@ -191,6 +195,12 @@ func Update(c *echo.Context) error {
 	birthday, err := timex.ParseDate(req.Birthday)
 	if err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid birthday: "+err.Error())
+	}
+	// 恢复 active 按新增计限额（堵"归档→新建→恢复"绕过）；排除自身让已 active 的原地编辑不受限
+	if req.Status != nil && *req.Status == "active" {
+		if err := quota.EnforceOnActivate(c, "max_members", id); err != nil {
+			return err
+		}
 	}
 
 	tx := mw.TxFrom(c)
