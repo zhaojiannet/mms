@@ -3,7 +3,7 @@ package platform
 import "testing"
 
 func TestValidateSlug(t *testing.T) {
-	valid := []string{"mystore", "shui-nv-ren", "abc", "a2b", "demo123"}
+	valid := []string{"mystore", "my-first-shop", "abc", "a2b", "demo123"}
 	for _, s := range valid {
 		if err := ValidateSlug(s); err != nil {
 			t.Errorf("ValidateSlug(%q) 应通过，得到: %v", s, err)

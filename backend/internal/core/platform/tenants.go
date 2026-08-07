@@ -66,7 +66,7 @@ type createTenantRequest struct {
 	AdminName  string `json:"admin_name"`
 }
 
-// CreateTenant POST /api/platform/tenants（不走申请直接开通，mystore/mystore2 这类已谈定的商户用）
+// CreateTenant POST /api/platform/tenants（不走申请表单，线下已谈定的商户直接开通）
 func CreateTenant(c *echo.Context) error {
 	var req createTenantRequest
 	if err := c.Bind(&req); err != nil {
