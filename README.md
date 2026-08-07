@@ -33,8 +33,11 @@ POS 收银工作区：选项目 / 多卡组合扣费 / 价格调整 / 一键结�
 | 多租户 | 每个商户独立数据 + 独立子域名 + 独立品牌（PostgreSQL FORCE RLS 隔离） |
 | 多店员 + 权限 | 超级管理员 / 管理员 / 员工 三级权限 + JWT token 版本吊销 |
 | 通知与公告 | 顶部铃铛实时提醒（生日 / 预约待确认 / 系统公告）+ 侧边栏版本号 + changelog 页 |
+| 运营后台 | `admin` 子域独立入口：商户开通 / 续期改套餐 / 停用恢复 / 重置商户管理员密码 / 套餐价格与限额管理 |
+| 自助申请 | 主站 `/apply` 公开申请表单（验证码防刷），运营审批通过即自动建号 |
+| 套餐限额 | hosted 模式按套餐执行会员数 / 员工数上限（事务内锁行防超发），商户端到期提示条 |
 
-**计费订阅、行业模块、运营后台** 规划中，当前版本（V 26.4）未实现。
+**计费支付（线上续费）、行业模块** 规划中，当前版本未实现。
 
 ## 技术栈
 
@@ -95,6 +98,7 @@ docker compose up -d
 | **企业版** | 合同 | — | 私有部署 + 定制开发 + SLA | | | |
 
 所有套餐均解锁**全部功能**，差异仅在数量与推送配额（以及 Ultra 的行业模块包）。
+价格与限额可在运营后台随时调整；会员数 / 员工数上限已即刻执行，门店数与推送配额待对应功能上线后生效。
 
 自建版**无套餐限制**（所有配额项视为无限）。
 
@@ -148,6 +152,7 @@ docker compose up -d
    ```
 
 5. 备份定时任务：`crontab -e` 加 `0 3 * * * /opt/mms/ops/backup_pg.sh >> /var/log/mms_backup.log 2>&1`
+6. **端口收口（必做）**：防火墙与云安全组只放行 `22 / 80 / 443`，不要放行 `8081`（后端）、`3001`（前端）、`5432`（数据库）。容器端口发布在宿主机上仅供本机反代访问；一旦对外可直连，反代层的 TLS、限流与「运营后台仅 admin 子域可达」的 Host 限制都会被绕过。
 
 ### 日常发布
 
@@ -202,19 +207,21 @@ mms/
 │   │   │   ├── users/            账号管理（super_admin 专属）
 │   │   │   ├── audit_logs/       操作日志
 │   │   │   ├── notifications/    通知与系统公告（含 announcements.json seed）
-│   │   │   └── uploads/          Logo 上传（重编码剥离 polyglot）
+│   │   │   ├── uploads/          Logo 上传（重编码剥离 polyglot）
+│   │   │   ├── platform/         运营后台（操作员登录 / 申请审批 / 商户与套餐管理）
+│   │   │   └── quota/            套餐限额执行（hosted）
 │   │   └── platform/             基础设施
 │   │       ├── db/               pgxpool + DSN 构造
-│   │       ├── auth/             JWT 签发 / 解析 / 版本吊销
-│   │       ├── middleware/       TenantResolver / TenantTx / RequireAuth / Audit
-│   │       └── bootstrap/        首次启动创建超管
-│   ├── migrations/               goose SQL 迁移（00001-00030）
+│   │       ├── auth/             JWT 签发 / 解析 / 版本吊销（商户与平台双 issuer）
+│   │       ├── middleware/       TenantResolver / TenantTx / RequireAuth / Audit / PlatformTx
+│   │       └── bootstrap/        首次启动创建超管与平台操作员
+│   ├── migrations/               goose SQL 迁移
 │   ├── sqlc/                     sqlc 生成代码
 │   ├── sqlc.yaml
 │   └── Dockerfile
 ├── frontend/                     Nuxt 4 前端（SPA 模式）
 │   ├── app/
-│   │   ├── pages/                收银 / 会员 / 预约 / 报表 / 设置 / changelog
+│   │   ├── pages/                收银 / 会员 / 预约 / 报表 / 设置 / changelog / 运营后台(platform) / 申请(apply)
 │   │   ├── components/           SidebarContent / UserMenu / PosWorkbench / EmptyState
 │   │   ├── composables/          useApi / useStoreInfo / useTheme / useSafeUrl
 │   │   ├── middleware/           auth.global / super-admin / at-least-admin
@@ -231,7 +238,7 @@ mms/
 └── README.md
 ```
 
-> 阶段 4+ 按需添加：计费订阅 / 自助注册 / 支付 / 运营后台 / 行业扩展。当前不预留空目录。
+> 运营后台与自助申请已并入 `core/platform`；阶段 4+ 按需添加：计费订阅 / 线上支付 / 行业扩展。当前不预留空目录。
 
 ## 许可证
 
