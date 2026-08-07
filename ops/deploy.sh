@@ -22,8 +22,10 @@ cd "$(dirname "$0")/.."
 
 [ -f ops/deploy.env ] && . ops/deploy.env
 
-# 服务器上 PG 容器名（1Panel 装的名字不固定），deploy.env 可覆盖
+# 服务器上 PG 容器名 / 超级用户名 / 库名（面板安装的不固定），deploy.env 可覆盖
 PG_CONTAINER="${PG_CONTAINER:-postgres-server}"
+PG_SUPERUSER="${PG_SUPERUSER:-postgres}"
+DB_NAME="${DB_NAME:-mms}"
 
 for v in SERVER APP_DIR SITE_URL BACKUP_DIR; do
 	if [ -z "${!v:-}" ]; then
@@ -52,11 +54,15 @@ if [ "${PART}" != "frontend" ]; then
 	docker exec mms_backend sh -c 'cd /app && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -o server ./cmd/server'
 
 	echo "== 后端：服务器留回滚快照（二进制 + 数据库）"
+	# pipefail 必须显式开：否则 pg_dump 失败而 gzip 成功，管道整体算成功，快照悄悄丢失
+	# 二进制留 3 代、库快照留 10 次：仅为快速回退，更早版本由 git 重新编译，不作存档
 	ssh "${SERVER}" "
-		set -e
+		set -e -o pipefail
 		mkdir -p '${BACKUP_DIR}'
-		[ ! -f '${APP_DIR}/backend/server' ] || cp -p '${APP_DIR}/backend/server' '${BACKUP_DIR}/server_prev'
-		docker exec '${PG_CONTAINER}' pg_dump -U postgres mms | gzip > '${BACKUP_DIR}/pre_deploy_\$(date +%Y%m%d_%H%M%S).sql.gz'
+		[ ! -f '${APP_DIR}/backend/server' ] || cp -p '${APP_DIR}/backend/server' '${BACKUP_DIR}/server_\$(date +%Y%m%d_%H%M%S)'
+		ls -t '${BACKUP_DIR}'/server_* 2>/dev/null | tail -n +4 | xargs -r rm --
+		docker exec '${PG_CONTAINER}' pg_dump -U '${PG_SUPERUSER}' '${DB_NAME}' | gzip > '${BACKUP_DIR}/pre_deploy_\$(date +%Y%m%d_%H%M%S).sql.gz'
+		ls -t '${BACKUP_DIR}'/pre_deploy_*.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm --
 	"
 
 	echo "== 后端：推送二进制并重启（goose 迁移随启动自动执行）"
@@ -75,7 +81,8 @@ for i in $(seq 1 18); do
 done
 
 echo "健康检查失败（${SITE_URL}/health 不通）。回滚步骤：" >&2
-echo "  1. 二进制：ssh ${SERVER} \"cp -p ${BACKUP_DIR}/server_prev ${APP_DIR}/backend/server && docker restart mms_backend\"" >&2
+echo "  1. 二进制（最新快照即部署前在跑的那版）：" >&2
+echo "     ssh ${SERVER} \"cp -p \\\$(ls -t ${BACKUP_DIR}/server_* | head -1) ${APP_DIR}/backend/server && docker restart mms_backend\"" >&2
 echo "  2. 数据库（仅当迁移损坏数据时）：用 ${BACKUP_DIR}/pre_deploy_*.sql.gz 恢复 mms 库" >&2
 echo "  3. 排查：ssh ${SERVER} \"docker logs --tail 100 mms_backend\"" >&2
 exit 1
