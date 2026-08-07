@@ -42,6 +42,7 @@
 docker-compose.override.yml
 
 .claude/
+.memsearch/
 CLAUDE.md
 docs/
 
