@@ -1,0 +1,160 @@
+// Package platform 运营后台：操作员登录、商户申请审批、商户与套餐管理
+//
+// CUSTOM: 本包用裸 pgx 而非 sqlc——查询要在同一事务里交替切换 app.platform_op /
+// app.current_tenant 两种 RLS 上下文，且多为一次性运营操作，不适合 sqlc 的固定租户模型
+package platform
+
+import (
+	"context"
+	"crypto/rand"
+	"encoding/json"
+	"math/big"
+	"net/http"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/labstack/echo/v5"
+
+	coreauth "github.com/zhaojiannet/mms/backend/internal/core/auth"
+	"github.com/zhaojiannet/mms/backend/internal/platform/auth"
+	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+)
+
+var dbPool *pgxpool.Pool
+
+// dummyHash 对不存在的操作员也跑一次密码校验，保持等时响应防账号枚举
+var dummyHash string
+
+// Init 由 main.go 注入 pool（登录与公开申请不经过事务中间件，直接用 pool）
+func Init(pool *pgxpool.Pool) error {
+	dbPool = pool
+	h, err := auth.HashPassword("dummy-never-matches")
+	if err != nil {
+		return err
+	}
+	dummyHash = h
+	return nil
+}
+
+const genericLoginErr = "邮箱或密码错误"
+
+type loginRequest struct {
+	Email         string `json:"email"`
+	Password      string `json:"password"`
+	CaptchaID     string `json:"captcha_id,omitempty"`
+	CaptchaAnswer string `json:"captcha_answer,omitempty"`
+}
+
+// Login POST /api/platform/login（路由层挂 IP 限流）
+func Login(c *echo.Context) error {
+	var req loginRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+	}
+	if req.Email == "" || req.Password == "" {
+		return echo.NewHTTPError(http.StatusBadRequest, genericLoginErr)
+	}
+	ctx := c.Request().Context()
+
+	var (
+		id          uuid.UUID
+		hash, name  string
+		status      string
+		ver         int32
+		failed      int
+		lockedUntil *time.Time
+	)
+	err := dbPool.QueryRow(ctx, `
+		SELECT id, password_hash, name, status, token_version, failed_login_attempts, locked_until
+		FROM platform_operators WHERE email = $1
+	`, req.Email).Scan(&id, &hash, &name, &status, &ver, &failed, &lockedUntil)
+	if err != nil || status != "active" {
+		// 不存在与已停用一律走 dummy 校验 + 统一错误：防账号枚举与时序探测（与商户登录同策略）
+		_, _ = auth.VerifyPassword(req.Password, dummyHash)
+		return echo.NewHTTPError(http.StatusUnauthorized, genericLoginErr)
+	}
+
+	// 失败 2 次后强制验证码；锁定期内验证码为必要条件（防恶意锁号 DoS，与商户登录同策略）
+	captchaOK := coreauth.VerifyCaptcha(req.CaptchaID, req.CaptchaAnswer)
+	if failed >= 2 && !captchaOK {
+		return echo.NewHTTPError(http.StatusUnauthorized, "请输入图形验证码")
+	}
+	if lockedUntil != nil && time.Now().Before(*lockedUntil) && !captchaOK {
+		return echo.NewHTTPError(http.StatusTooManyRequests, "尝试次数过多，请稍后再试")
+	}
+
+	ok, err := auth.VerifyPassword(req.Password, hash)
+	if err != nil || !ok {
+		_, _ = dbPool.Exec(ctx, `
+			UPDATE platform_operators
+			SET failed_login_attempts = failed_login_attempts + 1,
+			    locked_until = CASE WHEN failed_login_attempts + 1 >= 5
+			                        THEN now() + interval '15 minutes' END,
+			    updated_at = now()
+			WHERE id = $1
+		`, id)
+		return echo.NewHTTPError(http.StatusUnauthorized, genericLoginErr)
+	}
+
+	_, _ = dbPool.Exec(ctx, `
+		UPDATE platform_operators
+		SET failed_login_attempts = 0, locked_until = NULL, last_login_at = now(), updated_at = now()
+		WHERE id = $1
+	`, id)
+
+	token, expiresAt, err := auth.SignOperatorToken(id, req.Email, ver)
+	if err != nil {
+		return mw.InternalError(c, "platform.login.sign", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"access_token": token,
+		"expires_at":   expiresAt,
+		"operator":     map[string]any{"email": req.Email, "name": name},
+	})
+}
+
+// Me GET /api/platform/me（前端启动时校验 token 有效性）
+func Me(c *echo.Context) error {
+	op := mw.OperatorFrom(c)
+	return c.JSON(http.StatusOK, map[string]any{"email": op.Email, "name": op.Name})
+}
+
+// --------------- 共享工具 ---------------
+
+// passwordAlphabet 去掉易混字符（0O1lI）的随机密码字符集
+const passwordAlphabet = "abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+
+// genPassword 生成 16 位一次性初始密码（crypto/rand）
+func genPassword() (string, error) {
+	b := make([]byte, 16)
+	for i := range b {
+		n, err := rand.Int(rand.Reader, big.NewInt(int64(len(passwordAlphabet))))
+		if err != nil {
+			return "", err
+		}
+		b[i] = passwordAlphabet[n.Int64()]
+	}
+	return string(b), nil
+}
+
+// setTenantCtx 在平台事务内切入某租户的 RLS 上下文（写 users / subscriptions 用）
+// 同时清掉 platform_op 哨兵：切入单租户后跨租户读策略即不再需要，
+// 后续查询若漏写租户过滤仍有 RLS 保护（防御纵深）
+func setTenantCtx(ctx context.Context, tx pgx.Tx, tenantID uuid.UUID) error {
+	_, err := tx.Exec(ctx,
+		"SELECT set_config('app.current_tenant', $1, true), set_config('app.platform_op', '', true)",
+		tenantID.String())
+	return err
+}
+
+// editionByCode 查套餐；不存在返回 (0, nil, pgx.ErrNoRows)
+func editionByCode(ctx context.Context, q interface {
+	QueryRow(context.Context, string, ...any) pgx.Row
+}, code string) (int16, json.RawMessage, error) {
+	var id int16
+	var quotas json.RawMessage
+	err := q.QueryRow(ctx, "SELECT id, quotas FROM editions WHERE code = $1 AND active", code).Scan(&id, &quotas)
+	return id, quotas, err
+}

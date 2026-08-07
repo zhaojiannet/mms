@@ -105,6 +105,12 @@ func TenantFrom(c *echo.Context) Tenant {
 	return t
 }
 
+// IsReservedSubdomain 判断 slug 是否为保留子域（signup 校验期望子域时用）
+func IsReservedSubdomain(s string) bool {
+	_, ok := reservedSubdomains[strings.ToLower(s)]
+	return ok
+}
+
 // extractSlug 解析 Host 子域名作为 tenant slug
 //   - 生产：<slug>.<app_public_domain> → slug
 //   - 开发/自建 fallback：X-Tenant-Slug 请求头；hosted/enterprise 禁用以防反代漏配

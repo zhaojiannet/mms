@@ -109,3 +109,8 @@ func verifyCaptcha(id, answer string) bool {
 	}
 	return captchaMemStore{}.Verify(id, answer, true)
 }
+
+// VerifyCaptcha 导出版：平台登录与公开申请表单共用同一 captcha store
+func VerifyCaptcha(id, answer string) bool {
+	return verifyCaptcha(id, answer)
+}

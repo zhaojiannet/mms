@@ -27,6 +27,7 @@ import (
 	"github.com/zhaojiannet/mms/backend/internal/core/members"
 	"github.com/zhaojiannet/mms/backend/internal/core/notifications"
 	paymentmethods "github.com/zhaojiannet/mms/backend/internal/core/payment_methods"
+	platformcore "github.com/zhaojiannet/mms/backend/internal/core/platform"
 	"github.com/zhaojiannet/mms/backend/internal/core/reports"
 	"github.com/zhaojiannet/mms/backend/internal/core/services"
 	"github.com/zhaojiannet/mms/backend/internal/core/staff"
@@ -69,12 +70,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// 幂等 bootstrap：平台操作员（PLATFORM_ADMIN_* 齐全时创建，运营后台登录用）
+	if err := bootstrap.EnsureOperator(context.Background(), pool); err != nil {
+		slog.Error("bootstrap operator failed", "err", err)
+		os.Exit(1)
+	}
+
 	// 系统公告 seed：从 announcements.json upsert 入库；失败只 warn 不中断
 	notifications.SeedAnnouncements(context.Background(), pool)
 
 	// 注入 pool 到 auth 包：登录失败计数的独立 tx 会用（绕过业务 handler tx 的 rollback）
 	if err := auth.Init(pool); err != nil {
 		slog.Error("auth init failed", "err", err)
+		os.Exit(1)
+	}
+
+	// 注入 pool 到 platform 包：平台登录与公开申请不经过事务中间件
+	if err := platformcore.Init(pool); err != nil {
+		slog.Error("platform init failed", "err", err)
 		os.Exit(1)
 	}
 
@@ -124,6 +137,37 @@ func main() {
 
 	// 审计 worker pool：固定 4 worker 消费写队列；满时 block（不丢审计）
 	mw.StartAuditWorkers(pool)
+
+	// --------------- 平台层（运营后台 + 公开申请）：不经过租户中间件 ---------------
+	// 公开验证码：主站申请表单与运营后台登录用（无租户上下文，与商户 /api/captcha 共享 store）
+	publicCaptchaLimit := mw.RateLimit(20, time.Minute)
+	e.GET("/api/public/captcha", auth.CaptchaHandler, publicCaptchaLimit)
+
+	// 商户开通申请（公开表单提交，验证码必填）
+	signupLimit := mw.RateLimit(5, time.Minute)
+	e.POST("/api/signup/applications", platformcore.SubmitApplication, signupLimit)
+
+	// 平台操作员登录（独立身份体系，issuer=mms-platform；仅 admin 子域可达）
+	platformLoginLimit := mw.RateLimit(5, time.Minute)
+	e.POST("/api/platform/login", platformcore.Login, mw.RequirePlatformHost(), platformLoginLimit)
+
+	// 平台受保护路由：Host 限制 + 平台事务（app.platform_op 哨兵）+ 操作员鉴权
+	pf := e.Group("/api/platform")
+	pf.Use(mw.RequirePlatformHost())
+	pf.Use(mw.PlatformTx(pool))
+	pf.Use(mw.RequireOperator())
+	pf.GET("/me", platformcore.Me)
+	pf.GET("/applications", platformcore.ListApplications)
+	pf.POST("/applications/:id/approve", platformcore.ApproveApplication)
+	pf.POST("/applications/:id/reject", platformcore.RejectApplication)
+	pf.GET("/tenants", platformcore.ListTenants)
+	pf.POST("/tenants", platformcore.CreateTenant)
+	pf.POST("/tenants/:id/suspend", platformcore.SuspendTenant)
+	pf.POST("/tenants/:id/resume", platformcore.ResumeTenant)
+	pf.POST("/tenants/:id/subscription", platformcore.SetSubscription)
+	pf.POST("/tenants/:id/reset-admin-password", platformcore.ResetAdminPassword)
+	pf.GET("/editions", platformcore.ListEditions)
+	pf.PUT("/editions/:code", platformcore.UpdateEdition)
 
 	// 多租户 API：所有 /api/* 必须经过 tenant resolver + 事务中间件
 	api := e.Group("/api")
@@ -284,6 +328,9 @@ func main() {
 	adminAndAbove.POST("/store/logo", uploads.UploadLogo)
 	adminAndAbove.DELETE("/store/logo", uploads.DeleteLogo)
 
+	// --------------- 套餐订阅（admin 及以上，到期提示条数据源） ---------------
+	adminAndAbove.GET("/store/subscription", tenantsettings.StoreSubscription)
+
 	// --------------- 通知与公告（所有登录用户） ---------------
 	secured.GET("/notifications", notifications.List)
 	secured.POST("/notifications/:version/read", notifications.MarkRead)
@@ -349,6 +396,13 @@ func validateCriticalEnv() error {
 	bootstrapPwd := os.Getenv("BOOTSTRAP_ADMIN_PASSWORD")
 	if bootstrapPwd != "" && strings.Contains(bootstrapPwd, "change_me") {
 		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD contains 'change_me' placeholder; set a real initial password or leave empty")
+	}
+
+	// DEPLOYMENT_MODE 拼错会让套餐限额静默失效（quota 只认 "hosted"），启动时把关
+	switch os.Getenv("DEPLOYMENT_MODE") {
+	case "", "hosted", "self-hosted", "enterprise", "dev":
+	default:
+		return fmt.Errorf("DEPLOYMENT_MODE must be one of hosted / self-hosted / enterprise (got %q)", os.Getenv("DEPLOYMENT_MODE"))
 	}
 	return nil
 }

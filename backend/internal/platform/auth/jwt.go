@@ -95,6 +95,64 @@ func SignAccessToken(userID, tenantID uuid.UUID, email, role string, remember bo
 	return signed, expiresAt, nil
 }
 
+// OperatorClaims 平台操作员 token 载荷
+// issuer 与商户 token 分开（mms-platform vs mms），两侧 Parse 互相拒绝，杜绝串用
+type OperatorClaims struct {
+	OperatorID uuid.UUID `json:"operator_id"`
+	Email      string    `json:"email"`
+	Ver        int32     `json:"ver"`
+	jwt.RegisteredClaims
+}
+
+const platformIssuer = "mms-platform"
+
+// SignOperatorToken 签发平台操作员 token（固定短 TTL，无 remember）
+func SignOperatorToken(operatorID uuid.UUID, email string, ver int32) (string, time.Time, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return "", time.Time{}, err
+	}
+	expiresAt := time.Now().Add(accessTTL())
+	claims := OperatorClaims{
+		OperatorID: operatorID,
+		Email:      email,
+		Ver:        ver,
+		RegisteredClaims: jwt.RegisteredClaims{
+			Issuer:    platformIssuer,
+			Subject:   operatorID.String(),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+			ExpiresAt: jwt.NewNumericDate(expiresAt),
+		},
+	}
+	signed, err := jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString(secret)
+	if err != nil {
+		return "", time.Time{}, fmt.Errorf("sign operator token: %w", err)
+	}
+	return signed, expiresAt, nil
+}
+
+// ParseOperatorToken 验签平台操作员 token（issuer 必须是 mms-platform）
+func ParseOperatorToken(raw string) (*OperatorClaims, error) {
+	secret, err := jwtSecret()
+	if err != nil {
+		return nil, err
+	}
+	token, err := jwt.ParseWithClaims(raw, &OperatorClaims{}, func(t *jwt.Token) (any, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+		}
+		return secret, nil
+	}, jwt.WithValidMethods([]string{"HS256"}), jwt.WithIssuer(platformIssuer))
+	if err != nil {
+		return nil, fmt.Errorf("parse operator token: %w", err)
+	}
+	claims, ok := token.Claims.(*OperatorClaims)
+	if !ok || !token.Valid {
+		return nil, errors.New("invalid operator token")
+	}
+	return claims, nil
+}
+
 // ParseAccessToken 验签并返回 claims（含过期检查）
 func ParseAccessToken(raw string) (*Claims, error) {
 	secret, err := jwtSecret()
