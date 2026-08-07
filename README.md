@@ -140,7 +140,7 @@ docker compose up -d
 4. clone 仓库到服务器（如 `/opt/mms`），`cp .env.example .env` 填好配置，然后生产模式启动（PG 复用全局 `postgres-server`）：
 
    ```bash
-   mkdir -p frontend/.output   # 前端产物占位，首次推送前容器起不来属正常
+   mkdir -p frontend/.output   # 产物占位；首次推送前前后端容器起不来属正常
    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
    ```
 
@@ -156,7 +156,7 @@ docker compose up -d
 ./ops/deploy.sh backend    # 只改了后端
 ```
 
-脚本自动完成：本机容器内构建（前端 `nuxi build`、后端编译检查）→ 服务器留回滚快照（后端代码 tar + `pg_dump`）→ rsync 推送（永不触碰服务器 `.env` 和商户上传文件）→ 重启（后端启动时 goose 自动迁移）→ 轮询 `/health` 健康检查。失败时打印回滚命令。
+脚本自动完成：本机容器内构建（前端 `nuxi build`、后端交叉编译 linux 二进制）→ 服务器留回滚快照（上一版二进制 + `pg_dump`）→ rsync 推送（永不触碰服务器 `.env` 和商户上传文件）→ 重启（后端启动时 goose 自动迁移）→ 轮询 `/health` 健康检查。失败时打印回滚命令。服务器只跑产物，不联网拉依赖、不编译。
 
 前端回滚不靠快照：本机 checkout 上一个正常 commit 重新 `./ops/deploy.sh frontend` 即可。
 
