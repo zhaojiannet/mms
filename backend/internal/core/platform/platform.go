@@ -76,13 +76,25 @@ func Login(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusUnauthorized, genericLoginErr)
 	}
 
-	// 失败 2 次后强制验证码；锁定期内验证码为必要条件（防恶意锁号 DoS，与商户登录同策略）
-	captchaOK := coreauth.VerifyCaptcha(req.CaptchaID, req.CaptchaAnswer)
+	// 验证码与锁定的每个失败分支都回同一句 generic 错误：
+	// 任何差异化响应都会把「该邮箱是不是操作员」告诉攻击者（与商户登录同策略）
+	// 带了 captcha 就必须对；锁定期内需正确 captcha 才能继续（允许被恶意锁号者自救）
+	captchaProvided := req.CaptchaID != "" && req.CaptchaAnswer != ""
+	captchaOK := false
+	if captchaProvided {
+		captchaOK = coreauth.VerifyCaptcha(req.CaptchaID, req.CaptchaAnswer)
+		if !captchaOK {
+			_, _ = auth.VerifyPassword(req.Password, dummyHash)
+			return echo.NewHTTPError(http.StatusUnauthorized, genericLoginErr)
+		}
+	}
 	if failed >= 2 && !captchaOK {
-		return echo.NewHTTPError(http.StatusUnauthorized, "请输入图形验证码")
+		_, _ = auth.VerifyPassword(req.Password, dummyHash)
+		return echo.NewHTTPError(http.StatusUnauthorized, genericLoginErr)
 	}
 	if lockedUntil != nil && time.Now().Before(*lockedUntil) && !captchaOK {
-		return echo.NewHTTPError(http.StatusTooManyRequests, "尝试次数过多，请稍后再试")
+		_, _ = auth.VerifyPassword(req.Password, dummyHash)
+		return echo.NewHTTPError(http.StatusUnauthorized, genericLoginErr)
 	}
 
 	ok, err := auth.VerifyPassword(req.Password, hash)
