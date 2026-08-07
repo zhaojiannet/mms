@@ -1,10 +1,10 @@
 <template>
   <div class="min-h-screen flex items-center justify-center bg-stone-50 dark:bg-stone-950 p-4">
-    <div class="w-full max-w-sm rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs p-6 space-y-5">
-      <div class="text-center space-y-1">
-        <div class="mx-auto w-10 h-10 rounded-lg flex items-center justify-center bg-primary-500 text-white font-semibold text-lg">M</div>
-        <h1 class="font-semibold text-lg">运营后台</h1>
-        <p class="text-xs text-stone-500">平台操作员登录</p>
+    <div class="w-full max-w-sm rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs p-6 sm:p-8 space-y-6">
+      <div class="text-center space-y-2">
+        <div class="mx-auto w-12 h-12 rounded-xl flex items-center justify-center bg-primary-500 text-white font-semibold text-xl">M</div>
+        <h1 class="text-2xl font-semibold tracking-tight">运营后台</h1>
+        <p class="text-sm text-stone-500">平台操作员登录</p>
       </div>
 
       <UForm :state="form" class="space-y-4" @submit="onSubmit">
@@ -29,7 +29,7 @@
         </UFormField>
 
         <UAlert v-if="error" :description="error" color="error" variant="soft" icon="i-lucide-alert-circle" />
-        <UButton type="submit" block :loading="submitting">登录</UButton>
+        <UButton type="submit" block :loading="submitting" class="active:scale-95 transition-transform">登录</UButton>
       </UForm>
     </div>
   </div>

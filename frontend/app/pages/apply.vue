@@ -2,14 +2,14 @@
   <div class="min-h-screen flex items-center justify-center bg-stone-50 dark:bg-stone-950 p-4">
     <div class="w-full max-w-md rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs p-6 space-y-5">
       <template v-if="!submitted">
-        <div class="text-center space-y-1">
-          <h1 class="font-semibold text-lg">申请开通</h1>
+        <div class="text-center space-y-2">
+          <h1 class="text-2xl font-semibold tracking-tight">申请开通</h1>
           <p class="text-sm text-stone-500">填写店铺信息，我们审核后会尽快联系你</p>
         </div>
 
         <UForm :state="form" class="space-y-4" @submit="onSubmit">
           <UFormField label="店铺名" required>
-            <UInput v-model="form.store_name" size="md" class="w-full" placeholder="如：示例店铺美业" />
+            <UInput v-model="form.store_name" size="md" class="w-full" placeholder="填写你的店铺名称" />
           </UFormField>
           <UFormField label="行业" required>
             <USelect
@@ -50,14 +50,14 @@
           </UFormField>
 
           <UAlert v-if="error" :description="error" color="error" variant="soft" icon="i-lucide-alert-circle" />
-          <UButton type="submit" block :loading="submitting">提交申请</UButton>
+          <UButton type="submit" block :loading="submitting" class="active:scale-95 transition-transform">提交申请</UButton>
         </UForm>
       </template>
 
       <template v-else>
         <div class="text-center space-y-3 py-6">
           <UIcon name="i-lucide-check-circle" class="text-4xl text-primary-500" />
-          <h1 class="font-semibold text-lg">申请已提交</h1>
+          <h1 class="text-2xl font-semibold tracking-tight">申请已提交</h1>
           <p class="text-sm text-stone-500">我们会在 1-2 个工作日内联系你完成开通</p>
         </div>
       </template>

@@ -1,18 +1,31 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-between gap-2 flex-wrap">
-      <UTabs
-        v-model="statusTab"
-        :items="[
-          { label: '待审核', value: 'pending' },
-          { label: '已通过', value: 'approved' },
-          { label: '已拒绝', value: 'rejected' },
-        ]"
+  <div class="space-y-5">
+    <div class="flex items-end justify-between gap-2 flex-wrap">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">申请</h1>
+        <p class="text-sm text-stone-500 mt-1">商户在主站提交的开通申请，通过即自动建号</p>
+      </div>
+      <UButton
+        icon="i-lucide-refresh-cw"
+        variant="ghost"
+        color="neutral"
         size="sm"
-        :content="false"
+        class="active:scale-95 transition-transform"
+        @click="fetchList"
       />
-      <UButton icon="i-lucide-refresh-cw" variant="ghost" color="neutral" size="sm" @click="fetchList" />
     </div>
+
+    <UTabs
+      v-model="statusTab"
+      :items="[
+        { label: '待审核', value: 'pending' },
+        { label: '已通过', value: 'approved' },
+        { label: '已拒绝', value: 'rejected' },
+      ]"
+      size="sm"
+      :content="false"
+      class="w-fit"
+    />
 
     <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
       <table class="w-full min-w-[720px] text-sm">
@@ -27,7 +40,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
-          <tr v-for="a in items" :key="a.id" class="hover:bg-stone-50/60 dark:hover:bg-stone-800/40">
+          <tr v-for="a in items" :key="a.id" class="hover:bg-primary-50/30 dark:hover:bg-primary-950/10">
             <td class="px-4 py-3 font-medium">{{ a.store_name }}</td>
             <td class="px-4 py-3 text-stone-500">{{ a.industry }}</td>
             <td class="px-4 py-3">{{ a.contact_name }} <span class="text-stone-400 text-xs">{{ a.phone }}</span></td>
@@ -35,8 +48,8 @@
             <td class="px-4 py-3 text-stone-500 tabular-nums">{{ fmtDate(a.created_at) }}</td>
             <td class="px-4 py-3 text-right">
               <template v-if="a.status === 'pending'">
-                <UButton size="xs" variant="soft" @click="openApprove(a)">通过</UButton>
-                <UButton size="xs" variant="ghost" color="error" class="ml-1" @click="openReject(a)">拒绝</UButton>
+                <UButton size="sm" variant="soft" class="active:scale-95 transition-transform" @click="openApprove(a)">通过</UButton>
+                <UButton size="sm" variant="ghost" color="error" class="ml-1 active:scale-95 transition-transform" @click="openReject(a)">拒绝</UButton>
               </template>
               <span v-else-if="a.status === 'rejected'" class="text-xs text-stone-400" :title="a.reject_reason ?? ''">
                 已拒绝{{ a.reject_reason ? `：${a.reject_reason}` : '' }}

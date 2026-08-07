@@ -1,8 +1,11 @@
 <template>
-  <div class="space-y-4">
-    <div class="flex items-center justify-between gap-2 flex-wrap">
-      <p class="text-sm text-stone-500">共 {{ items.length }} 个商户</p>
-      <UButton icon="i-lucide-plus" @click="openCreate">新建商户</UButton>
+  <div class="space-y-5">
+    <div class="flex items-end justify-between gap-2 flex-wrap">
+      <div>
+        <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">商户</h1>
+        <p class="text-sm text-stone-500 mt-1">共 {{ items.length }} 个商户 · 到期与状态一览</p>
+      </div>
+      <UButton icon="i-lucide-plus" class="active:scale-95 transition-transform" @click="openCreate">新建商户</UButton>
     </div>
 
     <div v-if="!loading && items.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
@@ -18,7 +21,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
-          <tr v-for="t in items" :key="t.id" class="hover:bg-stone-50/60 dark:hover:bg-stone-800/40">
+          <tr v-for="t in items" :key="t.id" class="hover:bg-primary-50/30 dark:hover:bg-primary-950/10">
             <td class="px-4 py-3 font-medium">{{ t.name }}</td>
             <td class="px-4 py-3 text-stone-500 font-mono text-xs">{{ t.slug }}</td>
             <td class="px-4 py-3 text-center">

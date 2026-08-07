@@ -1,6 +1,9 @@
 <template>
-  <div class="space-y-4">
-    <p class="text-sm text-stone-500">五档套餐的价格与限额；限额改动即刻作用于该档全部商户的后续新增，已有数据不追溯</p>
+  <div class="space-y-5">
+    <div>
+      <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">套餐</h1>
+      <p class="text-sm text-stone-500 mt-1">价格与限额改动即刻作用于该档全部商户的后续新增，已有数据不追溯</p>
+    </div>
 
     <div v-if="!loading" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs overflow-x-auto">
       <table class="w-full min-w-[720px] text-sm">
@@ -17,7 +20,7 @@
           </tr>
         </thead>
         <tbody class="divide-y divide-stone-200/60 dark:divide-stone-800">
-          <tr v-for="e in items" :key="e.code" class="hover:bg-stone-50/60 dark:hover:bg-stone-800/40">
+          <tr v-for="e in items" :key="e.code" class="hover:bg-primary-50/30 dark:hover:bg-primary-950/10">
             <td class="px-4 py-3">
               <span class="font-medium">{{ e.name }}</span>
               <span class="ml-2 text-xs text-stone-400 font-mono">{{ e.code }}</span>
@@ -29,7 +32,7 @@
             <td class="px-4 py-3 text-right tabular-nums">{{ fmtQuota(e.quotas.max_branches) }}</td>
             <td class="px-4 py-3 text-right tabular-nums">{{ fmtQuota(e.quotas.push_monthly) }}</td>
             <td class="px-4 py-3 text-right">
-              <UButton size="xs" variant="soft" icon="i-lucide-pencil" @click="openEdit(e)">编辑</UButton>
+              <UButton size="sm" variant="soft" icon="i-lucide-pencil" class="active:scale-95 transition-transform" @click="openEdit(e)">编辑</UButton>
             </td>
           </tr>
         </tbody>
