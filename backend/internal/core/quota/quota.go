@@ -82,7 +82,7 @@ func EnforceOnActivate(c *echo.Context, kind string, id uuid.UUID) error {
 	}
 	spec, ok := kinds[kind]
 	if !ok {
-		return fmt.Errorf("quota: unknown kind %q", kind)
+		return mw.InternalError(c, "quota.kind", fmt.Errorf("unknown kind %q", kind))
 	}
 	var current string
 	if err := mw.TxFrom(c).QueryRow(c.Request().Context(), spec.statusSQL, id).Scan(&current); err != nil {
@@ -105,7 +105,7 @@ func enforce(c *echo.Context, kind string, excludeID uuid.UUID) error {
 	}
 	spec, ok := kinds[kind]
 	if !ok {
-		return fmt.Errorf("quota: unknown kind %q", kind)
+		return mw.InternalError(c, "quota.kind", fmt.Errorf("unknown kind %q", kind))
 	}
 
 	ctx := c.Request().Context()
@@ -113,7 +113,7 @@ func enforce(c *echo.Context, kind string, excludeID uuid.UUID) error {
 	tenant := mw.TenantFrom(c)
 
 	if _, err := tx.Exec(ctx, "SELECT 1 FROM tenants WHERE id = $1 FOR NO KEY UPDATE", tenant.ID); err != nil {
-		return fmt.Errorf("quota: lock tenant: %w", err)
+		return mw.InternalError(c, "quota.lock_tenant", err)
 	}
 
 	var quotasRaw []byte
@@ -128,13 +128,13 @@ func enforce(c *echo.Context, kind string, excludeID uuid.UUID) error {
 		if err := tx.QueryRow(ctx,
 			"SELECT quotas FROM editions WHERE code = 'free'",
 		).Scan(&quotasRaw); err != nil {
-			return fmt.Errorf("quota: load free edition: %w", err)
+			return mw.InternalError(c, "quota.load_free_edition", err)
 		}
 	}
 
 	var quotas map[string]int64
 	if err := json.Unmarshal(quotasRaw, &quotas); err != nil {
-		return fmt.Errorf("quota: parse quotas: %w", err)
+		return mw.InternalError(c, "quota.parse_quotas", err)
 	}
 	limit, ok := quotas[spec.quotaKey]
 	if !ok || limit <= 0 {
@@ -143,10 +143,11 @@ func enforce(c *echo.Context, kind string, excludeID uuid.UUID) error {
 
 	var current int64
 	if err := tx.QueryRow(ctx, spec.countSQL, excludeID).Scan(&current); err != nil {
-		return fmt.Errorf("quota: count: %w", err)
+		return mw.InternalError(c, "quota.count", err)
 	}
 	if current >= limit {
-		return echo.NewHTTPError(http.StatusForbidden,
+		// 402 而非 403：403 会被前端统一渲染成「权限不足」，把套餐限制误导成角色权限问题
+		return echo.NewHTTPError(http.StatusPaymentRequired,
 			fmt.Sprintf("当前套餐%s数已达上限（%d），请联系升级套餐", spec.label, limit))
 	}
 	return nil

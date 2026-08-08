@@ -44,6 +44,11 @@ export const useApi = () => {
         toast.add({ title: '权限不足', description: msg || '当前账号无此操作权限', color: 'error', icon: 'i-lucide-shield-x' })
         return
       }
+      // 402 专用于套餐限额：与「权限不足」分开，否则商户会去翻角色设置而不是升级套餐
+      if (status === 402) {
+        toast.add({ title: '套餐已达上限', description: msg || '请联系升级套餐', color: 'warning', icon: 'i-lucide-package' })
+        return
+      }
       if (status === 429) {
         toast.add({ title: '请求过于频繁', description: msg || '请稍后再试', color: 'warning', icon: 'i-lucide-hourglass' })
         return
