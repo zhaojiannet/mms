@@ -9,11 +9,21 @@ interface PlatformSession {
   operator: { email: string; name: string }
 }
 
-// isPlatformHost 当前访问域是否运营后台（admin.<appDomain>；本地开发放行）
+// isPlatformHost 当前访问域是否运营后台
+// 与后端 RequirePlatformHost 保持同一判定来源：优先 NUXT_PUBLIC_PLATFORM_HOST
+// 指定的完整主机名（逗号分隔），否则退回 admin. 前缀；本地开发放行
 export function isPlatformHost(): boolean {
   if (import.meta.server) return false
-  const host = window.location.hostname
-  return host.startsWith('admin.') || host === 'localhost' || host === '127.0.0.1'
+  const host = window.location.hostname.toLowerCase()
+  if (host === 'localhost' || host === '127.0.0.1') return true
+
+  const configured = String(useRuntimeConfig().public.platformHost || '')
+    .split(',')
+    .map(h => h.trim().toLowerCase())
+    .filter(Boolean)
+  if (configured.length > 0) return configured.includes(host)
+
+  return host.startsWith('admin.')
 }
 
 export function platformSession(): PlatformSession | null {

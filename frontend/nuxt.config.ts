@@ -24,6 +24,8 @@ export default defineNuxtConfig({
       appDomain: process.env.NUXT_PUBLIC_APP_DOMAIN || 'vip.example.com',
       deploymentMode: process.env.NUXT_PUBLIC_DEPLOYMENT_MODE || 'self-hosted',
       tenantSlug: process.env.NUXT_PUBLIC_TENANT_SLUG || 'demo',
+      // 运营后台的主机名（逗号分隔可多个）。留空则按 admin. 前缀判断
+      platformHost: process.env.NUXT_PUBLIC_PLATFORM_HOST || '',
     },
   },
 

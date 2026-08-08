@@ -25,17 +25,27 @@ type Operator struct {
 }
 
 // platformHosts 允许访问平台路由的主机名。
-// 配了 APP_DOMAIN 就精确匹配 admin.<APP_DOMAIN>；否则退回 admin. 前缀（兼容未配置的部署）。
+// 优先用 PLATFORM_HOST 指定完整主机名（逗号分隔可多个）——一台机器上跑多个项目时，
+// 运营入口往往不叫 admin.<域名>；换个不好猜的名字本身也是一层防护。
+// 未配则退回 admin.<APP_DOMAIN>；两者都没配才退回 admin. 前缀匹配（兼容旧部署）。
 // 只判前缀是不够的：攻击者把 admin.<自有域名> 解析到本机 IP，反代的默认 vhost 会把
 // 请求原样转进来，运营登录端点就在一个你不会监控的域名上暴露出来。
 var platformHosts = func() (exact map[string]struct{}, prefixOnly bool) {
 	exact = map[string]struct{}{"localhost": {}, "127.0.0.1": {}}
-	domain := strings.TrimSpace(os.Getenv("APP_DOMAIN"))
-	if domain == "" {
-		return exact, true
+
+	if hosts := strings.TrimSpace(os.Getenv("PLATFORM_HOST")); hosts != "" {
+		for _, h := range strings.Split(hosts, ",") {
+			if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+				exact[h] = struct{}{}
+			}
+		}
+		return exact, false
 	}
-	exact["admin."+strings.ToLower(domain)] = struct{}{}
-	return exact, false
+	if domain := strings.TrimSpace(os.Getenv("APP_DOMAIN")); domain != "" {
+		exact["admin."+strings.ToLower(domain)] = struct{}{}
+		return exact, false
+	}
+	return exact, true
 }
 
 // RequirePlatformHost 平台路由只在 admin 子域可达（本地回环放行便于开发与运维排查）
