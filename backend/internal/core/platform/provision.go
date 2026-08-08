@@ -95,6 +95,11 @@ func provisionTenant(ctx context.Context, tx pgx.Tx, in provisionInput) (provisi
 	if err := tx.QueryRow(ctx, `
 		INSERT INTO tenants (slug, name, status) VALUES ($1, $2, 'active') RETURNING id
 	`, in.Slug, in.Name).Scan(&out.TenantID); err != nil {
+		// 上面的 count 检查有竞态窗口（双击开通、两个审批并发），唯一约束才是权威
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return out, badInput("子域已被占用：" + in.Slug)
+		}
 		return out, fmt.Errorf("insert tenant: %w", err)
 	}
 

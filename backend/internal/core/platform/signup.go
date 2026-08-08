@@ -4,6 +4,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/labstack/echo/v5"
@@ -40,7 +41,11 @@ func SubmitApplication(c *echo.Context) error {
 	if req.StoreName == "" || req.ContactName == "" || req.Phone == "" || req.Industry == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "请完整填写店铺名、行业、联系人和手机号")
 	}
-	if len(req.StoreName) > 60 || len(req.ContactName) > 60 || len(req.Industry) > 60 || len(req.Phone) > 20 {
+	// 按字符数而非字节数：中文店名一字三字节，len() 会把 21 个汉字的正常店名判超限
+	if utf8.RuneCountInString(req.StoreName) > 60 ||
+		utf8.RuneCountInString(req.ContactName) > 30 ||
+		utf8.RuneCountInString(req.Industry) > 30 ||
+		utf8.RuneCountInString(req.Phone) > 20 {
 		return echo.NewHTTPError(http.StatusBadRequest, "字段长度超限")
 	}
 	if err := ValidateSlug(req.DesiredSlug); err != nil {
