@@ -11,6 +11,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v5"
 
+	"github.com/zhaojiannet/mms/backend/internal/core/quota"
 	"github.com/zhaojiannet/mms/backend/internal/platform/auth"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
 	"github.com/zhaojiannet/mms/backend/sqlc"
@@ -100,6 +101,11 @@ func Create(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "role must be super_admin/admin/staff")
 	}
 
+	// 登录账号与员工名册共用套餐的员工上限：只限名册的话，席位（真实成本项）不受控
+	if err := quota.Enforce(c, quota.KindLoginAccount); err != nil {
+		return err
+	}
+
 	hash, err := auth.HashPassword(req.Password)
 	if err != nil {
 		return mw.InternalError(c, "hash: ", err)
@@ -158,6 +164,13 @@ func Update(c *echo.Context) error {
 		}
 		if len(ids) <= 1 {
 			return echo.NewHTTPError(http.StatusBadRequest, "本店必须至少保留 1 位超级管理员，请先将其他用户升为超级管理员")
+		}
+	}
+
+	// 停用后再启用按新增席位计：与 members / staff 同策略，堵"停用→新建→启用"绕过
+	if req.Status != nil && *req.Status == "active" && cur.Status != "active" {
+		if err := quota.EnforceOnActivate(c, quota.KindLoginAccount, id); err != nil {
+			return err
 		}
 	}
 

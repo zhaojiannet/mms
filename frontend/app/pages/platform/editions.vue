@@ -70,7 +70,7 @@
                 <UInput v-model="form.push_monthly" type="number" min="0" size="md" class="w-full" />
               </UFormField>
             </div>
-            <p class="text-xs text-stone-500">会员与员工上限即刻执行；门店与推送待对应功能上线后生效。</p>
+            <p class="text-xs text-stone-500">会员与员工上限即刻执行（员工同时约束名册与登录账号，各自不超过该数）；门店与推送待对应功能上线后生效。</p>
           </div>
           <UAlert v-if="formError" :description="formError" color="error" variant="soft" icon="i-lucide-alert-circle" />
           <div class="flex justify-end gap-2 pt-2">

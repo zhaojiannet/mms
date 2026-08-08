@@ -30,21 +30,39 @@ func enforced() bool {
 	return hosted
 }
 
-// kinds 可执行的限额项；只统计在册（active）行，归档不占额度
+// 可执行的限额项。检查项与套餐键是多对一：
+// 「员工」一词在系统里对应两张表——staff 是服务名册（开单选谁做的、算提成），
+// users 是登录账号，两者仅可选关联。只限名册的话，free 档标称 2 人却能开无限
+// 个登录账号，席位这个真实成本项不受控；故两者共用 max_staff 各自计数。
+const (
+	KindMembers      = "members"
+	KindStaffRoster  = "staff_roster"
+	KindLoginAccount = "login_account"
+)
+
 var kinds = map[string]struct {
+	quotaKey  string // 读 editions.quotas 里的哪个键
 	countSQL  string // $1 = 排除的行 id（uuid.Nil 表示不排除）
 	statusSQL string // 取单行当前状态，判断本次更新是否真的新增 active 名额
 	label     string
 }{
-	"max_members": {
+	KindMembers: {
+		"max_members",
 		"SELECT count(*) FROM members WHERE status = 'active' AND id != $1",
 		"SELECT status FROM members WHERE id = $1",
 		"会员",
 	},
-	"max_staff": {
+	KindStaffRoster: {
+		"max_staff",
 		"SELECT count(*) FROM staff WHERE status = 'active' AND id != $1",
 		"SELECT status FROM staff WHERE id = $1",
 		"员工",
+	},
+	KindLoginAccount: {
+		"max_staff",
+		"SELECT count(*) FROM users WHERE status = 'active' AND id != $1",
+		"SELECT status FROM users WHERE id = $1",
+		"员工账号",
 	},
 }
 
@@ -118,7 +136,7 @@ func enforce(c *echo.Context, kind string, excludeID uuid.UUID) error {
 	if err := json.Unmarshal(quotasRaw, &quotas); err != nil {
 		return fmt.Errorf("quota: parse quotas: %w", err)
 	}
-	limit, ok := quotas[kind]
+	limit, ok := quotas[spec.quotaKey]
 	if !ok || limit <= 0 {
 		return nil
 	}

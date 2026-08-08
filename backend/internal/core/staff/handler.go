@@ -98,7 +98,7 @@ func Create(c *echo.Context) error {
 	if req.Name == "" || req.Position == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "name and position are required")
 	}
-	if err := quota.Enforce(c, "max_staff"); err != nil {
+	if err := quota.Enforce(c, quota.KindStaffRoster); err != nil {
 		return err
 	}
 
@@ -148,7 +148,7 @@ func Update(c *echo.Context) error {
 	}
 	// 恢复 active 按新增计限额（同 members.Update，堵归档绕过）
 	if req.Status != nil && *req.Status == "active" {
-		if err := quota.EnforceOnActivate(c, "max_staff", id); err != nil {
+		if err := quota.EnforceOnActivate(c, quota.KindStaffRoster, id); err != nil {
 			return err
 		}
 	}

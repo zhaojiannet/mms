@@ -121,7 +121,7 @@ func Create(c *echo.Context) error {
 	if req.Phone == nil || *req.Phone == "" {
 		return echo.NewHTTPError(http.StatusBadRequest, "phone is required")
 	}
-	if err := quota.Enforce(c, "max_members"); err != nil {
+	if err := quota.Enforce(c, quota.KindMembers); err != nil {
 		return err
 	}
 
@@ -198,7 +198,7 @@ func Update(c *echo.Context) error {
 	}
 	// 恢复 active 按新增计限额（堵"归档→新建→恢复"绕过）；排除自身让已 active 的原地编辑不受限
 	if req.Status != nil && *req.Status == "active" {
-		if err := quota.EnforceOnActivate(c, "max_members", id); err != nil {
+		if err := quota.EnforceOnActivate(c, quota.KindMembers, id); err != nil {
 			return err
 		}
 	}
