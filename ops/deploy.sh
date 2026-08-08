@@ -56,13 +56,19 @@ if [ "${PART}" != "frontend" ]; then
 	echo "== 后端：服务器留回滚快照（二进制 + 数据库）"
 	# pipefail 必须显式开：否则 pg_dump 失败而 gzip 成功，管道整体算成功，快照悄悄丢失
 	# 二进制留 3 代、库快照留 10 次：仅为快速回退，更早版本由 git 重新编译，不作存档
+	# 时间戳必须在远端展开，且不能包在单引号里——单引号会让 $(date) 变成字面量，
+	# 快照就都写进同一个文件名、后一次覆盖前一次（等于只剩最近一份备份）
 	ssh "${SERVER}" "
 		set -e -o pipefail
-		mkdir -p '${BACKUP_DIR}'
-		[ ! -f '${APP_DIR}/backend/server' ] || cp -p '${APP_DIR}/backend/server' '${BACKUP_DIR}/server_\$(date +%Y%m%d_%H%M%S)'
-		ls -t '${BACKUP_DIR}'/server_* 2>/dev/null | tail -n +4 | xargs -r rm --
-		docker exec '${PG_CONTAINER}' pg_dump -U '${PG_SUPERUSER}' '${DB_NAME}' | gzip > '${BACKUP_DIR}/pre_deploy_\$(date +%Y%m%d_%H%M%S).sql.gz'
-		ls -t '${BACKUP_DIR}'/pre_deploy_*.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm --
+		BACKUP_DIR='${BACKUP_DIR}'
+		APP_DIR='${APP_DIR}'
+		TS=\$(date +%Y%m%d_%H%M%S)
+		mkdir -p \"\$BACKUP_DIR\"
+		[ ! -f \"\$APP_DIR/backend/server\" ] || cp -p \"\$APP_DIR/backend/server\" \"\$BACKUP_DIR/server_\$TS\"
+		ls -t \"\$BACKUP_DIR\"/server_* 2>/dev/null | tail -n +4 | xargs -r rm --
+		docker exec '${PG_CONTAINER}' pg_dump -U '${PG_SUPERUSER}' '${DB_NAME}' | gzip > \"\$BACKUP_DIR/pre_deploy_\$TS.sql.gz\"
+		[ -s \"\$BACKUP_DIR/pre_deploy_\$TS.sql.gz\" ] || { echo '快照为空，中止部署' >&2; exit 1; }
+		ls -t \"\$BACKUP_DIR\"/pre_deploy_*.sql.gz 2>/dev/null | tail -n +11 | xargs -r rm --
 	"
 
 	echo "== 后端：推送二进制并重启（goose 迁移随启动自动执行）"

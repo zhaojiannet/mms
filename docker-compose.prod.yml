@@ -7,20 +7,23 @@
 #   - frontend：跑 Nitro 的 .output（自带运行时依赖），生产镜像不装 pnpm
 #
 # 基础镜像也随之缩小：golang 889MB → debian-slim 97MB，服务器拉取快得多。
+#
+# volumes 用 `!override` 替换开发用的依赖与构建缓存卷——Compose 对列表默认是追加
+# 合并，不覆盖的话生产容器会挂着一堆用不到的空卷。需要 Compose >= 2.24。
+# 注意：`!reset` 是清空（会连 uploads 卷一起丢），必须用 `!override`。
 services:
   backend:
     build:
       dockerfile: Dockerfile.prod
     command: ./server
-    volumes:
-      # 生产不需要 Go 模块与构建缓存（不在服务器编译）
+    volumes: !override
       - ./backend:/app
+      # 商户上传资产（店铺 logo）：必须保留，与代码分离持久化
       - mms-uploads:/app/uploads
 
   frontend:
     build:
       dockerfile: Dockerfile.prod
     command: node .output/server/index.mjs
-    volumes:
-      # 生产不需要 node_modules / .nuxt / pnpm store：产物自包含
+    volumes: !override
       - ./frontend:/app
