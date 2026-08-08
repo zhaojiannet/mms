@@ -23,4 +23,7 @@ regexes = [
     '''change_me_on_first_login''',
     '''change_me_in_production''',
     '''change_me_to_a_long_random_string''',
+    # 随机密码生成用的字符集（刻意去掉易混的 0O1lI），非密钥。
+    # generic-api-key 因变量名含 password 且熵高而误报
+    '''abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789''',
 ]

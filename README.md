@@ -111,7 +111,7 @@ docker compose up -d
 <slug>.vip.zhaojian.net         如 mystore.vip.zhaojian.net
 ```
 
-开发环境：`<slug>.dev.example.com`。
+子域后缀由 `.env` 的 `NUXT_PUBLIC_APP_DOMAIN` 决定，开发与生产各配一个即可。
 
 数据隔离基于 PostgreSQL Row Level Security：数据库强制执行按 `tenant_id` 过滤，即使代码写错也不会跨租户泄露。
 
