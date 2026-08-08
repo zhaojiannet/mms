@@ -1,0 +1,28 @@
+# ============================================
+# Nuxt 前端 · 生产运行镜像
+#
+# 只承载 ops/deploy.sh 推送的 .output：Nitro 的 node-server 产物自带
+# 运行时依赖（node_modules 已随产物生成），服务器无需 pnpm install。
+# 故镜像里不装 pnpm/corepack——省掉一次 npm registry 下载，
+# 生产容器也不带包管理器。
+# ============================================
+
+FROM node:22-bookworm-slim
+
+ARG UID=1000
+ARG GID=1000
+
+USER root
+RUN ( getent group ${GID} || groupmod -g ${GID} node ) && \
+    usermod -u ${UID} -g ${GID} node 2>/dev/null || true
+RUN mkdir -p /app && chown -R ${UID}:${GID} /app
+
+USER ${UID}:${GID}
+WORKDIR /app
+
+ENV NUXT_HOST=0.0.0.0
+ENV NUXT_PORT=3000
+ENV TZ=Asia/Shanghai
+EXPOSE 3000
+
+CMD ["node", ".output/server/index.mjs"]

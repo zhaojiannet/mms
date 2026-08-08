@@ -152,6 +152,8 @@ docker compose up -d
    docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
    ```
 
+   生产镜像不含 Go 工具链与 pnpm：构建产物全部由 `ops/deploy.sh` 从本机推送，**服务器不下载任何依赖**（`proxy.golang.org` 在部分地区不可达，让服务器拉 Go 依赖必然失败）。服务器唯一的外网动作是拉两个基础镜像（`debian:bookworm-slim` + `node:22-bookworm-slim`，约 344MB）。
+
 5. 备份定时任务：`crontab -e` 加 `0 3 * * * /opt/mms/ops/backup_pg.sh >> /var/log/mms_backup.log 2>&1`
 6. **端口收口（必做）**：防火墙与云安全组只放行 `22 / 80 / 443`，不要放行 `8081`（后端）、`3001`（前端）、`5432`（数据库）。容器端口发布在宿主机上仅供本机反代访问；一旦对外可直连，反代层的 TLS、限流与「运营后台仅 admin 子域可达」的 Host 限制都会被绕过。
 

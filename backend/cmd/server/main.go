@@ -11,6 +11,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	// 时区库嵌入二进制：报表按 time.Local 切业务日界，若镜像里没有
+	// /usr/share/zoneinfo，TZ=Asia/Shanghai 会静默退回 UTC 让"今日/本月"差 8 小时
+	_ "time/tzdata"
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 	"github.com/labstack/echo/v5"

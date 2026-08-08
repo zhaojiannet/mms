@@ -1,13 +1,26 @@
-# 生产叠加配置（服务器端用），覆盖开发命令：
+# 生产叠加配置（服务器端用）：
 #   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
-# 覆盖点：
-#   - backend：跑 ops/deploy.sh 推送的交叉编译二进制，服务器不联网拉依赖、不编译
-#   - frontend：跑构建产物而非 dev server；.output 由 ops/deploy.sh 从本机推送，
-#     经 ./frontend 的 bind mount 对容器可见
+# 服务器全程不下载任何依赖——构建产物由 ops/deploy.sh 从本机推送：
+#   - backend：跑交叉编译好的静态二进制，生产镜像不含 Go 工具链
+#     （proxy.golang.org 在部分地区不可达，服务器拉 Go 依赖必失败）
+#   - frontend：跑 Nitro 的 .output（自带运行时依赖），生产镜像不装 pnpm
+#
+# 基础镜像也随之缩小：golang 889MB → debian-slim 97MB，服务器拉取快得多。
 services:
   backend:
+    build:
+      dockerfile: Dockerfile.prod
     command: ./server
+    volumes:
+      # 生产不需要 Go 模块与构建缓存（不在服务器编译）
+      - ./backend:/app
+      - mms-uploads:/app/uploads
 
   frontend:
+    build:
+      dockerfile: Dockerfile.prod
     command: node .output/server/index.mjs
+    volumes:
+      # 生产不需要 node_modules / .nuxt / pnpm store：产物自包含
+      - ./frontend:/app

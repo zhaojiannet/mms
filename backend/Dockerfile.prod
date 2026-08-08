@@ -1,0 +1,25 @@
+# ============================================
+# Go 后端 · 生产运行镜像
+#
+# 只承载 ops/deploy.sh 从本机推送的静态二进制：镜像里没有 Go 工具链，
+# 服务器不拉 Go 依赖（proxy.golang.org 在部分地区不可达），也不装 apt 包。
+# 时区数据由 `import _ "time/tzdata"` 嵌进二进制，无需 tzdata 包。
+# ============================================
+
+FROM debian:bookworm-slim
+
+ARG UID=1000
+ARG GID=1000
+
+RUN ( getent group ${GID} || groupadd -g ${GID} app ) && \
+    ( id -u app 2>/dev/null || useradd -u ${UID} -g ${GID} -m -s /bin/bash app ) && \
+    mkdir -p /app && chown -R ${UID}:${GID} /app
+
+USER ${UID}:${GID}
+WORKDIR /app
+
+ENV TZ=Asia/Shanghai
+ENV APP_PORT=8080
+EXPOSE 8080
+
+CMD ["./server"]
