@@ -50,5 +50,5 @@ docs/
 /migration/legacy/
 /ops/cutover.md
 /ops/cutover.sh
-/ops/openresty/demo.conf
+/ops/openresty/*.conf
 /ops/deploy.env
