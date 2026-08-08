@@ -59,8 +59,9 @@ func UpdateEdition(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
 	}
-	if req.Quotas == nil {
-		return echo.NewHTTPError(http.StatusBadRequest, "quotas 必填")
+	if len(req.Quotas) == 0 {
+		// 空对象若整体覆盖，缺键会被 quota 判为"不限"，等于静默清零该档全部商户的限额
+		return echo.NewHTTPError(http.StatusBadRequest, "quotas 必填且不能为空")
 	}
 	for k, v := range req.Quotas {
 		if v < 0 {
@@ -72,9 +73,11 @@ func UpdateEdition(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "quotas 格式错误")
 	}
 
+	// `||` 增量合并而非整体替换：UI 只提交它认识的几个键，
+	// 整体覆盖会把将来新增的限额键在每次保存时丢掉
 	tag, err := mw.TxFrom(c).Exec(c.Request().Context(), `
 		UPDATE editions
-		SET price_monthly = $2, price_yearly = $3, quotas = $4, updated_at = now()
+		SET price_monthly = $2, price_yearly = $3, quotas = quotas || $4::jsonb, updated_at = now()
 		WHERE code = $1
 	`, code, req.PriceMonthly, req.PriceYearly, quotasJSON)
 	if err != nil {
