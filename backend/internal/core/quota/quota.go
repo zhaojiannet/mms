@@ -32,11 +32,20 @@ func enforced() bool {
 
 // kinds 可执行的限额项；只统计在册（active）行，归档不占额度
 var kinds = map[string]struct {
-	countSQL string // $1 = 排除的行 id（uuid.Nil 表示不排除）
-	label    string
+	countSQL  string // $1 = 排除的行 id（uuid.Nil 表示不排除）
+	statusSQL string // 取单行当前状态，判断本次更新是否真的新增 active 名额
+	label     string
 }{
-	"max_members": {"SELECT count(*) FROM members WHERE status = 'active' AND id != $1", "会员"},
-	"max_staff":   {"SELECT count(*) FROM staff WHERE status = 'active' AND id != $1", "员工"},
+	"max_members": {
+		"SELECT count(*) FROM members WHERE status = 'active' AND id != $1",
+		"SELECT status FROM members WHERE id = $1",
+		"会员",
+	},
+	"max_staff": {
+		"SELECT count(*) FROM staff WHERE status = 'active' AND id != $1",
+		"SELECT status FROM staff WHERE id = $1",
+		"员工",
+	},
 }
 
 // Enforce 创建路径调用：超限返回 403 业务错误，未超限返回 nil
@@ -44,10 +53,27 @@ func Enforce(c *echo.Context, kind string) error {
 	return enforce(c, kind, uuid.Nil)
 }
 
-// EnforceOnActivate 更新路径把 status 改回 active 时调用（堵"归档→新建→恢复"绕过）
-// excludeID 排除本行自身：已 active 的行原地编辑不受限，inactive 恢复 active 按新增计
-func EnforceOnActivate(c *echo.Context, kind string, excludeID uuid.UUID) error {
-	return enforce(c, kind, excludeID)
+// EnforceOnActivate 更新路径带 status=active 时调用，堵"归档→新建→恢复"绕过
+//
+// 只有原状态不是 active 才计限额：前端编辑表单总会回传当前 status，
+// 若一律检查，则限额下调或商户降档后，存量已超限的记录连改个手机号都会被拦
+// （README 承诺"已有数据不追溯"）。行不存在时放过，交由后续 UPDATE 返回 404。
+func EnforceOnActivate(c *echo.Context, kind string, id uuid.UUID) error {
+	if !enforced() {
+		return nil
+	}
+	spec, ok := kinds[kind]
+	if !ok {
+		return fmt.Errorf("quota: unknown kind %q", kind)
+	}
+	var current string
+	if err := mw.TxFrom(c).QueryRow(c.Request().Context(), spec.statusSQL, id).Scan(&current); err != nil {
+		return nil
+	}
+	if current == "active" {
+		return nil
+	}
+	return enforce(c, kind, id)
 }
 
 // enforce 并发安全：先 FOR NO KEY UPDATE 锁租户行，同租户并发创建被序列化、
