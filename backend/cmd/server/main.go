@@ -402,7 +402,7 @@ func validateCriticalEnv() error {
 	switch os.Getenv("DEPLOYMENT_MODE") {
 	case "", "hosted", "self-hosted", "enterprise", "dev":
 	default:
-		return fmt.Errorf("DEPLOYMENT_MODE must be one of hosted / self-hosted / enterprise (got %q)", os.Getenv("DEPLOYMENT_MODE"))
+		return fmt.Errorf(`DEPLOYMENT_MODE must be one of hosted / self-hosted / enterprise / dev, or empty (got %q)`, os.Getenv("DEPLOYMENT_MODE"))
 	}
 	return nil
 }

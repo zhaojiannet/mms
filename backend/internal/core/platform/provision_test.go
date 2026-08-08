@@ -1,6 +1,9 @@
 package platform
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func TestValidateSlug(t *testing.T) {
 	valid := []string{"mystore", "my-first-shop", "abc", "a2b", "demo123"}
@@ -18,8 +21,8 @@ func TestValidateSlug(t *testing.T) {
 		"api",           // 保留子域
 		"admin",         // 保留子域
 		"www",           // 保留子域
-		"中文slug",        // 非 ASCII
-		"a" + string(make([]byte, 40)), // 超长
+		"中文slug",                  // 非 ASCII
+		strings.Repeat("a", 31), // 超长（上限 30）
 	}
 	for _, s := range invalid {
 		if err := ValidateSlug(s); err == nil {
