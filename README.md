@@ -143,7 +143,7 @@ docker compose up -d
 
 3. 每个站点单独申请 Let's Encrypt 证书（HTTP 验证，自动续期）。有意不用通配符证书：通配须 DNS 验证，等于把域名解析的 API 密钥存进服务器；单域手动建站每商户约 5 分钟，规模上来（约 30 商户/月）再考虑自动化
 4. 另建两个平台站点（配置与商户站点相同的路径分流）：
-   - `admin.example.com` → 运营后台（商户管理 / 申请审批 / 套餐管理），操作员账号由 `.env` 的 `PLATFORM_ADMIN_*` 首次启动创建
+   - `admin.<你的域名>` → 运营后台（商户管理 / 申请审批 / 套餐管理），操作员账号由 `.env` 的 `PLATFORM_ADMIN_*` 首次启动创建；后端只接受 `admin.<APP_DOMAIN>` 这一个主机名
    - 主域名 `vip.zhaojian.net` → 产品主页，`/apply` 为商户开通申请表单
 4. clone 仓库到服务器（如 `/opt/mms`），`cp .env.example .env` 填好配置，然后生产模式启动（PG 复用全局 `postgres-server`）：
 

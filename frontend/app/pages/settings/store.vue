@@ -7,7 +7,7 @@
         <SectionTitle as="h2" class="mb-3">店铺名称</SectionTitle>
         <p class="text-sm text-stone-500 mb-3">显示在登录页、侧边栏顶部、各处"当前店铺"位置。</p>
         <div class="flex items-center gap-2">
-          <UInput v-model="storeName" placeholder="如：示例店铺造型" size="md" class="flex-1 max-w-sm" />
+          <UInput v-model="storeName" placeholder="填写店铺名称" size="md" class="flex-1 max-w-sm" />
           <UButton size="md" :loading="savingName" :disabled="!storeName" @click="saveName">保存</UButton>
         </div>
       </div>
