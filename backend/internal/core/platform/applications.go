@@ -110,7 +110,11 @@ func ApproveApplication(c *echo.Context) error {
 		AdminName:  req.AdminName,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		var ie InputError
+		if errors.As(err, &ie) {
+			return echo.NewHTTPError(http.StatusBadRequest, ie.Error())
+		}
+		return mw.InternalError(c, "platform.approve_application", err)
 	}
 
 	if _, err := tx.Exec(ctx, `

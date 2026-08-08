@@ -82,7 +82,11 @@ func CreateTenant(c *echo.Context) error {
 		AdminName:  req.AdminName,
 	})
 	if err != nil {
-		return echo.NewHTTPError(http.StatusBadRequest, err.Error())
+		var ie InputError
+		if errors.As(err, &ie) {
+			return echo.NewHTTPError(http.StatusBadRequest, ie.Error())
+		}
+		return mw.InternalError(c, "platform.create_tenant", err)
 	}
 	// 平台高危操作统一 slog 留痕（audit_logs 是租户内体系，平台侧独立成表待 billing 阶段一并设计）
 	slog.Info("platform: tenant created", "operator", mw.OperatorFrom(c).Email,
