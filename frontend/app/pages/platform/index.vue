@@ -134,6 +134,9 @@ async function fetchList() {
   try {
     const r = await api<{ items: TenantRow[] }>('/api/platform/tenants')
     items.value = r.items
+  } catch {
+    // 401/403 已由 usePlatformApi 统一处理（清会话跳登录）；其余保持空列表不白屏
+    items.value = []
   } finally {
     loading.value = false
   }
@@ -165,9 +168,14 @@ function rowMenu(t: TenantRow) {
 }
 
 async function onToggle(t: TenantRow, action: 'suspend' | 'resume') {
-  await api(`/api/platform/tenants/${t.id}/${action}`, { method: 'POST' })
-  toast.add({ title: action === 'suspend' ? `已停用 ${t.name}` : `已恢复 ${t.name}`, color: 'success' })
-  await fetchList()
+  try {
+    await api(`/api/platform/tenants/${t.id}/${action}`, { method: 'POST' })
+    toast.add({ title: action === 'suspend' ? `已停用 ${t.name}` : `已恢复 ${t.name}`, color: 'success' })
+    await fetchList()
+  } catch (e: any) {
+    // 不接住的话失败时"点了没反应"，操作员无法判断停用是否生效
+    toast.add({ title: '操作失败', description: e?.data?.message || '请重试', color: 'error', icon: 'i-lucide-alert-circle' })
+  }
 }
 
 // ---- 新建 ----

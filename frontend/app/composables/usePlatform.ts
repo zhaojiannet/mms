@@ -56,9 +56,18 @@ export const usePlatformApi = () => {
       }
     },
     onResponseError({ response }) {
-      if (response.status === 401) {
+      const msg = (response._data as any)?.message || ''
+      // 403 同样要清会话回登录页：操作员被停用时 RequireOperator 返回 403，
+      // 只处理 401 会让页面停在"已登录"状态、空态里看不到任何原因
+      if (response.status === 401 || response.status === 403) {
         platformLogout()
         void nuxtApp.runWithContext(() => {
+          toast.add({
+            title: response.status === 403 ? '账号不可用' : '会话已失效',
+            description: msg || '请重新登录',
+            color: 'error',
+            icon: 'i-lucide-shield-x',
+          })
           if (router.currentRoute.value.path !== '/platform/login') {
             return navigateTo('/platform/login')
           }

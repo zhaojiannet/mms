@@ -9,6 +9,11 @@ export default defineNuxtRouteMiddleware((to) => {
 
   // 运营后台自成体系：平台 token 守卫，与商户会话互不相干
   if (to.path.startsWith('/platform')) {
+    // 商户子域不渲染运营入口：后端 RequirePlatformHost 本就只放行 admin 子域，
+    // 前端若照常渲染登录页，商户域名的访客会填完密码才收到 not found
+    if (!isPlatformHost()) {
+      return navigateTo('/')
+    }
     const loggedIn = platformSession() !== null
     if (!loggedIn && to.path !== '/platform/login') {
       return navigateTo('/platform/login')
@@ -18,8 +23,8 @@ export default defineNuxtRouteMiddleware((to) => {
     }
     return
   }
-  // admin 子域直接进运营后台，不展示商户界面
-  if (isPlatformHost() && window.location.hostname.startsWith('admin.')) {
+  // admin 子域只提供运营后台，不展示商户界面
+  if (import.meta.client && window.location.hostname.startsWith('admin.')) {
     return navigateTo('/platform')
   }
 
