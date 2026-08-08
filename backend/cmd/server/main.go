@@ -400,6 +400,17 @@ func validateCriticalEnv() error {
 		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD contains 'change_me' placeholder; set a real initial password or leave empty")
 	}
 
+	// 平台操作员是权限最高的账号，起码要和自助改密同档（≥8 位）
+	platformPwd := os.Getenv("PLATFORM_ADMIN_PASSWORD")
+	if platformPwd != "" {
+		if len(platformPwd) < 8 {
+			return fmt.Errorf("PLATFORM_ADMIN_PASSWORD too short (need >= 8 chars)")
+		}
+		if strings.Contains(platformPwd, "change_me") {
+			return fmt.Errorf("PLATFORM_ADMIN_PASSWORD contains 'change_me' placeholder; set a real password")
+		}
+	}
+
 	// DEPLOYMENT_MODE 拼错会让套餐限额静默失效（quota 只认 "hosted"），启动时把关
 	switch os.Getenv("DEPLOYMENT_MODE") {
 	case "", "hosted", "self-hosted", "enterprise", "dev":

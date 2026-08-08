@@ -1,11 +1,14 @@
 package middleware
 
 import (
+	"errors"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/labstack/echo/v5"
 
@@ -21,16 +24,35 @@ type Operator struct {
 	Name  string
 }
 
+// platformHosts 允许访问平台路由的主机名。
+// 配了 APP_DOMAIN 就精确匹配 admin.<APP_DOMAIN>；否则退回 admin. 前缀（兼容未配置的部署）。
+// 只判前缀是不够的：攻击者把 admin.<自有域名> 解析到本机 IP，反代的默认 vhost 会把
+// 请求原样转进来，运营登录端点就在一个你不会监控的域名上暴露出来。
+var platformHosts = func() (exact map[string]struct{}, prefixOnly bool) {
+	exact = map[string]struct{}{"localhost": {}, "127.0.0.1": {}}
+	domain := strings.TrimSpace(os.Getenv("APP_DOMAIN"))
+	if domain == "" {
+		return exact, true
+	}
+	exact["admin."+strings.ToLower(domain)] = struct{}{}
+	return exact, false
+}
+
 // RequirePlatformHost 平台路由只在 admin 子域可达（本地回环放行便于开发与运维排查）
 // 商户子域的反代同样把 /api/ 转到本后端，不加 Host 限制则运营后台入口在每个商户域名暴露
 func RequirePlatformHost() echo.MiddlewareFunc {
+	allowed, prefixOnly := platformHosts()
 	return func(next echo.HandlerFunc) echo.HandlerFunc {
 		return func(c *echo.Context) error {
 			host := c.Request().Host
 			if i := strings.Index(host, ":"); i >= 0 {
 				host = host[:i]
 			}
-			if strings.HasPrefix(host, "admin.") || host == "localhost" || host == "127.0.0.1" {
+			host = strings.ToLower(host)
+			if _, ok := allowed[host]; ok {
+				return next(c)
+			}
+			if prefixOnly && strings.HasPrefix(host, "admin.") {
 				return next(c)
 			}
 			// 404 而非 403：不向商户域名的探测者确认平台入口存在
@@ -105,7 +127,12 @@ func RequireOperator() echo.MiddlewareFunc {
 				FROM platform_operators WHERE id = $1
 			`, claims.OperatorID).Scan(&op.ID, &op.Email, &op.Name, &status, &ver, &passwordChangedAt)
 			if err != nil {
-				return echo.NewHTTPError(http.StatusUnauthorized, "账号不存在")
+				// 只有"确实查不到这一行"才算会话失效；瞬时 DB 错误（超时、连接池耗尽）
+				// 若也回 401，前端会清掉会话把操作员在工作中途踢下线
+				if errors.Is(err, pgx.ErrNoRows) {
+					return echo.NewHTTPError(http.StatusUnauthorized, "账号不存在")
+				}
+				return InternalError(c, "platform.operator_lookup", err)
 			}
 			if status != "active" {
 				return echo.NewHTTPError(http.StatusForbidden, "账号已停用")
