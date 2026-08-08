@@ -8,6 +8,7 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/json"
+	"log/slog"
 	"math/big"
 	"net/http"
 	"time"
@@ -131,6 +132,61 @@ func Login(c *echo.Context) error {
 func Me(c *echo.Context) error {
 	op := mw.OperatorFrom(c)
 	return c.JSON(http.StatusOK, map[string]any{"email": op.Email, "name": op.Name})
+}
+
+type changePasswordRequest struct {
+	CurrentPassword string `json:"current_password"`
+	NewPassword     string `json:"new_password"`
+}
+
+// ChangePassword POST /api/platform/password（路由层挂密码类限流）
+//
+// 运营账号原先只能由 `PLATFORM_ADMIN_*` 首次启动创建、之后无法更换，
+// 疑似泄露时只剩连库改 hash 一条路。与商户改密同策略：验当前密码、
+// 递增 token_version 吊销全部已签发 token（含本次会话，前端随后重新登录）。
+func ChangePassword(c *echo.Context) error {
+	var req changePasswordRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+	}
+	if len(req.NewPassword) < 8 {
+		return echo.NewHTTPError(http.StatusBadRequest, "新密码至少 8 位")
+	}
+	if req.NewPassword == req.CurrentPassword {
+		return echo.NewHTTPError(http.StatusBadRequest, "新密码不能与当前密码相同")
+	}
+
+	ctx := c.Request().Context()
+	tx := mw.TxFrom(c)
+	op := mw.OperatorFrom(c)
+
+	var hash string
+	if err := tx.QueryRow(ctx,
+		"SELECT password_hash FROM platform_operators WHERE id = $1", op.ID,
+	).Scan(&hash); err != nil {
+		return mw.InternalError(c, "platform.password.load", err)
+	}
+	ok, err := auth.VerifyPassword(req.CurrentPassword, hash)
+	if err != nil || !ok {
+		return echo.NewHTTPError(http.StatusBadRequest, "当前密码不正确")
+	}
+
+	newHash, err := auth.HashPassword(req.NewPassword)
+	if err != nil {
+		return mw.InternalError(c, "platform.password.hash", err)
+	}
+	if _, err := tx.Exec(ctx, `
+		UPDATE platform_operators
+		SET password_hash = $2, token_version = token_version + 1,
+		    password_changed_at = now(), failed_login_attempts = 0, locked_until = NULL,
+		    updated_at = now()
+		WHERE id = $1
+	`, op.ID, newHash); err != nil {
+		return mw.InternalError(c, "platform.password.update", err)
+	}
+
+	slog.Info("platform: operator password changed", "operator", op.Email)
+	return c.NoContent(http.StatusNoContent)
 }
 
 // --------------- 共享工具 ---------------

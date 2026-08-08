@@ -157,6 +157,8 @@ func main() {
 	pf.Use(mw.PlatformTx(pool))
 	pf.Use(mw.RequireOperator())
 	pf.GET("/me", platformcore.Me)
+	// 改密与商户侧同档限流：验当前密码的端点须防穷举
+	pf.POST("/password", platformcore.ChangePassword, mw.RateLimit(5, time.Minute))
 	pf.GET("/applications", platformcore.ListApplications)
 	pf.POST("/applications/:id/approve", platformcore.ApproveApplication)
 	pf.POST("/applications/:id/reject", platformcore.RejectApplication)
