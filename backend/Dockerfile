@@ -29,6 +29,10 @@ ENV PATH=$GOPATH/bin:$PATH
 ENV TZ=Asia/Shanghai
 ENV APP_PORT=8080
 
+# sqlc：由 internal/core/*.sql 生成 sqlc/*.go（`sqlc generate`，工作目录 /app）
+# 写明版本而非 @latest：生成器版本决定产物，浮动版本会让不同人 generate 出不同结果
+RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
+
 EXPOSE 8080
 
 CMD ["tail", "-f", "/dev/null"]
