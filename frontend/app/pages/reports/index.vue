@@ -280,14 +280,16 @@
                 v-for="(b, i) in monthlyBars" :key="b.month"
                 class="group relative flex-1 flex flex-col items-center justify-end h-full min-w-0"
               >
-                <span
-                  v-if="b.isMax && b.value > 0"
-                  class="text-xs tabular-nums text-stone-500 dark:text-stone-400 mb-1 whitespace-nowrap"
-                >{{ b.display }}</span>
                 <div
-                  class="w-full max-w-10 rounded-t bg-primary-500/90 dark:bg-primary-400/90 group-hover:bg-primary-600 dark:group-hover:bg-primary-300 transition-colors"
+                  class="relative w-full max-w-10 rounded-t bg-primary-500/90 dark:bg-primary-400/90 group-hover:bg-primary-600 dark:group-hover:bg-primary-300 transition-colors"
                   :style="{ height: b.pct + '%' }"
-                />
+                >
+                  <!-- 标注绝对定位挂柱顶：放进 flex 流会把最高柱压矮，图形失真 -->
+                  <span
+                    v-if="b.isMax && b.value > 0"
+                    class="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 text-xs tabular-nums text-stone-500 dark:text-stone-400 whitespace-nowrap"
+                  >{{ b.display }}</span>
+                </div>
                 <!-- hover 浮层：完整月份 + 精确值 -->
                 <div class="pointer-events-none absolute bottom-full mb-1 z-20 px-2.5 py-1.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 text-xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity" :class="i < 2 ? 'left-0' : i > 9 ? 'right-0' : ''">
                   {{ b.month }} · {{ b.display }}
@@ -628,9 +630,10 @@ onMounted(() => { ensureVoidFetched() })
 
 // ===== 日期与 Preset =====
 const today = new Date()
-const startDate = ref(formatDateOnly(today))
+// 默认当月：店主多在营业前看报表，默认当日会先看到一屏 ¥0
+const startDate = ref(formatDateOnly(firstDayOfMonth(today)))
 const endDate = ref(formatDateOnly(today))
-const preset = ref<string>('day')
+const preset = ref<string>('month')
 
 // 列表默认/加载更多条数：参考 2025 桌面 SaaS 基准（15–30），取中位偏大 20
 const PAGE_SIZE = 20
