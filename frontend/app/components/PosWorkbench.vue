@@ -599,36 +599,39 @@
       <div v-if="todayTx.loading && todayTx.items.length === 0" class="px-6 py-10 text-center text-sm text-stone-400">加载中…</div>
       <div v-else-if="todayTx.items.length === 0" class="px-6 py-10 text-center text-sm text-stone-400">今日暂无消费记录</div>
       <div v-else class="overflow-x-auto">
-      <table class="w-full min-w-[720px] text-sm">
-        <thead class="bg-stone-50/60 dark:bg-stone-950/30 text-stone-500 text-xs tracking-wide">
+      <table class="w-full min-w-[880px] text-sm table-fixed">
+        <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
           <tr>
-            <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-32">姓名</th>
+            <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-28">姓名</th>
             <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-40">会员卡</th>
+            <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-20">类型</th>
             <th class="text-left px-4 py-2.5 font-medium">服务项目</th>
-            <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-20">数量</th>
+            <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-12">数量</th>
             <th class="text-right px-4 py-2.5 font-medium w-40">金额</th>
             <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-20">时间</th>
             <th v-if="canVoid" class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-28">操作</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-stone-100 dark:divide-stone-800">
+        <tbody>
           <tr
             v-for="t in visibleTx" :key="t.id"
-            :class="['even:bg-stone-50/40 dark:even:bg-stone-800/20 hover:bg-stone-100/60! dark:hover:bg-stone-800/30! transition-colors', t.status === 'voided' ? 'opacity-60' : '']"
+            :class="['border-t border-stone-100 dark:border-stone-800/60 even:bg-stone-50/40 dark:even:bg-stone-950/30 hover:bg-primary-50/30 dark:hover:bg-primary-950/10 transition-colors', t.status === 'voided' ? 'opacity-60' : '']"
           >
-            <td class="px-4 py-1.5 whitespace-nowrap truncate">
-              <span v-if="t.member_name" class="inline-flex items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium">
+            <td class="px-4 py-2 whitespace-nowrap truncate">
+              <span v-if="t.member_name" class="inline-flex max-w-full items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium" :title="t.member_name">
                 <UIcon name="i-lucide-user-round" class="size-4 text-primary-500 shrink-0" />
                 <span class="truncate">{{ t.member_name }}</span>
               </span>
               <span v-else-if="t.customer_name" class="text-stone-500 dark:text-stone-400" :title="t.customer_name + '（非会员）'">{{ t.customer_name }}</span>
               <span v-else class="text-stone-500 dark:text-stone-400">非会员</span>
             </td>
-            <td class="px-4 py-1.5 whitespace-nowrap truncate">
-              <span v-if="t.card_type_name" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
-                <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
-                <span class="truncate">{{ t.card_type_name }}</span>
-              </span>
+            <td class="px-4 py-2 whitespace-nowrap truncate">
+              <UTooltip v-if="t.card_type_name" :text="t.card_type_name" :delay-duration="200">
+                <span class="inline-flex max-w-full items-center gap-1.5 text-primary-600 dark:text-primary-400">
+                  <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
+                  <span class="truncate">{{ t.card_type_name }}</span>
+                </span>
+              </UTooltip>
               <!-- 多卡联合支付无单一 card_id，从余额流水判定，别让它显示成"—" -->
               <span v-else-if="isMultiCard(t)" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
                 <UIcon name="i-lucide-wallet-cards" class="size-4 shrink-0" />
@@ -636,13 +639,17 @@
               </span>
               <span v-else class="text-stone-400">—</span>
             </td>
-            <td class="px-4 py-1.5 text-stone-600 dark:text-stone-400 break-words">
+            <td class="px-4 py-2 whitespace-nowrap">
+              <UBadge v-if="isCreditTx(t)" label="挂账" color="warning" variant="soft" size="md" />
+              <UBadge v-else :label="kindLabel(t.kind)" :color="kindColor(t.kind)" variant="soft" size="md" />
+            </td>
+            <td class="px-4 py-2 text-stone-600 dark:text-stone-400 break-words">
               {{ t.summary || t.items_summary || '—' }}
               <div v-if="humanTxNotes(t.notes)" class="text-xs text-stone-400 dark:text-stone-500 mt-0.5">{{ humanTxNotes(t.notes) }}</div>
               <div v-if="multiCardText(t)" class="text-xs text-stone-400 dark:text-stone-500 mt-0.5 tabular-nums">{{ multiCardText(t) }}</div>
             </td>
-            <td class="px-4 py-1.5 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || (isCreditTx(t) || t.kind === 'recharge' ? 1 : '—') }}</td>
-            <td class="px-4 py-1.5 text-right align-middle">
+            <td class="px-4 py-2 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || (isCreditTx(t) || t.kind === 'recharge' ? 1 : '—') }}</td>
+            <td class="px-4 py-2 text-right align-middle">
               <!-- 实付金额：有卡余额变化时下加虚线，hover 弹出快照（UPopover hover 模式，富结构内容不适合 UTooltip） -->
               <UPopover
                 v-if="t.card_snapshots && t.card_snapshots.length > 0"
@@ -695,8 +702,8 @@
                 </div>
               </div>
             </td>
-            <td class="px-4 py-1.5 text-stone-500 text-sm tabular-nums whitespace-nowrap">{{ formatHm(t.transaction_time) }}</td>
-            <td v-if="canVoid" class="px-4 py-1.5 text-center whitespace-nowrap">
+            <td class="px-4 py-2 text-stone-500 text-sm tabular-nums whitespace-nowrap">{{ formatHm(t.transaction_time) }}</td>
+            <td v-if="canVoid" class="px-4 py-2 text-center whitespace-nowrap">
               <UButton
                 v-if="t.status !== 'voided'"
                 size="xs" variant="soft" color="error"

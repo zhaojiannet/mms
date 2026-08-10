@@ -139,10 +139,12 @@
                   </td>
                   <!-- 会员卡 -->
                   <td class="px-4 py-2 whitespace-nowrap truncate">
-                    <span v-if="t.card_type_name" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
-                      <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
-                      <span class="truncate">{{ t.card_type_name }}</span>
-                    </span>
+                    <UTooltip v-if="t.card_type_name" :text="t.card_type_name" :delay-duration="200">
+                      <span class="inline-flex max-w-full items-center gap-1.5 text-primary-600 dark:text-primary-400">
+                        <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
+                        <span class="truncate">{{ t.card_type_name }}</span>
+                      </span>
+                    </UTooltip>
                     <!-- 多卡联合支付无单一 card_id，从余额流水判定，别让它显示成"—" -->
                     <span v-else-if="isMultiCard(t)" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
                       <UIcon name="i-lucide-wallet-cards" class="size-4 shrink-0" />
