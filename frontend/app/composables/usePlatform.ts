@@ -9,29 +9,25 @@ interface PlatformSession {
   operator: { email: string; name: string }
 }
 
+// 平台域名判定的状态键，由 plugins/auth.client.ts 探测后写入
+export const PLATFORM_HOST_STATE = 'is-platform-host'
+
+// isPlatformHost 当前访问域能否进 /platform 路由
+// 判定权威只有后端 RequirePlatformHost 一处，前端不自持主机名配置：
+// 两份配置只能靠人工保持一致，写歪了的表现（后端 404 / 前端不进运营界面）
+// 要肉眼比对环境变量才能发现。
+export function isPlatformHost(): boolean {
+  return useState<boolean>(PLATFORM_HOST_STATE, () => false).value
+}
+
 // isPlatformOnlyHost 该域名是否专供运营后台（商户界面在此域名下不该出现）
-// 与后端 RequirePlatformHost 保持同一判定来源：优先 NUXT_PUBLIC_PLATFORM_HOST
-// 指定的完整主机名（逗号分隔），否则退回 admin. 前缀
+// 后端把 localhost 也算平台域（便于本地调运营页），但本机两侧都要开发，
+// 不能把商户界面跳走，故此处单独排除
 export function isPlatformOnlyHost(): boolean {
   if (import.meta.server) return false
   const host = window.location.hostname.toLowerCase()
-
-  const configured = String(useRuntimeConfig().public.platformHost || '')
-    .split(',')
-    .map(h => h.trim().toLowerCase())
-    .filter(Boolean)
-  if (configured.length > 0) return configured.includes(host)
-
-  return host.startsWith('admin.')
-}
-
-// isPlatformHost 当前访问域能否进 /platform 路由
-// 本地开发两侧都要调，localhost 一律放行
-export function isPlatformHost(): boolean {
-  if (import.meta.server) return false
-  const host = window.location.hostname.toLowerCase()
-  if (host === 'localhost' || host === '127.0.0.1') return true
-  return isPlatformOnlyHost()
+  if (host === 'localhost' || host === '127.0.0.1') return false
+  return isPlatformHost()
 }
 
 export function platformSession(): PlatformSession | null {
