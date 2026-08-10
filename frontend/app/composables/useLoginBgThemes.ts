@@ -17,11 +17,22 @@ export const LOGIN_BG_THEMES: LoginBgTheme[] = [
   { key: 'pet',      name: '宠物',   hint: '宠物 · 美容',   image: '/images/login-bg/login_bg08.jpg' },
 ]
 
+// 图片未加载/未选择时的垫底色，同时也是每张主题图 url() 后面的兜底色——
+// 必须是同一个值，否则首帧纯色和图片垫底色会是两种颜色
+const FALLBACK_BG = '#44403c'
+
 export function getThemeByKey(key: string | null | undefined): LoginBgTheme {
   return LOGIN_BG_THEMES.find(t => t.key === key) || LOGIN_BG_THEMES[0]!
 }
 
 // 把老配置 key（classic 等）或行业 key 都能兼容
 export function bgStyle(theme: LoginBgTheme): string {
-  return `url('${theme.image}') center/cover, #44403c`
+  return `url('${theme.image}') center/cover, ${FALLBACK_BG}`
+}
+
+// login_bg 的展示入口：key 为空 = 商户选择未知（接口没回或没配置），
+// 给纯色底而不是默认主题图——猜一张图再换会闪，纯色到正确图不会。
+// 消费 login_bg 的地方一律走这里，别直接 getThemeByKey（它把空值解析成默认主题）。
+export function loginBgStyle(key: string | null | undefined): string {
+  return key ? bgStyle(getThemeByKey(key)) : FALLBACK_BG
 }

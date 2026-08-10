@@ -17,8 +17,9 @@
       </div>
 
       <div class="relative space-y-6 max-w-md">
-        <h1 class="text-6xl leading-tight font-semibold tracking-tight">
-          简单高效<br />管理不用愁<br />经营更省心
+        <h1 class="leading-tight font-semibold tracking-tight">
+          <span class="block text-6xl">简单高效</span>
+          <span class="block text-4xl">管理不用愁，经营更省心</span>
         </h1>
         <p class="text-base text-white/80 leading-relaxed">
           面向美业 · 美容 · 美发 · 美甲 · 按摩 · 瑜伽 · 培训 · 宠物等小微商户的会员管理 SaaS
@@ -146,7 +147,7 @@
 <script setup lang="ts">
 useHead({ title: '登录' })
 import { useAuthStore } from '~/stores/auth'
-import { getThemeByKey, bgStyle } from '~/composables/useLoginBgThemes'
+import { loginBgStyle } from '~/composables/useLoginBgThemes'
 
 definePageMeta({ layout: 'public' })
 
@@ -167,10 +168,11 @@ const captchaNeeded = ref(false)
 const captchaId = ref('')
 const captchaImage = ref('')
 
-// login_bg 为空 = 首次访问且接口未返回：先给纯色底，避免默认图闪现一帧再切换；
-// 接口返回后由已有的 transition-[background] 平滑渐入商户自选背景
-const leftBg = computed(() =>
-  storeInfo.login_bg ? bgStyle(getThemeByKey(storeInfo.login_bg)) : '#44403c')
+// 主路径是缓存命中（login_bg 记在 localStorage）：首帧即正确背景，零闪换。
+// 首访无缓存时先纯色底，接口返回后图片就绪即显示——background-image 是离散
+// 属性不可插值，这一步是直接切换而非渐变，但从纯色切到正确图不算闪（闪的
+// 定义是先画了一张错的图再换掉）
+const leftBg = computed(() => loginBgStyle(storeInfo.login_bg))
 
 onMounted(refresh)
 

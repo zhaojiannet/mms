@@ -1,37 +1,8 @@
-import { reactive } from 'vue'
+// 状态与缓存都住在 useStoreInfoState（叶子模块，auth store 也从那边引
+// resetStoreInfo）；这里只挂请求逻辑，避免经 useApi 绕回 auth 的循环 import
+import { globalStoreInfo, rememberBg, type StoreInfo } from '~/composables/useStoreInfoState'
 
-export interface StoreInfo {
-  name: string
-  slug: string
-  login_bg: string
-  logo_url: string
-}
-
-// login_bg 记住上次的值：登录页背景来自 /api/store/info，异步返回前若先渲染
-// 默认图，商户自选背景会在首帧后闪换一次。缓存上次的选择做首帧，日常访问零闪烁；
-// 首次访问（无缓存）留空，页面渲染纯色底、接口返回后随过渡渐入，不闪默认图。
-const BG_CACHE_KEY = 'mms.login_bg'
-
-function cachedBg(): string {
-  try {
-    return window.localStorage.getItem(BG_CACHE_KEY) || ''
-  } catch {
-    return ''
-  }
-}
-
-const globalInfo = reactive<StoreInfo>({
-  name: '',
-  slug: '',
-  login_bg: cachedBg(),
-  logo_url: '',
-})
-
-// 模块级缓存跨账号常驻，登出时由 auth store 调用清空（login_bg 保留：
-// 同一门店的登录页背景与账号无关，清了反而让下次登录又闪一次）
-export function resetStoreInfo() {
-  Object.assign(globalInfo, { name: '', slug: '', login_bg: cachedBg(), logo_url: '' })
-}
+export type { StoreInfo }
 
 export function useStoreInfo() {
   const api = useApi()
@@ -39,21 +10,21 @@ export function useStoreInfo() {
   async function refresh() {
     try {
       const r = await api<StoreInfo>('/api/store/info')
-      globalInfo.name     = r.name     || ''
-      globalInfo.slug     = r.slug     || ''
-      globalInfo.login_bg = r.login_bg || 'beauty'
-      globalInfo.logo_url = r.logo_url || ''
-      try {
-        window.localStorage.setItem(BG_CACHE_KEY, globalInfo.login_bg)
-      } catch { /* 隐私模式等存不了就算了，只是回到会闪一次的行为 */ }
+      globalStoreInfo.name     = r.name     || ''
+      globalStoreInfo.slug     = r.slug     || ''
+      globalStoreInfo.logo_url = r.logo_url || ''
+      rememberBg(r.login_bg || '')
     } catch (e) {
       console.warn('useStoreInfo.refresh failed', e)
     }
   }
 
   function set(partial: Partial<StoreInfo>) {
-    Object.assign(globalInfo, partial)
+    const { login_bg, ...rest } = partial
+    Object.assign(globalStoreInfo, rest)
+    // 设置页改背景走这里：缓存必须跟着写，否则登出后首帧闪回旧背景
+    if (login_bg !== undefined) rememberBg(login_bg)
   }
 
-  return { info: globalInfo, refresh, set }
+  return { info: globalStoreInfo, refresh, set }
 }
