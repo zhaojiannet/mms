@@ -71,7 +71,7 @@
             />
           </div>
           <template #content>
-            <div class="w-96 max-h-112 flex flex-col">
+            <div class="w-96 max-w-[90vw] max-h-112 flex flex-col">
               <div class="flex items-center justify-between px-4 py-3 border-b border-stone-200/70 dark:border-stone-800">
                 <div class="flex items-center gap-2">
                   <span class="text-sm font-semibold">通知</span>

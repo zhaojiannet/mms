@@ -51,3 +51,4 @@ docs/
 /ops/cutover.md
 /ops/cutover.sh
 /ops/deploy.env
+.impeccable/

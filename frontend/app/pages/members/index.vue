@@ -608,7 +608,7 @@
           </div>
 
           <!-- 自定义面值 -->
-          <div v-else class="p-4 rounded-xl bg-stone-50/60 dark:bg-stone-900/60 ring-1 ring-stone-200/40 dark:ring-stone-800 border-l-4 border-primary-500 space-y-3">
+          <div v-else class="p-4 rounded-xl bg-primary-50/40 dark:bg-primary-950/20 ring-1 ring-primary-200/60 dark:ring-primary-900/40 space-y-3">
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <UFormField label="自定义金额（元）" required>
                 <UInput v-model="issueForm.finalPrice" type="number" step="0.01" min="0.01" placeholder="卡片面值" class="w-full" />
@@ -740,17 +740,23 @@ const hasMore = computed(() => loaded.value.length < total.value)
 const auth = useAuthStore()
 const isStaff = computed(() => auth.user?.role === 'staff')
 
-const columns: TableColumn<Member>[] = [
-  { accessorKey: 'name',          header: '会员' },
-  { accessorKey: 'phone',         header: '手机' },
-  { accessorKey: 'card_count',    header: '会员卡' },
-  { accessorKey: 'total_balance', header: '余额',   meta: { class: { td: 'text-right', th: 'text-right' } } },
-  { accessorKey: 'total_pending', header: '挂账',   meta: { class: { td: 'text-right', th: 'text-right' } } },
-  { accessorKey: 'status',        header: '状态' },
-  { accessorKey: 'created_at',    header: '注册日' },
-  { accessorKey: 'notes',         header: '备注',   size: 120, meta: { class: { td: 'max-w-48' } } },
-  { id: 'actions',                header: '操作',   size: 70, meta: { class: { td: 'text-center w-32', th: 'text-center w-32' } } },
-]
+// 挂账/备注列按数据有无动态显示：多数店这两列长期全空，白占横宽还把
+// 操作列挤出平板视口——没有内容的列不该存在
+const columns = computed<TableColumn<Member>[]>(() => {
+  const hasPending = loaded.value.some(m => parseFloat(m.total_pending || '0') > 0)
+  const hasNotes = loaded.value.some(m => m.notes)
+  return [
+    { accessorKey: 'name',          header: '会员' },
+    { accessorKey: 'phone',         header: '手机' },
+    { accessorKey: 'card_count',    header: '会员卡' },
+    { accessorKey: 'total_balance', header: '余额',   meta: { class: { td: 'text-right', th: 'text-right' } } },
+    ...(hasPending ? [{ accessorKey: 'total_pending', header: '挂账', meta: { class: { td: 'text-right', th: 'text-right' } } } as TableColumn<Member>] : []),
+    { accessorKey: 'status',        header: '状态' },
+    { accessorKey: 'created_at',    header: '注册日' },
+    ...(hasNotes ? [{ accessorKey: 'notes', header: '备注', size: 120, meta: { class: { td: 'max-w-48' } } } as TableColumn<Member>] : []),
+    { id: 'actions',                header: '操作',   size: 70, meta: { class: { td: 'text-center w-32', th: 'text-center w-32' } } },
+  ]
+})
 
 function buildQuery(offset: number) {
   const params = new URLSearchParams()
