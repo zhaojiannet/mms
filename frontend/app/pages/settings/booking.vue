@@ -24,6 +24,12 @@
                 生成
               </UButton>
             </div>
+            <UButton
+              size="sm" variant="soft" color="error" icon="i-lucide-ban"
+              :loading="disabling"
+              class="mt-3 active:scale-95 transition-transform"
+              @click="disableOpen = true"
+            >关闭在线预约</UButton>
           </div>
         </div>
 
@@ -50,6 +56,17 @@
         </div>
       </div>
     </div>
+
+    <DeleteConfirmModal
+      v-model:open="disableOpen"
+      title="关闭在线预约"
+      :loading="disabling"
+      @confirm="disableBooking"
+    >
+      <template #message>
+        <p>确认关闭在线预约？当前预约码与已分享的链接、二维码将立即失效，重新生成预约码即可恢复。</p>
+      </template>
+    </DeleteConfirmModal>
   </div>
 </template>
 
@@ -105,6 +122,22 @@ async function generate() {
   } catch (e: any) {
     toast.add({ title: '生成失败', description: e?.data?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
   } finally { loading.value = false }
+}
+
+const disabling = ref(false)
+const disableOpen = ref(false)
+
+async function disableBooking() {
+  disabling.value = true
+  try {
+    await api('/api/tenant-settings/booking-code', { method: 'DELETE' })
+    code.value = null
+    updatedAt.value = null
+    disableOpen.value = false
+    toast.add({ title: '在线预约已关闭', color: 'success', icon: 'i-lucide-check' })
+  } catch (e: any) {
+    toast.add({ title: '关闭失败', description: e?.data?.message, color: 'error', icon: 'i-lucide-alert-triangle' })
+  } finally { disabling.value = false }
 }
 
 async function copyCode() {

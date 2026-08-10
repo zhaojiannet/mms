@@ -341,6 +341,22 @@ func RegenerateBookingCode(c *echo.Context) error {
 	})
 }
 
+// DisableBookingCode DELETE /api/tenant-settings/booking-code
+// 关闭在线预约：预约码置 null 后 verifyBookingCode 一律拒绝，C 端 /b/<code>
+// 立即失效；重新生成即恢复
+func DisableBookingCode(c *echo.Context) error {
+	t := mw.TenantFrom(c)
+	q := sqlc.New(mw.TxFrom(c))
+	ctx := c.Request().Context()
+	if err := setString(ctx, q, t.ID, "booking_code", nil); err != nil {
+		return mw.InternalError(c, "tenant_settings.disable_booking_code", err)
+	}
+	if err := setString(ctx, q, t.ID, "booking_code_updated_at", nil); err != nil {
+		return mw.InternalError(c, "tenant_settings.clear_booking_updated_at", err)
+	}
+	return c.JSON(http.StatusOK, map[string]any{"disabled": true})
+}
+
 // SetSuperPassword POST /api/tenant-settings/super-password
 // body: { current_password, new_password }
 // 要求当前登录用户确认本人登录密码，然后设置 tenant 级超级密码

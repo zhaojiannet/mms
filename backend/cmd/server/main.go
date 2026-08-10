@@ -310,6 +310,7 @@ func main() {
 	superOnly.POST("/tenant-settings/enable-void", tenantsettings.EnableVoid, pwdLimit)
 	superOnly.POST("/tenant-settings/disable-void", tenantsettings.DisableVoid, pwdLimit)
 	adminAndAbove.POST("/tenant-settings/booking-code", tenantsettings.RegenerateBookingCode)
+	adminAndAbove.DELETE("/tenant-settings/booking-code", tenantsettings.DisableBookingCode)
 	superOnly.POST("/tenant-settings/super-password", tenantsettings.SetSuperPassword, pwdLimit)
 	secured.GET("/tenant-settings/super-password/status", tenantsettings.SuperPasswordStatus)
 
