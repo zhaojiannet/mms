@@ -19,9 +19,21 @@ WHERE ($1::timestamptz IS NULL OR transaction_time >= $1::timestamptz)
   AND ($2::timestamptz   IS NULL OR transaction_time <  $2::timestamptz)
   AND ($3::text              IS NULL OR kind              =  $3::text)
   AND ($4::uuid         IS NULL OR member_id        =  $4::uuid)
+  AND ($5::text IS NULL
+       OR EXISTS (SELECT 1 FROM members mm WHERE mm.id = transactions.member_id
+                  AND (mm.name ILIKE '%' || $5::text || '%'
+                       OR mm.phone ILIKE '%' || $5::text || '%'))
+       OR customer_name ILIKE '%' || $5::text || '%'
+       OR summary ILIKE '%' || $5::text || '%'
+       OR EXISTS (SELECT 1 FROM transaction_items ti2
+                  WHERE ti2.transaction_id = transactions.id
+                    AND ti2.service_name_snapshot ILIKE '%' || $5::text || '%')
+       OR ($5::text ~ '^[0-9]+(\.[0-9]{1,2})?$'
+           AND (total_amount = $5::numeric
+                OR actual_paid_amount = $5::numeric)))
   AND (
-    $5::text IS NOT NULL AND status = $5::text
-    OR $5::text IS NULL AND ($6::bool IS TRUE OR status = 'completed')
+    $6::text IS NOT NULL AND status = $6::text
+    OR $6::text IS NULL AND ($7::bool IS TRUE OR status = 'completed')
   )
 `
 
@@ -30,6 +42,7 @@ type CountTransactionsByParams struct {
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
 	MemberID      pgtype.UUID        `json:"member_id"`
+	Search        *string            `json:"search"`
 	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
@@ -40,6 +53,7 @@ func (q *Queries) CountTransactionsBy(ctx context.Context, arg CountTransactions
 		arg.EndDate,
 		arg.Kind,
 		arg.MemberID,
+		arg.Search,
 		arg.Status,
 		arg.IncludeVoided,
 	)
@@ -170,8 +184,21 @@ const listTransactions = `-- name: ListTransactions :many
 SELECT
   t.id, t.tenant_id, t.kind, t.status, t.member_id, t.customer_name, t.staff_id, t.payment_method_id, t.card_id, t.total_amount, t.actual_paid_amount, t.discount_amount, t.transaction_time, t.voided_at, t.voided_by_user_id, t.voided_by_name, t.void_reason, t.summary, t.notes, t.legacy_id, t.created_at, t.updated_at,
   m.name  AS member_name,
-  ct.name AS card_type_name,
-  COALESCE((SELECT SUM(quantity)::int FROM transaction_items WHERE transaction_id = t.id), 0)::int AS item_qty
+  -- 卡展示名：自定义面值卡按实际面值展示并带折扣后缀（迁移把 isCustomCard 塌缩为
+  -- final_price，与卡型标价不同即为自定义），老板在老系统看惯的「自定义面值卡(¥N) n折」不丢
+  COALESCE(CASE WHEN c.final_price <> ct.price
+             THEN '自定义面值卡(¥' || to_char(c.final_price, 'FM9999999990.00') || ')'
+             ELSE ct.name END
+        || CASE WHEN c.final_discount_rate < 1
+             THEN ' ' || rtrim(rtrim(to_char(c.final_discount_rate * 10, 'FM90.9'), '0'), '.') || '折'
+             ELSE '' END, '')::text AS card_type_name,
+  COALESCE((SELECT SUM(quantity)::int FROM transaction_items WHERE transaction_id = t.id), 0)::int AS item_qty,
+  -- 挂账登记交易（0 实收）关联的挂账金额：流水里显示「挂账 ¥N」而不是令人困惑的 ¥0
+  COALESCE((SELECT mc.amount FROM member_credits mc WHERE mc.charged_tx_id = t.id LIMIT 1), 0)::numeric(10,2) AS credit_amount,
+  -- summary 为空时（老系统迁入的交易普遍如此）前端回退显示明细聚合，服务项目列不再一片「—」
+  (SELECT string_agg(ti.service_name_snapshot
+            || CASE WHEN ti.quantity > 1 THEN '×' || ti.quantity ELSE '' END, '、')
+   FROM transaction_items ti WHERE ti.transaction_id = t.id) AS items_summary
 FROM transactions t
 LEFT JOIN members m     ON m.id = t.member_id
 LEFT JOIN cards c       ON c.id = t.card_id
@@ -180,9 +207,22 @@ WHERE ($3::timestamptz IS NULL OR t.transaction_time >= $3::timestamptz)
   AND ($4::timestamptz   IS NULL OR t.transaction_time <  $4::timestamptz)
   AND ($5::text              IS NULL OR t.kind             =  $5::text)
   AND ($6::uuid         IS NULL OR t.member_id       =  $6::uuid)
+  -- 搜索范围与老系统对齐并扩展：会员姓名 / 手机号 / 非会员姓名 / 项目摘要 /
+  -- 明细服务名；纯数字输入再按金额精确匹配（应收或实收）
+  AND ($7::text IS NULL
+       OR m.name ILIKE '%' || $7::text || '%'
+       OR m.phone ILIKE '%' || $7::text || '%'
+       OR t.customer_name ILIKE '%' || $7::text || '%'
+       OR t.summary ILIKE '%' || $7::text || '%'
+       OR EXISTS (SELECT 1 FROM transaction_items ti2
+                  WHERE ti2.transaction_id = t.id
+                    AND ti2.service_name_snapshot ILIKE '%' || $7::text || '%')
+       OR ($7::text ~ '^[0-9]+(\.[0-9]{1,2})?$'
+           AND (t.total_amount = $7::numeric
+                OR t.actual_paid_amount = $7::numeric)))
   AND (
-    $7::text IS NOT NULL AND t.status = $7::text
-    OR $7::text IS NULL AND ($8::bool IS TRUE OR t.status = 'completed')
+    $8::text IS NOT NULL AND t.status = $8::text
+    OR $8::text IS NULL AND ($9::bool IS TRUE OR t.status = 'completed')
   )
 ORDER BY t.transaction_time DESC, t.id DESC
 LIMIT $1 OFFSET $2
@@ -195,15 +235,18 @@ type ListTransactionsParams struct {
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
 	MemberID      pgtype.UUID        `json:"member_id"`
+	Search        *string            `json:"search"`
 	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
 
 type ListTransactionsRow struct {
-	Transaction  Transaction `json:"transaction"`
-	MemberName   *string     `json:"member_name"`
-	CardTypeName *string     `json:"card_type_name"`
-	ItemQty      int32       `json:"item_qty"`
+	Transaction  Transaction     `json:"transaction"`
+	MemberName   *string         `json:"member_name"`
+	CardTypeName string          `json:"card_type_name"`
+	ItemQty      int32           `json:"item_qty"`
+	CreditAmount decimal.Decimal `json:"credit_amount"`
+	ItemsSummary []byte          `json:"items_summary"`
 }
 
 // 列出交易，附带会员名 / 卡类型名 / 项目数 (POS 收银底部 / 流水页展示)
@@ -218,6 +261,7 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 		arg.EndDate,
 		arg.Kind,
 		arg.MemberID,
+		arg.Search,
 		arg.Status,
 		arg.IncludeVoided,
 	)
@@ -254,6 +298,8 @@ func (q *Queries) ListTransactions(ctx context.Context, arg ListTransactionsPara
 			&i.MemberName,
 			&i.CardTypeName,
 			&i.ItemQty,
+			&i.CreditAmount,
+			&i.ItemsSummary,
 		); err != nil {
 			return nil, err
 		}
@@ -303,7 +349,7 @@ func (q *Queries) LockTransactionForUpdate(ctx context.Context, id uuid.UUID) (T
 const lookupTransactionsByIDs = `-- name: LookupTransactionsByIDs :many
 SELECT t.id,
        t.total_amount,
-       COALESCE(m.name, t.customer_name, '散客')::text AS display_name
+       COALESCE(m.name, t.customer_name, '非会员')::text AS display_name
 FROM transactions t
 LEFT JOIN members m ON m.id = t.member_id
 WHERE t.id = ANY($1::uuid[])
@@ -343,9 +389,21 @@ WHERE ($1::timestamptz IS NULL OR transaction_time >= $1::timestamptz)
   AND ($2::timestamptz   IS NULL OR transaction_time <  $2::timestamptz)
   AND ($3::text              IS NULL OR kind              =  $3::text)
   AND ($4::uuid         IS NULL OR member_id        =  $4::uuid)
+  AND ($5::text IS NULL
+       OR EXISTS (SELECT 1 FROM members mm WHERE mm.id = transactions.member_id
+                  AND (mm.name ILIKE '%' || $5::text || '%'
+                       OR mm.phone ILIKE '%' || $5::text || '%'))
+       OR customer_name ILIKE '%' || $5::text || '%'
+       OR summary ILIKE '%' || $5::text || '%'
+       OR EXISTS (SELECT 1 FROM transaction_items ti2
+                  WHERE ti2.transaction_id = transactions.id
+                    AND ti2.service_name_snapshot ILIKE '%' || $5::text || '%')
+       OR ($5::text ~ '^[0-9]+(\.[0-9]{1,2})?$'
+           AND (total_amount = $5::numeric
+                OR actual_paid_amount = $5::numeric)))
   AND (
-    $5::text IS NOT NULL AND status = $5::text
-    OR $5::text IS NULL AND ($6::bool IS TRUE OR status = 'completed')
+    $6::text IS NOT NULL AND status = $6::text
+    OR $6::text IS NULL AND ($7::bool IS TRUE OR status = 'completed')
   )
 `
 
@@ -354,6 +412,7 @@ type MaxTransactionsUpdatedAtParams struct {
 	EndDate       pgtype.Timestamptz `json:"end_date"`
 	Kind          *string            `json:"kind"`
 	MemberID      pgtype.UUID        `json:"member_id"`
+	Search        *string            `json:"search"`
 	Status        *string            `json:"status"`
 	IncludeVoided *bool              `json:"include_voided"`
 }
@@ -366,6 +425,7 @@ func (q *Queries) MaxTransactionsUpdatedAt(ctx context.Context, arg MaxTransacti
 		arg.EndDate,
 		arg.Kind,
 		arg.MemberID,
+		arg.Search,
 		arg.Status,
 		arg.IncludeVoided,
 	)

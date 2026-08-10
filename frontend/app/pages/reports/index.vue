@@ -91,7 +91,19 @@
               class="cursor-pointer active:scale-95 transition-transform"
               @click="txKind = f.key as any; fetchTx(true)"
             />
-            <span class="ml-auto text-sm text-stone-500 tabular-nums">共 {{ txTotal }} 笔</span>
+            <UInput
+              v-model="txSearch"
+              icon="i-lucide-search"
+              size="sm"
+              placeholder="姓名 / 电话 / 项目 / 金额"
+              class="ml-auto w-52"
+              :ui="{ leadingIcon: 'size-4 text-stone-400' }"
+            />
+            <label class="flex items-center gap-2 cursor-pointer select-none">
+              <USwitch v-model="showVoided" size="sm" @update:model-value="fetchTx(true)" />
+              <span class="text-sm text-stone-500">显示已撤销</span>
+            </label>
+            <span class="text-sm text-stone-500 tabular-nums">共 {{ txTotal }} 笔</span>
           </div>
 
           <div
@@ -101,13 +113,13 @@
             <table class="w-full min-w-[880px] text-sm table-fixed">
               <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
                 <tr>
-                  <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-32">姓名</th>
+                  <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-28">姓名</th>
                   <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-40">会员卡</th>
                   <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-20">类型</th>
                   <th class="text-left px-4 py-2.5 font-medium">服务项目</th>
-                  <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-14">数量</th>
+                  <th class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-12">数量</th>
                   <th class="text-right px-4 py-2.5 font-medium w-40">金额</th>
-                  <th class="text-left px-4 py-2.5 font-medium whitespace-nowrap w-44">时间</th>
+                  <th class="text-left px-4 py-2.5 font-medium w-24">时间</th>
                   <th v-if="canVoid" class="text-center px-4 py-2.5 font-medium whitespace-nowrap w-28">操作</th>
                 </tr>
               </thead>
@@ -118,15 +130,12 @@
                 >
                   <!-- 姓名 -->
                   <td class="px-4 py-2 whitespace-nowrap truncate">
-                    <span v-if="t.member_name" class="inline-flex items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium">
+                    <span v-if="t.member_name" class="inline-flex max-w-full items-center gap-1.5 text-stone-900 dark:text-stone-100 font-medium" :title="t.member_name">
                       <UIcon name="i-lucide-user-round" class="size-4 text-primary-500 shrink-0" />
                       <span class="truncate">{{ t.member_name }}</span>
                     </span>
-                    <span v-else-if="t.customer_name" class="text-stone-900 dark:text-stone-100 font-medium">
-                      {{ t.customer_name }}
-                      <span class="text-xs text-stone-400 font-normal ml-1">散客</span>
-                    </span>
-                    <span v-else class="text-stone-400">—</span>
+                    <span v-else-if="t.customer_name" class="text-stone-500 dark:text-stone-400" :title="t.customer_name + '（非会员）'">{{ t.customer_name }}</span>
+                    <span v-else class="text-stone-500 dark:text-stone-400">非会员</span>
                   </td>
                   <!-- 会员卡 -->
                   <td class="px-4 py-2 whitespace-nowrap truncate">
@@ -136,14 +145,19 @@
                     </span>
                     <span v-else class="text-stone-400">—</span>
                   </td>
-                  <!-- 类型 -->
+                  <!-- 类型：挂账登记（0 实收 + 关联挂账）单独标出，不与普通消费混淆 -->
                   <td class="px-4 py-2 whitespace-nowrap">
-                    <UBadge :label="kindLabel(t.kind)" :color="kindColor(t.kind)" variant="soft" size="md" />
+                    <UBadge v-if="isCreditTx(t)" label="挂账" color="warning" variant="soft" size="md" />
+                    <UBadge v-else :label="kindLabel(t.kind)" :color="kindColor(t.kind)" variant="soft" size="md" />
                   </td>
-                  <!-- 服务项目（允许换行） -->
-                  <td class="px-4 py-2 text-stone-600 dark:text-stone-400 break-words">{{ t.summary || '—' }}</td>
+                  <!-- 服务项目（允许换行）：summary 为空回退到明细聚合（老系统迁入的交易普遍无 summary） -->
+                  <td class="px-4 py-2 text-stone-600 dark:text-stone-400 break-words">
+                    {{ t.summary || t.items_summary || '—' }}
+                    <div v-if="humanTxNotes(t.notes)" class="text-xs text-stone-400 dark:text-stone-500 mt-0.5">{{ humanTxNotes(t.notes) }}</div>
+                    <div v-if="multiCardText(t)" class="text-xs text-stone-400 dark:text-stone-500 mt-0.5 tabular-nums">{{ multiCardText(t) }}</div>
+                  </td>
                   <!-- 数量 -->
-                  <td class="px-4 py-2 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || '—' }}</td>
+                  <td class="px-4 py-2 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || (isCreditTx(t) || t.kind === 'recharge' ? 1 : '—') }}</td>
                   <!-- 金额（实付大号 + 应收划线 + 省/已撤销 + 余额快照 hover） -->
                   <td class="px-4 py-2 text-right align-middle">
                     <div class="relative inline-block group">
@@ -152,10 +166,14 @@
                         :class="t.card_snapshots && t.card_snapshots.length > 0 ? 'cursor-help border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5' : ''"
                       >
                         <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
-                        <span class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
+                        <template v-if="isCreditTx(t)">
+                          <span class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
+                        </template>
+                        <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                       </div>
                       <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
-                        <span v-if="parseFloat(t.discount_amount) > 0" class="text-error-600">省 ¥{{ t.discount_amount }}</span>
+                        <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">暂未收款</span>
+                        <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
                         <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                       </div>
                       <!-- 余额快照 tooltip -->
@@ -180,7 +198,10 @@
                     </div>
                   </td>
                   <!-- 时间 -->
-                  <td class="px-4 py-2 text-stone-500 text-sm tabular-nums whitespace-nowrap">{{ formatTime(t.transaction_time) }}</td>
+                  <td class="px-4 py-2 text-stone-500 text-sm tabular-nums leading-tight">
+                    <div>{{ formatTime(t.transaction_time).split(' ')[0] }}</div>
+                    <div class="text-xs text-stone-400">{{ formatTime(t.transaction_time).split(' ')[1] }}</div>
+                  </td>
                   <!-- 操作（仅当开启交易撤销时显示） -->
                   <td v-if="canVoid" class="px-4 py-2 text-center whitespace-nowrap">
                     <UButton
@@ -214,6 +235,86 @@
     </div>
 
     <!-- ============ 排行 ============ -->
+    <!-- ============ 月度对比（近 12 个月，独立于日期区间） ============ -->
+    <div v-show="activeTab === 'monthly'">
+        <div class="space-y-4 mt-4">
+          <USkeleton v-if="monthlyLoading" class="h-64 rounded-2xl" />
+          <template v-else>
+          <!-- 对比图：单指标切换柱状（12 个月），hover 看精确值，最高月直接标注 -->
+          <div class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 p-5">
+            <div class="flex items-center gap-2 flex-wrap mb-4">
+              <UBadge
+                v-for="mt in monthlyMetrics" :key="mt.key"
+                :label="mt.label"
+                :color="monthlyMetric === mt.key ? 'primary' : 'neutral'"
+                :variant="monthlyMetric === mt.key ? 'solid' : 'soft'"
+                class="cursor-pointer active:scale-95 transition-transform"
+                @click="monthlyMetric = mt.key"
+              />
+              <span class="ml-auto text-xs text-stone-400">近 12 个月</span>
+            </div>
+            <div class="flex items-end gap-1.5 h-52">
+              <div
+                v-for="(b, i) in monthlyBars" :key="b.month"
+                class="group relative flex-1 flex flex-col items-center justify-end h-full min-w-0"
+              >
+                <span
+                  v-if="b.isMax && b.value > 0"
+                  class="text-xs tabular-nums text-stone-500 dark:text-stone-400 mb-1 whitespace-nowrap"
+                >{{ b.display }}</span>
+                <div
+                  class="w-full max-w-10 rounded-t bg-primary-500/90 dark:bg-primary-400/90 group-hover:bg-primary-600 dark:group-hover:bg-primary-300 transition-colors"
+                  :style="{ height: b.pct + '%' }"
+                />
+                <!-- hover 浮层：完整月份 + 精确值 -->
+                <div class="pointer-events-none absolute bottom-full mb-1 z-20 px-2.5 py-1.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 text-xs tabular-nums whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity" :class="i < 2 ? 'left-0' : i > 9 ? 'right-0' : ''">
+                  {{ b.month }} · {{ b.display }}
+                </div>
+              </div>
+            </div>
+            <div class="flex gap-1.5 mt-2">
+              <div v-for="b in monthlyBars" :key="b.month" class="flex-1 text-center text-xs text-stone-400 tabular-nums truncate">{{ b.shortMonth }}</div>
+            </div>
+          </div>
+
+          <div class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-x-auto">
+            <div class="px-5 py-3.5 border-b border-stone-200/60 dark:border-stone-800 flex items-baseline gap-3">
+              <span class="text-sm font-medium text-stone-700 dark:text-stone-300">月度明细</span>
+              <span class="ml-auto text-xs text-stone-400">近 12 个月 · 与上方日期区间无关</span>
+            </div>
+            <table class="w-full min-w-[840px] text-sm table-fixed">
+              <thead class="bg-stone-50/60 dark:bg-stone-950/40 text-stone-500 text-xs tracking-wide">
+                <tr>
+                  <th class="text-left px-4 py-3 font-medium whitespace-nowrap w-24">月份</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap">营业额</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap">其中挂账</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap">清账回款</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap">办卡充值</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap">卡耗</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap w-16">客数</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap">客单价</th>
+                  <th class="text-right px-4 py-3 font-medium whitespace-nowrap w-20">新会员</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="m in monthly" :key="m.month" class="border-t border-stone-100 dark:border-stone-800/60 even:bg-stone-50/40 dark:even:bg-stone-950/30 hover:bg-primary-50/30 dark:hover:bg-primary-950/10 transition-colors">
+                  <td class="px-4 py-3 tabular-nums whitespace-nowrap font-medium">{{ m.month }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums font-medium whitespace-nowrap">¥{{ m.revenue }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums whitespace-nowrap" :class="parseFloat(m.pending_added) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-stone-400'">¥{{ m.pending_added }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-stone-500 whitespace-nowrap">¥{{ m.pending_cleared }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-stone-500 whitespace-nowrap">¥{{ m.recharge }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-stone-500 whitespace-nowrap">¥{{ m.card_consumption }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-stone-500 whitespace-nowrap">{{ m.customers }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-stone-500 whitespace-nowrap">¥{{ m.avg_order }}</td>
+                  <td class="px-4 py-3 text-right tabular-nums text-stone-500 whitespace-nowrap">{{ m.new_members }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          </template>
+        </div>
+    </div>
+
     <div v-show="activeTab === 'ranking'">
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-4">
           <!-- 项目排行 -->
@@ -492,6 +593,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '报表' })
 definePageMeta({ middleware: 'at-least-admin' })
 
 import { CalendarDate } from '@internationalized/date'
@@ -547,8 +649,12 @@ const rangeCalValue = computed(() => {
 })
 function onRangeUpdate(v: any) {
   if (!v?.start || !v?.end) return
-  startDate.value = calToStr(v.start)
-  endDate.value = calToStr(v.end)
+  const s = calToStr(v.start), e = calToStr(v.end)
+  // applyPreset 改日期后组件会回显式地 emit 一次：值没变就不是用户操作，
+  // 直接忽略——否则刚点亮的 preset 会被清掉，还多跑一次查询
+  if (s === startDate.value && e === endDate.value) return
+  startDate.value = s
+  endDate.value = e
   preset.value = ''
   onQuery()
 }
@@ -574,6 +680,7 @@ function applyPreset(p: typeof presets[number]) {
 // ===== Tabs =====
 const tabs = [
   { label: '流水',   slot: 'transactions' as const, value: 'transactions', icon: 'i-lucide-list' },
+  { label: '月度',   slot: 'monthly' as const,      value: 'monthly',      icon: 'i-lucide-calendar-range' },
   { label: '排行',   slot: 'ranking' as const,      value: 'ranking',      icon: 'i-lucide-trophy' },
   { label: '会员卡', slot: 'cards' as const,        value: 'cards',        icon: 'i-lucide-credit-card' },
   { label: '支付',   slot: 'payment' as const,      value: 'payment',      icon: 'i-lucide-wallet' },
@@ -621,6 +728,9 @@ interface Tx {
   total_amount: string; actual_paid_amount: string; discount_amount: string
   transaction_time: string; summary: string | null
   item_qty: number
+  items_summary: string | null
+  credit_amount: string
+  notes: string | null
   card_snapshots: CardSnapshot[] | null
 }
 const txItems = ref<Tx[]>([])
@@ -628,6 +738,9 @@ const txTotal = ref(0)
 const txLoading = ref(false)
 const txPage = ref(1)
 const txKind = ref<'' | 'sale' | 'recharge' | 'credit_settlement'>('')
+const showVoided = ref(false)
+const txSearch = ref('')
+watchDebounced(txSearch, () => { fetchTx(true) }, { debounce: 300 })
 const txFilters = [
   { key: '',                  label: '全部' },
   { key: 'sale',              label: '消费' },
@@ -636,6 +749,32 @@ const txFilters = [
 ]
 function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
 function kindColor(k: string) { return (TX_KIND_COLOR as Record<string, 'primary' | 'info' | 'neutral'>)[k] ?? 'neutral' }
+
+// 挂账登记交易：0 实收 + 关联着一笔挂账（老系统迁入与新系统原生开单同构）
+function isCreditTx(t: Tx) { return parseFloat(t.credit_amount || '0') > 0 }
+
+// 折数：实付/应收 × 10，整数不带小数（8折），否则一位小数（8.5折）
+// 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
+function isMultiCard(t: Tx) {
+  return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
+}
+
+// 多卡分卡明细：直接从结构化余额流水组装（老系统靠 notes 文本，这里比它可靠）
+function multiCardText(t: Tx): string {
+  const parts = (t.card_snapshots || []).filter(s => s.change_type === 'consume')
+  if (parts.length < 2) return ''
+  return '多卡：' + parts
+    .map(s => `${s.card_type_name}¥${(parseFloat(s.balance_before) - parseFloat(s.balance_after)).toFixed(2)}`)
+    .join(' + ')
+}
+
+function discountRate(t: Tx): string {
+  const total = parseFloat(t.total_amount)
+  const paid = parseFloat(t.actual_paid_amount)
+  if (!(total > 0) || !(paid >= 0) || paid >= total) return ''
+  const zhe = Math.round((paid / total) * 100) / 10
+  return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折`
+}
 
 async function fetchTx(reset = false) {
   if (reset) { txPage.value = 1; txItems.value = [] }
@@ -649,9 +788,11 @@ async function fetchTx(reset = false) {
       end_date: endNext.toISOString(),
       page: String(txPage.value),
       limit: String(PAGE_SIZE),
-      include_voided: '1',
     })
+    // 默认隐藏已撤销：撤销单不计任何统计，日常视图与老系统习惯一致；审计时打开开关看全
+    if (showVoided.value) q.set('include_voided', '1')
     if (txKind.value) q.set('kind', txKind.value)
+    if (txSearch.value.trim()) q.set('search', txSearch.value.trim())
     const data = await api<{ items: Tx[]; total: number }>(`/api/transactions?${q}`)
     txItems.value = reset ? data.items : [...txItems.value, ...data.items]
     txTotal.value = data.total
@@ -796,6 +937,47 @@ function ensureTabLoaded(tab: string) {
   else if (tab === 'payment') fetchPayment()
   else if (tab === 'pending') fetchPending()
   else if (tab === 'reminders') { fetchBirthday(); fetchSleeping(true) }
+  else if (tab === 'monthly') fetchMonthly()
+}
+
+// ===== 月度对比（近 12 个月，不随上方日期区间变化）=====
+interface MonthRow {
+  month: string; revenue: string; pending_added: string; pending_cleared: string
+  recharge: string; card_consumption: string; customers: number; avg_order: string; new_members: number
+}
+const monthly = ref<MonthRow[]>([])
+const monthlyLoading = ref(false)
+const monthlyMetrics = [
+  { key: 'revenue',          label: '营业额', money: true },
+  { key: 'recharge',         label: '办卡充值', money: true },
+  { key: 'card_consumption', label: '卡耗', money: true },
+  { key: 'customers',        label: '客数', money: false },
+] as const
+const monthlyMetric = ref<typeof monthlyMetrics[number]['key']>('revenue')
+// 图表按时间正序（旧→新，左到右）；表格保持最新在上
+const monthlyBars = computed(() => {
+  const rows = [...monthly.value].reverse()
+  const metric = monthlyMetrics.find(m => m.key === monthlyMetric.value)!
+  const vals = rows.map(r => parseFloat(String(r[metric.key])) || 0)
+  const max = Math.max(...vals, 0)
+  return rows.map((r, i) => {
+    const v = vals[i] ?? 0
+    return {
+      month: r.month,
+      shortMonth: `${parseInt(r.month.slice(5))}月`,
+      value: v,
+      pct: max > 0 ? Math.max((v / max) * 100, v > 0 ? 2 : 0) : 0,
+      isMax: max > 0 && v === max,
+      display: metric.money ? `¥${v.toLocaleString('zh-CN')}` : String(v),
+    }
+  })
+})
+async function fetchMonthly() {
+  monthlyLoading.value = true
+  try {
+    const r = await api<{ data: MonthRow[] }>('/api/reports/business/monthly')
+    monthly.value = [...(r.data || [])].reverse()   // 最新月份在最上
+  } finally { monthlyLoading.value = false }
 }
 
 function dateQS() { return `start_date=${startDate.value}&end_date=${endDate.value}` }

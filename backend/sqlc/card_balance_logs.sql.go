@@ -153,7 +153,12 @@ SELECT
   l.balance_after,
   l.delta,
   l.change_type,
-  ct.name AS card_type_name
+  (CASE WHEN c.final_price <> ct.price
+             THEN '自定义面值卡(¥' || to_char(c.final_price, 'FM9999999990.00') || ')'
+             ELSE ct.name END
+        || CASE WHEN c.final_discount_rate < 1
+             THEN ' ' || rtrim(rtrim(to_char(c.final_discount_rate * 10, 'FM90.9'), '0'), '.') || '折'
+             ELSE '' END)::text AS card_type_name
 FROM card_balance_logs l
 JOIN cards c       ON c.id = l.card_id
 JOIN card_types ct ON ct.id = c.card_type_id

@@ -44,14 +44,14 @@
               <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-x" @click="clearMember" />
             </div>
 
-            <!-- 散客 -->
+            <!-- 非会员 -->
             <div v-else-if="walkInName" class="flex items-center gap-3 px-3 py-2.5 rounded-lg bg-stone-50 dark:bg-stone-800/60 ring-1 ring-stone-200 dark:ring-stone-700">
               <div class="size-10 shrink-0 rounded-full bg-stone-200 dark:bg-stone-700 text-stone-500 flex items-center justify-center">
                 <UIcon name="i-lucide-user-round" class="size-5" />
               </div>
               <div class="flex-1 flex items-center gap-2">
                 <span class="text-base font-semibold">{{ walkInName }}</span>
-                <UBadge label="散客" color="neutral" variant="soft" size="xs" />
+                <UBadge label="非会员" color="neutral" variant="soft" size="xs" />
               </div>
               <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-x" @click="walkInName = ''" />
             </div>
@@ -119,7 +119,7 @@
                 class="absolute left-0 right-0 top-full mt-1 z-20 px-3 py-2.5 rounded-lg bg-white dark:bg-stone-900 ring-1 ring-stone-200 dark:ring-stone-700 shadow-lg text-sm text-stone-500"
               >
                 无匹配，按 <kbd class="px-1.5 py-0.5 rounded bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 text-xs">Enter</kbd> 以
-                <span class="font-medium text-stone-700 dark:text-stone-200">「{{ memberSearch }}」</span> 散客消费
+                <span class="font-medium text-stone-700 dark:text-stone-200">「{{ memberSearch }}」</span> 非会员消费
               </div>
             </div>
           </div>
@@ -596,8 +596,8 @@
                 <UIcon name="i-lucide-user-round" class="size-4 text-primary-500 shrink-0" />
                 <span class="truncate">{{ t.member_name }}</span>
               </span>
-              <span v-else-if="t.customer_name" class="text-stone-900 dark:text-stone-100 font-medium">{{ t.customer_name }} <span class="text-xs text-stone-400 font-normal ml-1">散客</span></span>
-              <span v-else class="text-stone-400">—</span>
+              <span v-else-if="t.customer_name" class="text-stone-500 dark:text-stone-400" :title="t.customer_name + '（非会员）'">{{ t.customer_name }}</span>
+              <span v-else class="text-stone-500 dark:text-stone-400">非会员</span>
             </td>
             <td class="px-4 py-1.5 whitespace-nowrap truncate">
               <span v-if="t.card_type_name" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
@@ -606,8 +606,12 @@
               </span>
               <span v-else class="text-stone-400">—</span>
             </td>
-            <td class="px-4 py-1.5 text-stone-600 dark:text-stone-400 break-words">{{ t.summary || '—' }}</td>
-            <td class="px-4 py-1.5 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || '—' }}</td>
+            <td class="px-4 py-1.5 text-stone-600 dark:text-stone-400 break-words">
+              {{ t.summary || t.items_summary || '—' }}
+              <div v-if="humanTxNotes(t.notes)" class="text-xs text-stone-400 dark:text-stone-500 mt-0.5">{{ humanTxNotes(t.notes) }}</div>
+              <div v-if="multiCardText(t)" class="text-xs text-stone-400 dark:text-stone-500 mt-0.5 tabular-nums">{{ multiCardText(t) }}</div>
+            </td>
+            <td class="px-4 py-1.5 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || (isCreditTx(t) || t.kind === 'recharge' ? 1 : '—') }}</td>
             <td class="px-4 py-1.5 text-right align-middle">
               <!-- 实付金额：有卡余额变化时下加虚线，hover 弹出快照（UPopover hover 模式，富结构内容不适合 UTooltip） -->
               <UPopover
@@ -619,10 +623,12 @@
                 <div class="inline-block cursor-help">
                   <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
                     <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
-                    <span class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
+                    <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
+                    <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                   </div>
                   <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
-                    <span v-if="parseFloat(t.discount_amount) > 0" class="text-error-600">省 ¥{{ t.discount_amount }}</span>
+                    <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">挂账 · 暂未收款</span>
+                    <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
                     <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                   </div>
                 </div>
@@ -647,10 +653,12 @@
               <div v-else class="inline-block">
                 <div class="flex items-baseline justify-end gap-1.5 leading-tight">
                   <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
-                  <span class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
+                  <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
+                  <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                 </div>
                 <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
-                  <span v-if="parseFloat(t.discount_amount) > 0" class="text-error-600">省 ¥{{ t.discount_amount }}</span>
+                  <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">挂账 · 暂未收款</span>
+                  <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
                   <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                 </div>
               </div>
@@ -824,7 +832,36 @@ interface TodayTx {
   total_amount: string; actual_paid_amount: string; discount_amount: string
   transaction_time: string; summary: string | null
   item_qty: number
+  items_summary: string | null
+  credit_amount: string
+  notes: string | null
   card_snapshots: CardSnapshot[] | null
+}
+
+// 挂账登记交易：0 实收 + 关联着一笔挂账
+function isCreditTx(t: TodayTx) { return parseFloat(t.credit_amount || '0') > 0 }
+
+// 折数：实付/应收 × 10，整数不带小数（8折），否则一位小数（8.5折）
+// 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
+function isMultiCard(t: TodayTx) {
+  return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
+}
+
+// 多卡分卡明细：直接从结构化余额流水组装（老系统靠 notes 文本，这里比它可靠）
+function multiCardText(t: TodayTx): string {
+  const parts = (t.card_snapshots || []).filter(s => s.change_type === 'consume')
+  if (parts.length < 2) return ''
+  return '多卡：' + parts
+    .map(s => `${s.card_type_name}¥${(parseFloat(s.balance_before) - parseFloat(s.balance_after)).toFixed(2)}`)
+    .join(' + ')
+}
+
+function discountRate(t: TodayTx): string {
+  const total = parseFloat(t.total_amount)
+  const paid = parseFloat(t.actual_paid_amount)
+  if (!(total > 0) || !(paid >= 0) || paid >= total) return ''
+  const zhe = Math.round((paid / total) * 100) / 10
+  return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折`
 }
 const PAGE_SIZE = 10 // 默认显示 / 每次加载条数
 const todayTx = reactive({

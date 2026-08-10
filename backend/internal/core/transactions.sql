@@ -9,7 +9,7 @@ SELECT * FROM transactions WHERE id = $1 FOR UPDATE;
 -- 批量返回 id + 简要信息（给操作日志对象列显示用）
 SELECT t.id,
        t.total_amount,
-       COALESCE(m.name, t.customer_name, '散客')::text AS display_name
+       COALESCE(m.name, t.customer_name, '非会员')::text AS display_name
 FROM transactions t
 LEFT JOIN members m ON m.id = t.member_id
 WHERE t.id = ANY($1::uuid[]);
@@ -44,8 +44,21 @@ INSERT INTO transactions (
 SELECT
   sqlc.embed(t),
   m.name  AS member_name,
-  ct.name AS card_type_name,
-  COALESCE((SELECT SUM(quantity)::int FROM transaction_items WHERE transaction_id = t.id), 0)::int AS item_qty
+  -- 卡展示名：自定义面值卡按实际面值展示并带折扣后缀（迁移把 isCustomCard 塌缩为
+  -- final_price，与卡型标价不同即为自定义），老板在老系统看惯的「自定义面值卡(¥N) n折」不丢
+  COALESCE(CASE WHEN c.final_price <> ct.price
+             THEN '自定义面值卡(¥' || to_char(c.final_price, 'FM9999999990.00') || ')'
+             ELSE ct.name END
+        || CASE WHEN c.final_discount_rate < 1
+             THEN ' ' || rtrim(rtrim(to_char(c.final_discount_rate * 10, 'FM90.9'), '0'), '.') || '折'
+             ELSE '' END, '')::text AS card_type_name,
+  COALESCE((SELECT SUM(quantity)::int FROM transaction_items WHERE transaction_id = t.id), 0)::int AS item_qty,
+  -- 挂账登记交易（0 实收）关联的挂账金额：流水里显示「挂账 ¥N」而不是令人困惑的 ¥0
+  COALESCE((SELECT mc.amount FROM member_credits mc WHERE mc.charged_tx_id = t.id LIMIT 1), 0)::numeric(10,2) AS credit_amount,
+  -- summary 为空时（老系统迁入的交易普遍如此）前端回退显示明细聚合，服务项目列不再一片「—」
+  (SELECT string_agg(ti.service_name_snapshot
+            || CASE WHEN ti.quantity > 1 THEN '×' || ti.quantity ELSE '' END, '、')
+   FROM transaction_items ti WHERE ti.transaction_id = t.id) AS items_summary
 FROM transactions t
 LEFT JOIN members m     ON m.id = t.member_id
 LEFT JOIN cards c       ON c.id = t.card_id
@@ -54,6 +67,19 @@ WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR t.transaction_time >= sql
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR t.transaction_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('kind')::text              IS NULL OR t.kind             =  sqlc.narg('kind')::text)
   AND (sqlc.narg('member_id')::uuid         IS NULL OR t.member_id       =  sqlc.narg('member_id')::uuid)
+  -- 搜索范围与老系统对齐并扩展：会员姓名 / 手机号 / 非会员姓名 / 项目摘要 /
+  -- 明细服务名；纯数字输入再按金额精确匹配（应收或实收）
+  AND (sqlc.narg('search')::text IS NULL
+       OR m.name ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR m.phone ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR t.customer_name ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR t.summary ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR EXISTS (SELECT 1 FROM transaction_items ti2
+                  WHERE ti2.transaction_id = t.id
+                    AND ti2.service_name_snapshot ILIKE '%' || sqlc.narg('search')::text || '%')
+       OR (sqlc.narg('search')::text ~ '^[0-9]+(\.[0-9]{1,2})?$'
+           AND (t.total_amount = sqlc.narg('search')::numeric
+                OR t.actual_paid_amount = sqlc.narg('search')::numeric)))
   AND (
     sqlc.narg('status')::text IS NOT NULL AND t.status = sqlc.narg('status')::text
     OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR t.status = 'completed')
@@ -70,6 +96,18 @@ WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR transaction_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('kind')::text              IS NULL OR kind              =  sqlc.narg('kind')::text)
   AND (sqlc.narg('member_id')::uuid         IS NULL OR member_id        =  sqlc.narg('member_id')::uuid)
+  AND (sqlc.narg('search')::text IS NULL
+       OR EXISTS (SELECT 1 FROM members mm WHERE mm.id = transactions.member_id
+                  AND (mm.name ILIKE '%' || sqlc.narg('search')::text || '%'
+                       OR mm.phone ILIKE '%' || sqlc.narg('search')::text || '%'))
+       OR customer_name ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR summary ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR EXISTS (SELECT 1 FROM transaction_items ti2
+                  WHERE ti2.transaction_id = transactions.id
+                    AND ti2.service_name_snapshot ILIKE '%' || sqlc.narg('search')::text || '%')
+       OR (sqlc.narg('search')::text ~ '^[0-9]+(\.[0-9]{1,2})?$'
+           AND (total_amount = sqlc.narg('search')::numeric
+                OR actual_paid_amount = sqlc.narg('search')::numeric)))
   AND (
     sqlc.narg('status')::text IS NOT NULL AND status = sqlc.narg('status')::text
     OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR status = 'completed')
@@ -81,6 +119,18 @@ WHERE (sqlc.narg('start_date')::timestamptz IS NULL OR transaction_time >= sqlc.
   AND (sqlc.narg('end_date')::timestamptz   IS NULL OR transaction_time <  sqlc.narg('end_date')::timestamptz)
   AND (sqlc.narg('kind')::text              IS NULL OR kind              =  sqlc.narg('kind')::text)
   AND (sqlc.narg('member_id')::uuid         IS NULL OR member_id        =  sqlc.narg('member_id')::uuid)
+  AND (sqlc.narg('search')::text IS NULL
+       OR EXISTS (SELECT 1 FROM members mm WHERE mm.id = transactions.member_id
+                  AND (mm.name ILIKE '%' || sqlc.narg('search')::text || '%'
+                       OR mm.phone ILIKE '%' || sqlc.narg('search')::text || '%'))
+       OR customer_name ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR summary ILIKE '%' || sqlc.narg('search')::text || '%'
+       OR EXISTS (SELECT 1 FROM transaction_items ti2
+                  WHERE ti2.transaction_id = transactions.id
+                    AND ti2.service_name_snapshot ILIKE '%' || sqlc.narg('search')::text || '%')
+       OR (sqlc.narg('search')::text ~ '^[0-9]+(\.[0-9]{1,2})?$'
+           AND (total_amount = sqlc.narg('search')::numeric
+                OR actual_paid_amount = sqlc.narg('search')::numeric)))
   AND (
     sqlc.narg('status')::text IS NOT NULL AND status = sqlc.narg('status')::text
     OR sqlc.narg('status')::text IS NULL AND (sqlc.narg('include_voided')::bool IS TRUE OR status = 'completed')

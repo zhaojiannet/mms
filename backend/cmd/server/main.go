@@ -351,6 +351,7 @@ func main() {
 
 	// --------------- 报表（admin 及以上） ---------------
 	adminAndAbove.GET("/reports/business", reports.Business)
+	adminAndAbove.GET("/reports/business/monthly", reports.BusinessMonthly)
 	adminAndAbove.GET("/reports/card-pool", reports.CardPool)
 	adminAndAbove.GET("/reports/service-ranking", reports.ServiceRanking)
 	adminAndAbove.GET("/reports/sleeping-members", reports.SleepingMembers)

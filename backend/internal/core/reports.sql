@@ -157,3 +157,41 @@ WHERE mc.settled_at IS NULL
 GROUP BY m.id, m.name, m.phone
 ORDER BY total_pending DESC
 LIMIT $1 OFFSET $2;
+
+-- name: ReportMonthlyBusiness :many
+-- 月度对比：近 12 个月各项经营指标（老系统「月度对比」等价口径）
+--   revenue          营业额 = sale 实收 + 当月新增挂账（挂账登记行实收为 0，金额在挂账表）
+--   card_consumption 卡耗 = 扣卡流水净额（消费+清账，撤销的不计）
+--   customers        客数 = sale 按会员去重（非会员按交易），含挂账登记，不含清账/办卡
+-- base 由调用方传入「本月首日的本地 0 点」，月界在 timestamptz 域上前推
+WITH months AS (
+  SELECT (sqlc.arg('base')::timestamptz - make_interval(months => g))     AS m_start,
+         (sqlc.arg('base')::timestamptz - make_interval(months => g - 1)) AS m_end
+  FROM generate_series(0, 11) AS g
+)
+SELECT
+  m.m_start::timestamptz AS m_start,
+  (COALESCE((SELECT sum(t.actual_paid_amount) FROM transactions t
+             WHERE t.status = 'completed' AND t.kind = 'sale'
+               AND t.transaction_time >= m.m_start AND t.transaction_time < m.m_end), 0)
+   + COALESCE((SELECT sum(mc.amount) FROM member_credits mc
+               WHERE mc.charged_at >= m.m_start AND mc.charged_at < m.m_end), 0))::numeric(12,2) AS revenue,
+  COALESCE((SELECT sum(mc.amount) FROM member_credits mc
+            WHERE mc.charged_at >= m.m_start AND mc.charged_at < m.m_end), 0)::numeric(12,2) AS pending_added,
+  COALESCE((SELECT sum(mc.amount) FROM member_credits mc
+            WHERE mc.settled_at >= m.m_start AND mc.settled_at < m.m_end), 0)::numeric(12,2) AS pending_cleared,
+  COALESCE((SELECT sum(t.actual_paid_amount) FROM transactions t
+            WHERE t.status = 'completed' AND t.kind = 'recharge'
+              AND t.transaction_time >= m.m_start AND t.transaction_time < m.m_end), 0)::numeric(12,2) AS recharge,
+  COALESCE((SELECT sum(-l.delta) FROM card_balance_logs l
+            JOIN transactions t2 ON t2.id = l.transaction_id
+            WHERE l.change_type = 'consume' AND t2.status = 'completed'
+              AND t2.kind IN ('sale', 'credit_settlement')
+              AND t2.transaction_time >= m.m_start AND t2.transaction_time < m.m_end), 0)::numeric(12,2) AS card_consumption,
+  COALESCE((SELECT count(DISTINCT COALESCE(t.member_id::text, t.id::text)) FROM transactions t
+            WHERE t.status = 'completed' AND t.kind = 'sale'
+              AND t.transaction_time >= m.m_start AND t.transaction_time < m.m_end), 0)::int AS customers,
+  COALESCE((SELECT count(*) FROM members mm
+            WHERE mm.created_at >= m.m_start AND mm.created_at < m.m_end), 0)::int AS new_members
+FROM months m
+ORDER BY m.m_start;

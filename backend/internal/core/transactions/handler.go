@@ -47,6 +47,8 @@ type DTO struct {
 	TransactionTime  time.Time       `json:"transaction_time"`
 	Summary          *string         `json:"summary"`
 	ItemQty          int32           `json:"item_qty,omitempty"`       // 列表场景由 SUM(transaction_items.quantity) 填充
+	ItemsSummary     *string         `json:"items_summary,omitempty"`  // 列表场景由明细快照名聚合填充；summary 为空时前端回退显示
+	CreditAmount     decimal.Decimal `json:"credit_amount"`            // 挂账登记交易关联的挂账金额，非挂账行为 0
 	Notes            *string         `json:"notes"`
 	VoidedAt         *time.Time      `json:"voided_at,omitempty"`
 	VoidedByName     *string         `json:"voided_by_name,omitempty"`
@@ -690,7 +692,13 @@ func SettleCredit(c *echo.Context) error {
 	return c.JSON(http.StatusCreated, toDTO(trx))
 }
 
-// buildListETag 把 filter 指纹 + max(updated_at) + 分页 hash 成弱 ETag
+// listRespVersion 列表响应的结构版本，必须掺进 ETag：
+// 数据没变但响应新增/变更了字段时，旧 ETag 会让浏览器 304 沿用旧结构的缓存体，
+// 新字段在前端"看起来没生效"。每次改动列表响应的字段集合都要递增。
+// v2: 增加 credit_amount / items_summary；v3: card_type_name 改为完整展示名（自定义面值+折扣）
+const listRespVersion = "v3"
+
+// buildListETag 把响应结构版本 + filter 指纹 + max(updated_at) + 分页 hash 成弱 ETag
 //
 // filter 任意一项变 → ETag 变（避免不同 filter 共用旧 304）
 // 范围内有任何写入 → max_updated_at 变 → ETag 变
@@ -699,10 +707,17 @@ func buildListETag(
 	kind, status *string,
 	includeVoided *bool,
 	memberID pgtype.UUID,
+	search *string,
 	page, limit int32,
 	maxUpdatedAt pgtype.Timestamptz,
 ) string {
 	var b strings.Builder
+	b.WriteString(listRespVersion)
+	b.WriteByte('|')
+	if search != nil {
+		b.WriteString(*search)
+	}
+	b.WriteByte('|')
 	if start.Valid {
 		b.WriteString(start.Time.UTC().Format(time.RFC3339Nano))
 	}
@@ -785,6 +800,13 @@ func List(c *echo.Context) error {
 		}
 		memberID = pgtype.UUID{Bytes: mid, Valid: true}
 	}
+	var search *string
+	if v := strings.TrimSpace(c.QueryParam("search")); v != "" {
+		if len([]rune(v)) > 40 {
+			return echo.NewHTTPError(http.StatusBadRequest, "search too long")
+		}
+		search = &v
+	}
 
 	// staff 强制仅今日 + 强制 status=completed：忽略客户端 start_date/end_date/status/include_voided
 	// 不让员工看撤销记录（敏感操作，admin 通过操作日志查）
@@ -812,11 +834,12 @@ func List(c *echo.Context) error {
 		MemberID:      memberID,
 		IncludeVoided: includeVoided,
 		Status:        status,
+		Search:        search,
 	})
 	if err != nil {
 		return mw.InternalError(c, "list.max_updated_at", err)
 	}
-	etag := buildListETag(start, end, kind, status, includeVoided, memberID, page, limit, maxUpdatedAt)
+	etag := buildListETag(start, end, kind, status, includeVoided, memberID, search, page, limit, maxUpdatedAt)
 	if match := c.Request().Header.Get("If-None-Match"); match != "" && match == etag {
 		c.Response().Header().Set("ETag", etag)
 		return c.NoContent(http.StatusNotModified)
@@ -832,6 +855,7 @@ func List(c *echo.Context) error {
 		MemberID:      memberID,
 		IncludeVoided: includeVoided,
 		Status:        status,
+		Search:        search,
 	})
 	if err != nil {
 		return mw.InternalError(c, "list: ", err)
@@ -843,6 +867,7 @@ func List(c *echo.Context) error {
 		MemberID:      memberID,
 		IncludeVoided: includeVoided,
 		Status:        status,
+		Search:        search,
 	})
 	if err != nil {
 		return mw.InternalError(c, "count: ", err)
@@ -853,8 +878,15 @@ func List(c *echo.Context) error {
 	for _, r := range rows {
 		dto := toDTO(r.Transaction)
 		dto.MemberName = r.MemberName
-		dto.CardTypeName = r.CardTypeName
+		if r.CardTypeName != "" {
+			dto.CardTypeName = &r.CardTypeName
+		}
 		dto.ItemQty = r.ItemQty
+		dto.CreditAmount = r.CreditAmount
+		if len(r.ItemsSummary) > 0 {
+			s := string(r.ItemsSummary)
+			dto.ItemsSummary = &s
+		}
 		items = append(items, dto)
 		txIDs = append(txIDs, r.Transaction.ID)
 	}

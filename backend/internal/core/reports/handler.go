@@ -249,3 +249,47 @@ func parseDateRange(c *echo.Context) (pgtype.Timestamptz, pgtype.Timestamptz, er
 		pgtype.Timestamptz{Time: end, Valid: true}, nil
 }
 
+
+// BusinessMonthly GET /api/reports/business/monthly
+// 月度对比：近 12 个月的经营指标（口径见 ReportMonthlyBusiness 的 SQL 注释）
+func BusinessMonthly(c *echo.Context) error {
+	q := sqlc.New(mw.TxFrom(c))
+	now := time.Now()
+	base := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
+	rows, err := q.ReportMonthlyBusiness(c.Request().Context(),
+		pgtype.Timestamptz{Time: base, Valid: true})
+	if err != nil {
+		return mw.InternalError(c, "reports.monthly", err)
+	}
+
+	type monthDTO struct {
+		Month           string          `json:"month"`
+		Revenue         decimal.Decimal `json:"revenue"`
+		PendingAdded    decimal.Decimal `json:"pending_added"`
+		PendingCleared  decimal.Decimal `json:"pending_cleared"`
+		Recharge        decimal.Decimal `json:"recharge"`
+		CardConsumption decimal.Decimal `json:"card_consumption"`
+		Customers       int32           `json:"customers"`
+		AvgOrder        decimal.Decimal `json:"avg_order"`
+		NewMembers      int32           `json:"new_members"`
+	}
+	out := make([]monthDTO, 0, len(rows))
+	for _, r := range rows {
+		avg := decimal.Zero
+		if r.Customers > 0 {
+			avg = r.Revenue.Div(decimal.NewFromInt32(r.Customers)).Round(2)
+		}
+		out = append(out, monthDTO{
+			Month:           r.MStart.Time.In(time.Local).Format("2006-01"),
+			Revenue:         r.Revenue,
+			PendingAdded:    r.PendingAdded,
+			PendingCleared:  r.PendingCleared,
+			Recharge:        r.Recharge,
+			CardConsumption: r.CardConsumption,
+			Customers:       r.Customers,
+			AvgOrder:        avg,
+			NewMembers:      r.NewMembers,
+		})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"data": out})
+}
