@@ -92,6 +92,37 @@
         </button>
       </div>
     </div>
+
+    <!-- 套餐信息（hosted 有订阅时才显示；自建部署 edition=null 整块隐藏） -->
+    <div v-if="sub?.edition" class="p-6 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs">
+      <SectionTitle as="h2" class="mb-3">当前套餐</SectionTitle>
+      <div class="flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
+        <div>
+          <span class="text-stone-500">套餐</span>
+          <span class="ml-2 font-medium text-stone-900 dark:text-stone-100">{{ sub.edition_name }}</span>
+        </div>
+        <div v-if="sub.current_period_end">
+          <span class="text-stone-500">到期日</span>
+          <span class="ml-2 font-medium tabular-nums text-stone-900 dark:text-stone-100">
+            {{ new Date(sub.current_period_end).toLocaleDateString('zh-CN') }}
+          </span>
+          <span
+            v-if="sub.days_left != null"
+            :class="[
+              'ml-2 tabular-nums',
+              sub.days_left <= 0 ? 'text-error font-medium'
+                : sub.days_left <= 14 ? 'text-warning font-medium'
+                : 'text-stone-500',
+            ]"
+          >{{ sub.days_left <= 0 ? '已到期' : `剩 ${sub.days_left} 天` }}</span>
+        </div>
+        <div v-else>
+          <span class="text-stone-500">有效期</span>
+          <span class="ml-2 font-medium text-stone-900 dark:text-stone-100">长期有效</span>
+        </div>
+      </div>
+      <p class="text-sm text-stone-500 mt-3">续费或变更套餐请联系平台运营。</p>
+    </div>
   </div>
 </template>
 
@@ -158,10 +189,24 @@ async function removeLogo() {
 const themes = LOGIN_BG_THEMES
 const current = ref('beauty')
 
+// 套餐信息（与 SubscriptionBanner 同一接口；本页仅 admin 可进，无需再判角色）
+interface SubInfo {
+  edition: string | null
+  edition_name?: string
+  current_period_end?: string | null
+  days_left?: number
+}
+const sub = ref<SubInfo | null>(null)
+
 async function init() {
   await refresh()
   storeName.value = info.name
   current.value = info.login_bg || 'beauty'
+  try {
+    sub.value = await api<SubInfo>('/api/store/subscription')
+  } catch {
+    // 拿不到套餐信息不影响店铺配置，整块不显示即可
+  }
 }
 
 async function saveName() {
