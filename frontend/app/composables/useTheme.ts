@@ -51,3 +51,9 @@ export const useTheme = () => {
 
   return { current, apply, init, find, themes: THEMES }
 }
+
+// 导航激活态「白胶囊」——商户侧栏与运营后台顶栏共用，改样式只动这里。
+// 侧栏经 NuxtLink active-class 注入需要 ! 提权，由同一份基串派生防漂移
+const NAV_ACTIVE = 'bg-white dark:bg-stone-800 shadow-xs dark:ring-1 dark:ring-stone-700 text-primary-700 dark:text-primary-300 font-medium'
+export const navActiveClass = NAV_ACTIVE
+export const navActiveClassImportant = NAV_ACTIVE.split(' ').map(c => `${c}!`).join(' ')

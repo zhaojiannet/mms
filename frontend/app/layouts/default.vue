@@ -35,7 +35,7 @@
             v-else
             class="w-9 h-9 rounded-md flex items-center justify-center
                    bg-primary-500 text-white font-semibold shrink-0"
-          >{{ [...(storeInfo.name || 'S')][0] }}</div>
+          >{{ firstGrapheme(storeInfo.name) }}</div>
           <span class="font-semibold truncate">{{ storeInfo.name || '通用会员管理系统' }}</span>
         </div>
         <div class="ml-auto shrink-0">
@@ -50,7 +50,8 @@
     </div>
 
     <!-- Mobile drawer -->
-    <USlideover v-model:open="drawerOpen" side="left" :ui="{ content: 'w-72 max-w-[80vw]' }">
+    <!-- 抽屉底色必须与桌面侧栏一致（stone-100/900）：默认白底会让激活项的白胶囊隐形 -->
+    <USlideover v-model:open="drawerOpen" side="left" :ui="{ content: 'w-72 max-w-[80vw] bg-stone-100 dark:bg-stone-900' }">
       <template #content>
         <SidebarContent mobile @navigate="drawerOpen = false" />
       </template>

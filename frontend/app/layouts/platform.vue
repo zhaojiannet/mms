@@ -19,7 +19,7 @@
                  focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-500/40
                  transition-colors"
           :class="route.path === item.to
-            ? 'bg-white dark:bg-stone-800 shadow-xs text-primary-700 dark:text-primary-300 font-medium'
+            ? navActiveClass
             : ''"
         >
           <UIcon :name="item.icon" class="size-4" />

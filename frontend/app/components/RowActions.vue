@@ -32,7 +32,7 @@ defineEmits<{
       v-if="canDelete"
       size="xs" variant="ghost" color="neutral"
       icon="i-lucide-trash-2"
-      class="active:scale-95 transition-transform hover:text-error-600 hover:bg-error-50 dark:hover:bg-error-950/30"
+      class="active:scale-95 transition-transform hover:text-error-600 dark:hover:text-error-400 hover:bg-error-50 dark:hover:bg-error-950/30"
       @click="$emit('delete')"
     >{{ deleteLabel }}</UButton>
   </div>

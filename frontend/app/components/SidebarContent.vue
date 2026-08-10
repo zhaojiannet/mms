@@ -4,20 +4,18 @@
     <div
       class="h-16 flex items-center gap-2.5 px-3 shrink-0"
     >
-      <!-- 白衬底 chip：商户上传深色 logo 在暗色侧栏上会隐形，白底对任何配色都可辨 -->
-      <div v-if="info.logo_url" class="h-12 shrink-0 rounded-xl bg-white ring-1 ring-stone-200/60 dark:ring-stone-700 p-1 flex items-center justify-center">
-        <img
-          :key="info.logo_url"
-          :src="cfg.apiBase + safeAssetUrl(info.logo_url)"
-          alt="Logo"
-          class="max-h-full w-auto object-contain"
-        />
-      </div>
+      <img
+        v-if="info.logo_url"
+        :key="info.logo_url"
+        :src="cfg.apiBase + safeAssetUrl(info.logo_url)"
+        alt="Logo"
+        class="h-12 w-auto max-w-40 object-contain shrink-0"
+      />
       <div
         v-else
         class="w-12 h-12 rounded-xl flex items-center justify-center
                font-semibold text-xl shrink-0 bg-primary-500 text-white shadow-xs"
-      >{{ [...(info.name || 'S')][0] }}</div>
+      >{{ firstGrapheme(info.name) }}</div>
       <div class="leading-tight min-w-0">
         <div class="font-semibold text-base truncate">{{ info.name || '通用会员管理系统' }}</div>
         <!-- 拿不到店铺信息时整行不显示：只有域名后缀的半截文本会盖住"接口没通"这个真实故障 -->
@@ -46,7 +44,7 @@
                    before:content-[''] before:absolute before:left-0 before:top-1/2 before:-translate-y-1/2
                    before:h-5 before:w-0.5 before:bg-primary-500
                    before:opacity-0 before:transition-opacity before:duration-150"
-            active-class="bg-white! dark:bg-stone-800! shadow-xs! text-primary-700! dark:text-primary-300! font-medium before:opacity-100!"
+            :active-class="navActiveClassImportant + ' before:opacity-100!'"
             @click="$emit('navigate')"
           >
             <UIcon :name="item.icon" class="size-5 shrink-0" />
