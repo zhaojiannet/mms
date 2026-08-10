@@ -1242,8 +1242,7 @@ function memberStatusLabel(s: string) {
 }
 // 头像字符：取姓名最后一个字（中文姓名末字 = 名字，更易区分同姓客户）
 function avatarChar(name: string) {
-  if (!name) return '?'
-  return [...name.trim()].slice(-1)[0] || '?'
+  return lastGrapheme(name)
 }
 // 手机号脱敏：158****1234（POS 屏隐私保护）
 function formatPhone(p: string | null) {

@@ -49,3 +49,20 @@ export const formatDiscountRate = (r: number | string | null | undefined): strin
   if (n >= 1) return '无折扣'
   return `${(n * 10).toFixed(1)} 折`
 }
+
+// 头像首字/尾字：Intl.Segmenter 按字素簇切分（旗帜、ZWJ 组合 emoji 不碎），
+// trim 防前导空格渲染成空白头像。此前 4 处内联 slice(0,1) 各自漂移，收敛于此
+const seg = new Intl.Segmenter('zh', { granularity: 'grapheme' })
+export const firstGrapheme = (s?: string | null, fallback = 'S'): string => {
+  const t = (s || '').trim()
+  if (!t) return fallback
+  for (const g of seg.segment(t)) return g.segment
+  return fallback
+}
+export const lastGrapheme = (s?: string | null, fallback = '?'): string => {
+  const t = (s || '').trim()
+  if (!t) return fallback
+  let last = fallback
+  for (const g of seg.segment(t)) last = g.segment
+  return last
+}

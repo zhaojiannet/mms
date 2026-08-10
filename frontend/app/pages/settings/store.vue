@@ -30,7 +30,7 @@
             <div
               v-else
               class="size-16 rounded-xl bg-stone-100 dark:bg-stone-800 ring-1 ring-stone-200 dark:ring-stone-700 flex items-center justify-center text-2xl font-semibold text-stone-400"
-            >{{ [...(info.name || 'S')][0] }}</div>
+            >{{ firstGrapheme(info.name) }}</div>
           </div>
           <div class="flex items-center gap-2">
             <!-- CUSTOM: 隐藏的原生 file input，由上方按钮触发 click。Nuxt UI 的 UFileUpload 是完整 dropzone UI，不适合此处"按钮触发选择"的极简交互 -->

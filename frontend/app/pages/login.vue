@@ -39,7 +39,7 @@
             class="w-9 h-9 rounded-xl overflow-hidden flex items-center justify-center
                    bg-primary-500 text-white font-semibold shadow-xs"
           >
-            <span>{{ [...(storeInfo.name || 'S')][0] }}</span>
+            <span>{{ firstGrapheme(storeInfo.name) }}</span>
           </div>
           <span class="font-semibold text-base">{{ storeInfo.name || '通用会员管理系统' }}</span>
         </div>
