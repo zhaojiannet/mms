@@ -23,7 +23,7 @@ export default defineNuxtConfig({
       apiBase: process.env.NUXT_PUBLIC_API_BASE || '',
       appDomain: process.env.NUXT_PUBLIC_APP_DOMAIN || 'vip.example.com',
       deploymentMode: process.env.NUXT_PUBLIC_DEPLOYMENT_MODE || 'self-hosted',
-      tenantSlug: process.env.NUXT_PUBLIC_TENANT_SLUG || 'demo',
+      tenantSlug: process.env.NUXT_PUBLIC_TENANT_SLUG || '',
     },
   },
 

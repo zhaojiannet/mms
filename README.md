@@ -81,12 +81,14 @@ cp .env.example .env
 docker compose up -d
 ```
 
-### 4. 访问
+### 4. 首次进入
 
-- 后端 health：http://localhost:8081/health（宿主 8081 → 容器 8080）
-- 前端：http://localhost:3001（宿主 3001 → 容器 3000）
-- 运营后台：http://localhost:3001/platform，账号为 `.env` 的 `PLATFORM_ADMIN_EMAIL` + `PLATFORM_ADMIN_PASSWORD`（首次启动自动创建）
-- 商户账号：在运营后台开通商户时生成，密码一次性返回，请当场记下
+全新的库里没有任何商户，第一个商户由运营后台开通：
+
+1. 后端 health：http://localhost:8081/health（宿主 8081 → 容器 8080）
+2. 打开运营后台 http://localhost:3001/platform ，用 `.env` 的 `PLATFORM_ADMIN_EMAIL` + `PLATFORM_ADMIN_PASSWORD` 登录（首次启动自动创建）
+3. 开通第一个商户，自己定 slug；返回的管理员密码只显示这一次，当场记下
+4. 本地没有子域可用，把该 slug 填进 `.env` 的 `NUXT_PUBLIC_TENANT_SLUG` 后重启前端容器，再访问 http://localhost:3001 用商户管理员登录
 
 ## 套餐（仅官方托管）
 

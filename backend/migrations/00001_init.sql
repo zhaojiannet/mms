@@ -176,19 +176,10 @@ $$
   SELECT NULLIF(current_setting('app.current_tenant', TRUE), '')::UUID
 $$;
 
--- ============================================================
--- Bootstrap 种子：demo 租户赠送 Plus 1 年（示例商户）
---   - 顺序说明：必须在 ENABLE/FORCE ROW LEVEL SECURITY 之前执行，
---     否则 WITH CHECK policy 会把本次 INSERT 挡回（mms 是 owner 但 FORCE 对 owner 生效）
---   - 自建用户可改 slug/name 或删除本段后再跑迁移
--- ============================================================
-INSERT INTO tenants (slug, name) VALUES ('demo', 'Demo Store');
-
-INSERT INTO subscriptions (tenant_id, edition_id, source, billing_cycle, current_period_end, auto_renew, notes)
-SELECT t.id, e.id, 'gift', 'gift', now() + interval '1 year', FALSE, 'demo 示例商户，赠送 Plus 1 年'
-FROM tenants t
-CROSS JOIN editions e
-WHERE t.slug = 'demo' AND e.code = 'plus';
+-- 不种任何租户：全新库里只有 editions 等系统数据，商户一律由运营后台开通，
+-- 这样建号路径唯一、角色（super_admin）与订阅都由 provisionTenant 一次配齐。
+-- 若日后要种，注意必须放在 ENABLE/FORCE ROW LEVEL SECURITY 之前：
+-- WITH CHECK policy 会把 INSERT 挡回（mms 是 owner，但 FORCE 对 owner 同样生效）。
 
 ALTER TABLE subscriptions   ENABLE ROW LEVEL SECURITY;
 ALTER TABLE subscriptions   FORCE  ROW LEVEL SECURITY;
