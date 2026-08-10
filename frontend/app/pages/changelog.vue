@@ -27,13 +27,31 @@
 
       <p class="text-sm text-stone-600 dark:text-stone-400">{{ a.summary }}</p>
 
-      <div class="pt-2 border-t border-stone-200/60 dark:border-stone-800 text-sm text-stone-700 dark:text-stone-300 whitespace-pre-wrap leading-relaxed">{{ a.body_markdown }}</div>
+      <div
+        class="pt-2 border-t border-stone-200/60 dark:border-stone-800 text-sm text-stone-700 dark:text-stone-300 leading-relaxed
+               [&_h2]:text-base [&_h2]:font-semibold [&_h2]:text-stone-900 dark:[&_h2]:text-stone-100 [&_h2]:mt-4 [&_h2]:mb-2
+               [&_h3]:text-sm [&_h3]:font-semibold [&_h3]:text-stone-900 dark:[&_h3]:text-stone-100 [&_h3]:mt-3 [&_h3]:mb-1.5
+               [&_ul]:list-disc [&_ul]:pl-5 [&_ul]:space-y-1 [&_ol]:list-decimal [&_ol]:pl-5 [&_ol]:space-y-1
+               [&_p]:my-2 [&_strong]:font-semibold [&_strong]:text-stone-900 dark:[&_strong]:text-stone-100
+               [&_code]:px-1 [&_code]:py-0.5 [&_code]:rounded [&_code]:bg-stone-100 dark:[&_code]:bg-stone-800 [&_code]:text-xs
+               [&_a]:text-primary-600 [&_a]:underline [&_>*:first-child]:mt-0"
+        v-html="renderMarkdown(a.body_markdown)"
+      />
     </article>
   </div>
 </template>
 
 <script setup lang="ts">
+import { marked } from 'marked'
+
 useHead({ title: '版本说明' })
+
+// v-html 的前提：公告只由后端启动时从仓库内的 announcements.json seed 入库，
+// 没有任何写入端点，内容全部来自代码库。若日后开放运营编辑公告，这里必须先过
+// 一遍 sanitize（如 DOMPurify），否则就是存储型 XSS
+function renderMarkdown(md: string): string {
+  return marked.parse(md ?? '', { async: false })
+}
 
 interface Announcement {
   id: string
