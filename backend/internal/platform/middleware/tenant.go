@@ -41,16 +41,33 @@ type Tenant struct {
 }
 
 // reservedSubdomains 是不当作 tenant slug 的保留子域
-var reservedSubdomains = map[string]struct{}{
-	"":          {},
-	"www":       {},
-	"vip":       {},
-	"dev":       {},
-	"api":       {},
-	"admin":     {},
-	"mail":      {},
-	"localhost": {},
-	"127":       {},
+//
+// 运营入口的首段一并纳入：PLATFORM_HOST 允许把入口改成不好猜的名字，若商户
+// 能占用同名 slug，那个域名上就同时住着运营后台和一家商户，商户永远拿不到
+// 自己的界面。入口名从配置来，保留字表也必须跟着配置走。
+var reservedSubdomains = func() map[string]struct{} {
+	hosts, _ := platformHosts()
+	return buildReservedSubdomains(hosts)
+}()
+
+func buildReservedSubdomains(platformHosts map[string]struct{}) map[string]struct{} {
+	m := map[string]struct{}{
+		"":          {},
+		"www":       {},
+		"vip":       {},
+		"dev":       {},
+		"api":       {},
+		"admin":     {},
+		"mail":      {},
+		"localhost": {},
+		"127":       {},
+	}
+	for h := range platformHosts {
+		if i := strings.Index(h, "."); i > 0 {
+			m[h[:i]] = struct{}{}
+		}
+	}
+	return m
 }
 
 // TenantResolver 从 Host 头（或 X-Tenant-Slug）解析 slug，查 tenants 公开目录，注入 Tenant 到 context
