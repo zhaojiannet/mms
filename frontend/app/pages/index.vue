@@ -49,7 +49,7 @@
             <span class="text-stone-300 dark:text-stone-700">·</span>
             <div class="flex items-baseline gap-1.5">
               <span class="text-xs text-stone-500">挂账</span>
-              <span class="font-semibold text-error-600">¥{{ kpi.pending }}</span>
+              <span class="font-semibold text-warning-600 dark:text-warning-400">¥{{ kpi.pending }}</span>
             </div>
           </template>
         </div>

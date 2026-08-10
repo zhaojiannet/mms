@@ -74,7 +74,7 @@
           <SectionTitle as="h2">
             未清挂账
             <template #suffix>
-              <span v-if="pendings.length > 0" class="text-xs tabular-nums font-medium text-error-600">合计 ¥{{ totalPending }}</span>
+              <span v-if="pendings.length > 0" class="text-xs tabular-nums font-medium text-warning-600 dark:text-warning-400">合计 ¥{{ totalPending }}</span>
             </template>
           </SectionTitle>
           <UButton v-if="pendings.length > 1" size="sm" variant="soft" @click="openSettleAll">批量清账</UButton>

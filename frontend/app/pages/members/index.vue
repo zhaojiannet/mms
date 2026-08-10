@@ -89,33 +89,46 @@
         </template>
 
         <template #card_count-cell="{ row }">
-          <div
-            v-if="row.original.card_count > 0"
-            class="group relative cursor-pointer"
-            @mouseenter="row.original.card_count > 1 && prefetchCards(row.original.id)"
-            @click="openDetail(row.original)"
+          <!-- 多卡明细用 UPopover（teleport 顶层）：手写 absolute 悬浮层会被
+               overflow-hidden 的表格容器裁掉最末行，与报表流水同类问题 -->
+          <UPopover
+            v-if="row.original.card_count > 1"
+            mode="hover"
+            :open-delay="150"
+            :ui="{ content: 'px-3 py-2.5 min-w-72' }"
           >
             <span
-              class="inline-flex items-center gap-1.5"
+              class="inline-flex items-center gap-1.5 cursor-pointer"
               :class="row.original.active_card_count > 0 ? (row.original.active_card_count === row.original.card_count ? 'text-primary-600 dark:text-primary-400' : 'text-warning-600 dark:text-warning-400') : 'text-stone-400'"
+              @mouseenter="prefetchCards(row.original.id)"
+              @click="openDetail(row.original)"
             >
               <UIcon name="i-lucide-credit-card" class="size-4" />
               <span class="tabular-nums">有卡 {{ row.original.active_card_count }}/{{ row.original.card_count }}</span>
             </span>
-            <div
-              v-if="row.original.card_count > 1 && cardsCache.has(row.original.id)"
-              class="pointer-events-none absolute left-0 top-full mt-1 z-30 min-w-72 px-3 py-2.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150 whitespace-normal"
-            >
-              <div class="text-xs text-stone-400 dark:text-stone-500 mb-1.5">会员卡详情</div>
-              <div v-for="c in cardsCache.get(row.original.id)" :key="c.id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
-                <span class="truncate">{{ c.card_type_name }}</span>
-                <span class="tabular-nums shrink-0">
-                  <span v-if="parseFloat(c.final_discount_rate) < 1" class="text-xs text-stone-400 mr-2">{{ (parseFloat(c.final_discount_rate) * 10).toFixed(1) }}折</span>
-                  <span class="font-semibold" :class="parseFloat(c.balance) > 0 ? '' : 'text-stone-500'">¥{{ c.balance }}</span>
-                </span>
+            <template #content>
+              <div class="whitespace-normal">
+                <div class="text-xs text-stone-500 dark:text-stone-400 mb-1.5">会员卡详情</div>
+                <div v-for="c in cardsCache.get(row.original.id) || []" :key="c.id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+                  <span class="truncate text-stone-900 dark:text-stone-100">{{ c.card_type_name }}</span>
+                  <span class="tabular-nums shrink-0">
+                    <span v-if="parseFloat(c.final_discount_rate) < 1" class="text-xs text-stone-500 mr-2">{{ (parseFloat(c.final_discount_rate) * 10).toFixed(1) }}折</span>
+                    <span class="font-semibold text-stone-900 dark:text-stone-100" :class="parseFloat(c.balance) > 0 ? '' : 'text-stone-500!'">¥{{ c.balance }}</span>
+                  </span>
+                </div>
+                <div v-if="!cardsCache.has(row.original.id)" class="text-xs text-stone-500 py-1">加载中…</div>
               </div>
-            </div>
-          </div>
+            </template>
+          </UPopover>
+          <span
+            v-else-if="row.original.card_count > 0"
+            class="inline-flex items-center gap-1.5 cursor-pointer"
+            :class="row.original.active_card_count > 0 ? 'text-primary-600 dark:text-primary-400' : 'text-stone-400'"
+            @click="openDetail(row.original)"
+          >
+            <UIcon name="i-lucide-credit-card" class="size-4" />
+            <span class="tabular-nums">有卡 {{ row.original.active_card_count }}/{{ row.original.card_count }}</span>
+          </span>
           <span v-else class="text-stone-400">无卡</span>
         </template>
 
@@ -133,7 +146,7 @@
           <div class="text-right">
             <span
               v-if="parseFloat(row.original.total_pending) > 0"
-              class="font-medium tabular-nums text-error-600"
+              class="font-medium tabular-nums text-warning-600 dark:text-warning-400"
             >¥{{ row.original.total_pending }}</span>
             <span v-else class="text-stone-400 tabular-nums">—</span>
           </div>
@@ -237,7 +250,7 @@
           </div>
           <div>
             <div class="text-xs text-stone-400">挂账</div>
-            <div class="font-medium tabular-nums" :class="parseFloat(m.total_pending) > 0 ? 'text-error-600' : 'text-stone-400'">
+            <div class="font-medium tabular-nums" :class="parseFloat(m.total_pending) > 0 ? 'text-warning-600 dark:text-warning-400' : 'text-stone-400'">
               {{ parseFloat(m.total_pending) > 0 ? `¥${m.total_pending}` : '—' }}
             </div>
           </div>
@@ -371,7 +384,7 @@
                 <h3 class="text-base font-medium">挂账/未结清款项</h3>
                 <span
                   v-if="parseFloat(detailMember.total_pending) > 0"
-                  class="text-xs tabular-nums font-medium text-error-600"
+                  class="text-xs tabular-nums font-medium text-warning-600 dark:text-warning-400"
                 >合计 ¥{{ detailMember.total_pending }}</span>
               </div>
               <UButton size="xs" variant="soft" color="neutral" icon="i-lucide-plus" @click="openAddPending">新建挂账</UButton>
@@ -526,7 +539,7 @@
       <template #body>
         <div class="space-y-3">
           <p v-if="settleAll" class="text-sm">
-            将一次性结清 {{ detailPendings.length }} 笔挂账，总额 <strong class="text-error-600 tabular-nums">¥{{ pendingTotal }}</strong>
+            将一次性结清 {{ detailPendings.length }} 笔挂账，总额 <strong class="text-warning-600 dark:text-warning-400 tabular-nums">¥{{ pendingTotal }}</strong>
           </p>
           <p v-else class="text-sm">
             事由：{{ settleTarget?.summary || '未注明' }}<br />
