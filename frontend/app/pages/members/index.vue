@@ -317,27 +317,14 @@
             </div>
           </div>
 
-          <!-- Section 2: KPI 双卡 -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="px-4 py-3 rounded-xl bg-primary-50/80 dark:bg-primary-950/30 ring-1 ring-primary-200/60 dark:ring-primary-800">
-              <div class="text-xs text-primary-700/60 dark:text-primary-300/60">卡余额</div>
-              <div class="text-2xl font-semibold tabular-nums text-primary-600 dark:text-primary-400 mt-0.5">¥{{ activeCardsBalance }}</div>
-            </div>
-            <div class="px-4 py-3 rounded-xl" :class="parseFloat(detailMember.total_pending) > 0 ? 'bg-error-50/80 dark:bg-error-950/30 ring-1 ring-error-200/60 dark:ring-error-800' : 'bg-stone-100/80 dark:bg-stone-800/40 ring-1 ring-stone-200/60 dark:ring-stone-700'">
-              <div class="text-xs" :class="parseFloat(detailMember.total_pending) > 0 ? 'text-error-700/60 dark:text-error-300/60' : 'text-stone-500'">未清挂账</div>
-              <div class="text-2xl font-semibold tabular-nums mt-0.5" :class="parseFloat(detailMember.total_pending) > 0 ? 'text-error-600' : 'text-stone-400'">
-                ¥{{ detailMember.total_pending }}
-              </div>
-            </div>
-          </div>
-
-          <!-- Section 3: 名下会员卡 -->
+          <!-- Section 3: 名下会员卡（合计挂在标题旁，明细在下，不再单设汇总卡重复一遍） -->
           <div class="p-4 rounded-xl ring-1 ring-stone-200/40 dark:ring-stone-800 bg-white dark:bg-stone-900">
             <div class="flex items-center justify-between mb-3">
               <SectionTitle>
                 名下会员卡
                 <template #suffix>
                   <span class="text-xs text-stone-400">{{ detailCards.length }} 张</span>
+                  <span v-if="detailCards.length > 0" class="text-xs tabular-nums font-medium text-primary-600 dark:text-primary-400">合计 ¥{{ activeCardsBalance }}</span>
                 </template>
               </SectionTitle>
               <UButton size="xs" variant="soft" color="primary" icon="i-lucide-plus" @click="openIssueCard">办卡</UButton>
@@ -382,6 +369,10 @@
               <div class="flex items-center gap-2">
                 <span class="inline-block w-1 h-4 rounded-full bg-warning-500" />
                 <h3 class="text-base font-medium">挂账/未结清款项</h3>
+                <span
+                  v-if="parseFloat(detailMember.total_pending) > 0"
+                  class="text-xs tabular-nums font-medium text-error-600"
+                >合计 ¥{{ detailMember.total_pending }}</span>
               </div>
               <UButton size="xs" variant="soft" color="neutral" icon="i-lucide-plus" @click="openAddPending">新建挂账</UButton>
             </div>

@@ -13,7 +13,10 @@
         <div class="flex items-center gap-4">
           <UAvatar :alt="member.name" size="lg" />
           <div>
-            <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ member.name }}</h1>
+            <div class="flex items-center gap-2.5">
+              <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">{{ member.name }}</h1>
+              <UBadge :label="member.status === 'active' ? '正常' : '停用'" :color="member.status === 'active' ? 'success' : 'neutral'" variant="soft" />
+            </div>
             <div class="mt-1 text-sm text-stone-500 space-x-3 tabular-nums">
               <span>{{ member.phone || '未留手机' }}</span>
               <span>{{ genderLabel(member.gender) }}</span>
@@ -29,29 +32,13 @@
         </div>
       </header>
 
-      <!-- KPI: 卡总余额 / 挂账未清 / 累计消费 -->
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="p-4 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs">
-          <div class="text-xs text-stone-500">卡余额合计</div>
-          <div class="text-2xl font-semibold tabular-nums mt-1">¥{{ totalBalance }}</div>
-        </div>
-        <div class="p-4 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs">
-          <div class="text-xs text-stone-500">未清挂账</div>
-          <div class="text-2xl font-semibold tabular-nums mt-1 text-warning-600">¥{{ totalPending }}</div>
-        </div>
-        <div class="p-4 rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 shadow-xs">
-          <div class="text-xs text-stone-500">状态</div>
-          <div class="text-lg font-medium mt-1">
-            <UBadge :label="member.status === 'active' ? '正常' : '停用'" :color="member.status === 'active' ? 'success' : 'neutral'" variant="soft" />
-          </div>
-        </div>
-      </div>
-
       <!-- 会员卡 -->
       <section>
         <div class="flex items-center justify-between mb-3">
           <SectionTitle as="h2">会员卡</SectionTitle>
-          <span class="text-sm text-stone-500">{{ cards.length }} 张</span>
+          <span class="text-sm text-stone-500 tabular-nums">
+            {{ cards.length }} 张<template v-if="cards.length > 0"> · 合计 <span class="font-medium text-primary-600 dark:text-primary-400">¥{{ totalBalance }}</span></template>
+          </span>
         </div>
         <div v-if="cards.length > 0" class="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div
@@ -84,7 +71,12 @@
       <!-- 挂账 -->
       <section>
         <div class="flex items-center justify-between mb-3">
-          <SectionTitle as="h2">未清挂账</SectionTitle>
+          <SectionTitle as="h2">
+            未清挂账
+            <template #suffix>
+              <span v-if="pendings.length > 0" class="text-xs tabular-nums font-medium text-error-600">合计 ¥{{ totalPending }}</span>
+            </template>
+          </SectionTitle>
           <UButton v-if="pendings.length > 1" size="sm" variant="soft" @click="openSettleAll">批量清账</UButton>
         </div>
         <div v-if="pendings.length > 0" class="rounded-2xl bg-white dark:bg-stone-900 ring-1 ring-stone-900/5 dark:ring-stone-800 overflow-hidden">

@@ -143,6 +143,11 @@
                       <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
                       <span class="truncate">{{ t.card_type_name }}</span>
                     </span>
+                    <!-- 多卡联合支付无单一 card_id，从余额流水判定，别让它显示成"—" -->
+                    <span v-else-if="isMultiCard(t)" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
+                      <UIcon name="i-lucide-layers" class="size-4 shrink-0" />
+                      <span>多卡</span>
+                    </span>
                     <span v-else class="text-stone-400">—</span>
                   </td>
                   <!-- 类型：挂账登记（0 实收 + 关联挂账）单独标出，不与普通消费混淆 -->
@@ -158,42 +163,59 @@
                   </td>
                   <!-- 数量 -->
                   <td class="px-4 py-2 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || (isCreditTx(t) || t.kind === 'recharge' ? 1 : '—') }}</td>
-                  <!-- 金额（实付大号 + 应收划线 + 省/已撤销 + 余额快照 hover） -->
+                  <!-- 金额（实付大号 + 应收划线 + 省/已撤销 + 余额快照 hover）
+                       快照用 UPopover（teleport 到页面顶层）：手写 absolute tooltip 隐藏时
+                       仍占滚动空间，最末行会把 overflow-x-auto 容器底撑出十几像素，
+                       整个表格多出一根纵向滚动条，hover 时还会被容器裁掉 -->
                   <td class="px-4 py-2 text-right align-middle">
-                    <div class="relative inline-block group">
-                      <div
-                        class="flex items-baseline justify-end gap-1.5 leading-tight"
-                        :class="t.card_snapshots && t.card_snapshots.length > 0 ? 'cursor-help border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5' : ''"
-                      >
-                        <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
-                        <template v-if="isCreditTx(t)">
-                          <span class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
-                        </template>
+                    <UPopover
+                      v-if="t.card_snapshots && t.card_snapshots.length > 0"
+                      mode="hover"
+                      :open-delay="150"
+                      :ui="{ content: 'px-3 py-2.5 min-w-64' }"
+                    >
+                      <div class="inline-block cursor-help">
+                        <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
+                          <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                          <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
+                          <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
+                        </div>
+                        <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
+                          <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">暂未收款</span>
+                          <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
+                          <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
+                          <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
+                        </div>
+                      </div>
+                      <template #content>
+                        <div>
+                          <div class="text-xs text-stone-500 dark:text-stone-400 mb-1.5">余额快照</div>
+                          <div v-for="s in t.card_snapshots" :key="s.card_id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
+                            <span class="truncate text-left text-stone-900 dark:text-stone-100">
+                              {{ s.card_type_name }}
+                              <span v-if="s.change_type === 'void_restore'" class="text-xs text-warning-600 dark:text-warning-400 ml-1">还原</span>
+                              <span v-else-if="s.change_type === 'issue'" class="text-xs text-primary-600 dark:text-primary-400 ml-1">办卡</span>
+                            </span>
+                            <span class="tabular-nums shrink-0">
+                              <span class="text-stone-500 dark:text-stone-400">¥{{ s.balance_before }}</span>
+                              <span class="text-stone-400 dark:text-stone-500 mx-1">→</span>
+                              <span class="font-semibold text-stone-900 dark:text-stone-100">¥{{ s.balance_after }}</span>
+                            </span>
+                          </div>
+                        </div>
+                      </template>
+                    </UPopover>
+                    <div v-else class="inline-block">
+                      <div class="flex items-baseline justify-end gap-1.5 leading-tight">
+                        <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                        <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                         <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                       </div>
                       <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                         <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">暂未收款</span>
                         <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
+                        <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                         <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
-                      </div>
-                      <!-- 余额快照 tooltip -->
-                      <div
-                        v-if="t.card_snapshots && t.card_snapshots.length > 0"
-                        class="pointer-events-none absolute right-0 top-full mt-1 z-30 min-w-64 px-3 py-2.5 rounded-md bg-stone-900/95 dark:bg-stone-100/95 text-white dark:text-stone-900 shadow-lg opacity-0 group-hover:opacity-100 transition-opacity duration-150"
-                      >
-                        <div class="text-xs text-stone-400 dark:text-stone-500 mb-1.5">余额快照</div>
-                        <div v-for="s in t.card_snapshots" :key="s.card_id" class="flex items-baseline justify-between gap-3 py-0.5 text-sm">
-                          <span class="truncate text-left">
-                            {{ s.card_type_name }}
-                            <span v-if="s.change_type === 'void_restore'" class="text-xs text-warning-500 ml-1">还原</span>
-                            <span v-else-if="s.change_type === 'issue'" class="text-xs text-primary-400 ml-1">办卡</span>
-                          </span>
-                          <span class="tabular-nums shrink-0">
-                            <span class="text-stone-400 dark:text-stone-500">¥{{ s.balance_before }}</span>
-                            <span class="text-stone-300 dark:text-stone-600 mx-1">→</span>
-                            <span class="font-semibold">¥{{ s.balance_after }}</span>
-                          </span>
-                        </div>
                       </div>
                     </div>
                   </td>
@@ -757,6 +779,14 @@ function isCreditTx(t: Tx) { return parseFloat(t.credit_amount || '0') > 0 }
 // 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
 function isMultiCard(t: Tx) {
   return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
+}
+
+// 加价额：消费单实付高于应付的部分（现场加项目没改单，老系统迁入数据常见）。
+// 挂账实付本来就是 0，充值的差价语义是卖卡折扣，都不算加价
+function surcharge(t: Tx): number {
+  if (t.kind !== 'sale' || isCreditTx(t)) return 0
+  const d = parseFloat(t.actual_paid_amount) - parseFloat(t.total_amount)
+  return d > 0.001 ? d : 0
 }
 
 // 多卡分卡明细：直接从结构化余额流水组装（老系统靠 notes 文本，这里比它可靠）

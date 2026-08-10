@@ -604,6 +604,11 @@
                 <UIcon name="i-lucide-credit-card" class="size-4 shrink-0" />
                 <span class="truncate">{{ t.card_type_name }}</span>
               </span>
+              <!-- 多卡联合支付无单一 card_id，从余额流水判定，别让它显示成"—" -->
+              <span v-else-if="isMultiCard(t)" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
+                <UIcon name="i-lucide-layers" class="size-4 shrink-0" />
+                <span>多卡</span>
+              </span>
               <span v-else class="text-stone-400">—</span>
             </td>
             <td class="px-4 py-1.5 text-stone-600 dark:text-stone-400 break-words">
@@ -622,13 +627,14 @@
               >
                 <div class="inline-block cursor-help">
                   <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
-                    <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                    <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
                     <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                     <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                   </div>
                   <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                     <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">挂账 · 暂未收款</span>
                     <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
+                    <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                     <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                   </div>
                 </div>
@@ -652,13 +658,14 @@
               </UPopover>
               <div v-else class="inline-block">
                 <div class="flex items-baseline justify-end gap-1.5 leading-tight">
-                  <span v-if="parseFloat(t.discount_amount) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                  <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
                   <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                   <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                 </div>
                 <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                   <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">挂账 · 暂未收款</span>
                   <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
+                  <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                   <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                 </div>
               </div>
@@ -843,6 +850,14 @@ function isCreditTx(t: TodayTx) { return parseFloat(t.credit_amount || '0') > 0 
 
 // 折数：实付/应收 × 10，整数不带小数（8折），否则一位小数（8.5折）
 // 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
+// 加价额：消费单实付高于应付的部分（现场加项目没改单，老系统迁入数据常见）。
+// 挂账实付本来就是 0，充值的差价语义是卖卡折扣，都不算加价
+function surcharge(t: TodayTx): number {
+  if (t.kind !== 'sale' || isCreditTx(t)) return 0
+  const d = parseFloat(t.actual_paid_amount) - parseFloat(t.total_amount)
+  return d > 0.001 ? d : 0
+}
+
 function isMultiCard(t: TodayTx) {
   return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
 }

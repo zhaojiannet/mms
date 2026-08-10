@@ -10,13 +10,15 @@
       </div>
       <div class="flex items-center gap-2 flex-wrap w-full sm:w-auto min-w-0">
         <UPopover :ui="{ content: 'p-2 w-auto' }" class="flex-1 sm:flex-none">
+          <!-- 宽度必须显式限定：w-full 会把分段日期框撑满可用行宽，段间全是空白，
+               还把右侧按钮挤到换行 -->
           <UInputDate
             :model-value="rangeCalValue"
             @update:model-value="onRangeUpdate"
             range
             size="sm"
             icon="i-lucide-calendar"
-            class="h-8! py-0! text-sm! w-full"
+            class="h-8! py-0! text-sm! w-full sm:w-60"
             :ui="{
               leadingIcon: 'size-4 text-stone-400',
             }"
