@@ -150,7 +150,9 @@ func RequireOperator() echo.MiddlewareFunc {
 			if claims.Ver != ver {
 				return echo.NewHTTPError(http.StatusUnauthorized, "会话已失效，请重新登录")
 			}
-			if claims.IssuedAt != nil && claims.IssuedAt.Time.Before(passwordChangedAt) {
+			// changed_at 截断到秒再比：JWT iat 精度是秒，改密后同一秒内签发的
+			// 新 token 会被微秒级时间戳误判成改密前旧 token（与商户侧同修）
+			if claims.IssuedAt != nil && claims.IssuedAt.Time.Before(passwordChangedAt.Truncate(time.Second)) {
 				return echo.NewHTTPError(http.StatusUnauthorized, "会话已失效，请重新登录")
 			}
 

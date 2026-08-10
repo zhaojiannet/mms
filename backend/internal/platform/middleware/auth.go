@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/labstack/echo/v5"
 
@@ -50,9 +51,12 @@ func RequireAuth() echo.MiddlewareFunc {
 			if claims.Ver != u.TokenVersion {
 				return echo.NewHTTPError(http.StatusUnauthorized, "会话已失效，请重新登录")
 			}
-			// iat 早于 password_changed_at → token 在改密前签发，拒绝
+			// iat 早于 password_changed_at → token 在改密前签发，拒绝。
+			// changed_at 先截断到秒再比：JWT iat 精度是秒，库里时间戳带微秒，
+			// 改密后同一秒内登录的新 token 会因秒截断被误判成改密前签发。
+			// 截断后同秒签发放行、改密前签发（至多前一秒）照样拒绝，语义无损。
 			if claims.IssuedAt != nil && u.PasswordChangedAt.Valid &&
-				claims.IssuedAt.Time.Before(u.PasswordChangedAt.Time) {
+				claims.IssuedAt.Time.Before(u.PasswordChangedAt.Time.Truncate(time.Second)) {
 				return echo.NewHTTPError(http.StatusUnauthorized, "会话已失效，请重新登录")
 			}
 
