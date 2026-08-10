@@ -43,6 +43,14 @@ WHERE (sqlc.narg('status')::text IS NULL OR status = sqlc.narg('status')::text)
        OR name  ILIKE '%' || sqlc.narg('search')::text || '%'
        OR phone LIKE  '%' || sqlc.narg('search')::text || '%');
 
+-- name: TenantHasPendingCredits :one
+-- 是否存在任何未清挂账（租户级，RLS 限定）：前端会员表按此决定挂账列显隐，
+-- 不能从已加载的分页切片推导——未加载页的欠款会被整列藏掉
+SELECT EXISTS(SELECT 1 FROM member_credits WHERE settled_at IS NULL);
+
+-- name: TenantHasMemberNotes :one
+SELECT EXISTS(SELECT 1 FROM members WHERE notes IS NOT NULL AND notes <> '');
+
 -- name: CreateMember :one
 INSERT INTO members (tenant_id, name, phone, gender, birthday, notes)
 VALUES ($1, $2, $3, COALESCE(sqlc.narg('gender')::text, 'unknown'), $4, $5)

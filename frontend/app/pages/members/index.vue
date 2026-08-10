@@ -692,7 +692,7 @@ interface Member {
   created_at: string
   updated_at: string
 }
-interface ListResponse { items: Member[]; total: number }
+interface ListResponse { items: Member[]; total: number; has_pending: boolean; has_notes: boolean }
 
 interface CardInfo {
   id: string
@@ -723,6 +723,10 @@ const ops = useMemberOps(() => detailMember.value?.id ?? '')
 
 const loaded = ref<Member[]>([])
 const total = ref(0)
+// 挂账/备注列显隐：后端租户级聚合标志，不从已加载分页切片推导——
+// 切片推导会让未加载页的欠款整列被藏、翻页时列突然插入导致整表横移
+const hasPending = ref(true)
+const hasNotes = ref(true)
 const loading = ref(true)
 const loadingMore = ref(false)
 
@@ -740,22 +744,22 @@ const hasMore = computed(() => loaded.value.length < total.value)
 const auth = useAuthStore()
 const isStaff = computed(() => auth.user?.role === 'staff')
 
-// 挂账/备注列按数据有无动态显示：多数店这两列长期全空，白占横宽还把
-// 操作列挤出平板视口——没有内容的列不该存在
+// 挂账/备注列按租户数据有无显示：多数店这两列长期全空，白占横宽还把
+// 操作列挤出平板视口。依据是后端聚合标志（每次 fetch 更新一次的布尔），
+// 列身份只在标志翻转时变化，不随每页加载重建
 const columns = computed<TableColumn<Member>[]>(() => {
-  const hasPending = loaded.value.some(m => parseFloat(m.total_pending || '0') > 0)
-  const hasNotes = loaded.value.some(m => m.notes)
-  return [
+  const cols: TableColumn<Member>[] = [
     { accessorKey: 'name',          header: '会员' },
     { accessorKey: 'phone',         header: '手机' },
     { accessorKey: 'card_count',    header: '会员卡' },
     { accessorKey: 'total_balance', header: '余额',   meta: { class: { td: 'text-right', th: 'text-right' } } },
-    ...(hasPending ? [{ accessorKey: 'total_pending', header: '挂账', meta: { class: { td: 'text-right', th: 'text-right' } } } as TableColumn<Member>] : []),
     { accessorKey: 'status',        header: '状态' },
     { accessorKey: 'created_at',    header: '注册日' },
-    ...(hasNotes ? [{ accessorKey: 'notes', header: '备注', size: 120, meta: { class: { td: 'max-w-48' } } } as TableColumn<Member>] : []),
     { id: 'actions',                header: '操作',   size: 70, meta: { class: { td: 'text-center w-32', th: 'text-center w-32' } } },
   ]
+  if (hasPending.value) cols.splice(4, 0, { accessorKey: 'total_pending', header: '挂账', meta: { class: { td: 'text-right', th: 'text-right' } } })
+  if (hasNotes.value) cols.splice(cols.length - 1, 0, { accessorKey: 'notes', header: '备注', size: 120, meta: { class: { td: 'max-w-48' } } })
+  return cols
 })
 
 function buildQuery(offset: number) {
@@ -786,6 +790,8 @@ async function fetchFirst() {
     if (seq !== fetchSeq) return
     loaded.value = data.items
     total.value = data.total
+    hasPending.value = data.has_pending
+    hasNotes.value = data.has_notes
   } catch {
     // 401 已由 useApi 全局登出+跳转；其余错误置空列表，避免 unhandled rejection
     if (seq === fetchSeq) {
@@ -807,6 +813,8 @@ async function loadMore() {
     if (seq !== fetchSeq) return
     loaded.value = loaded.value.concat(data.items)
     total.value = data.total
+    hasPending.value = data.has_pending
+    hasNotes.value = data.has_notes
   } catch {
     // 加载更多失败保留已有数据即可
   } finally {

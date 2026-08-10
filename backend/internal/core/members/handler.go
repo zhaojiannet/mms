@@ -39,6 +39,9 @@ type MemberDTO struct {
 type ListResponse struct {
 	Items []MemberDTO `json:"items"`
 	Total int64       `json:"total"`
+	// 租户级聚合标志：挂账/备注列的显隐依据（分页切片推导会随翻页跳变）
+	HasPending bool `json:"has_pending"`
+	HasNotes   bool `json:"has_notes"`
 }
 
 type CreateRequest struct {
@@ -106,7 +109,15 @@ func List(c *echo.Context) error {
 	for _, m := range rows {
 		items = append(items, toListDTO(m))
 	}
-	return c.JSON(http.StatusOK, ListResponse{Items: items, Total: total})
+	hasPending, err := q.TenantHasPendingCredits(ctx)
+	if err != nil {
+		return mw.InternalError(c, "members has_pending: ", err)
+	}
+	hasNotes, err := q.TenantHasMemberNotes(ctx)
+	if err != nil {
+		return mw.InternalError(c, "members has_notes: ", err)
+	}
+	return c.JSON(http.StatusOK, ListResponse{Items: items, Total: total, HasPending: hasPending, HasNotes: hasNotes})
 }
 
 // Create POST /api/members
