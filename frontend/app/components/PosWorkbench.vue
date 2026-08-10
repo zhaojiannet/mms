@@ -1,8 +1,8 @@
 <template>
   <div>
-    <div class="grid grid-cols-1 lg:grid-cols-5 gap-6">
+    <div class="grid grid-cols-1 md:grid-cols-5 gap-6 pb-24 md:pb-0">
       <!-- 左：表单（占 3 列），各项之间用极浅分割线 -->
-      <section class="lg:col-span-3 divide-y divide-stone-200/50 dark:divide-stone-800/40 [&>div]:py-5 [&>div:first-child]:pt-0 [&>div:last-child]:pb-0">
+      <section class="md:col-span-3 divide-y divide-stone-200/50 dark:divide-stone-800/40 [&>div]:py-5 [&>div:first-child]:pt-0 [&>div:last-child]:pb-0">
 
         <!-- 会员 -->
         <div>
@@ -49,9 +49,9 @@
               <div class="size-10 shrink-0 rounded-full bg-stone-200 dark:bg-stone-700 text-stone-500 flex items-center justify-center">
                 <UIcon name="i-lucide-user-round" class="size-5" />
               </div>
-              <div class="flex-1 flex items-center gap-2">
-                <span class="text-base font-semibold">{{ walkInName }}</span>
-                <UBadge label="非会员" color="neutral" variant="soft" size="xs" />
+              <div class="flex-1 min-w-0 flex items-center gap-2">
+                <span class="text-base font-semibold truncate">{{ walkInName }}</span>
+                <UBadge label="非会员" color="neutral" variant="soft" size="xs" class="shrink-0" />
               </div>
               <UButton size="xs" variant="ghost" color="neutral" icon="i-lucide-x" @click="walkInName = ''" />
             </div>
@@ -180,14 +180,22 @@
           </div>
 
           <!-- 常用 8 个卡片 -->
-          <div v-if="quickServices.length > 0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-2">
+          <div v-if="quickServices.length > 0" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
             <button
               v-for="s in quickServices" :key="s.id"
               type="button"
-              class="group relative px-3 py-2.5 rounded-lg text-left bg-white dark:bg-stone-900 ring-1 ring-stone-200 dark:ring-stone-700 shadow-xs hover:shadow-sm hover:ring-2 hover:ring-primary-500/40 hover:bg-primary-50/30 dark:hover:bg-primary-950/20 active:scale-[0.97] transition"
+              class="group relative px-3 py-2.5 rounded-lg text-left bg-white dark:bg-stone-900 shadow-xs hover:shadow-sm active:scale-[0.97] transition"
+              :class="cartQty(s.id) > 0
+                ? 'ring-2 ring-primary-500/60'
+                : 'ring-1 ring-stone-200 dark:ring-stone-700 hover:ring-2 hover:ring-primary-500/40 hover:bg-primary-50/30 dark:hover:bg-primary-950/20'"
               @click="addItem(s)"
             >
-              <UBadge v-if="s.no_discount" label="不折" color="warning" variant="soft" size="xs" class="absolute top-1 right-1" />
+              <!-- 已加入购物车的数量角标：平板单列时购物车不在视口内，点击必须当场有反馈 -->
+              <span
+                v-if="cartQty(s.id) > 0"
+                class="absolute -top-1.5 -right-1.5 size-5 rounded-full bg-primary-500 text-white text-xs font-medium flex items-center justify-center tabular-nums shadow-xs"
+              >{{ cartQty(s.id) }}</span>
+              <UBadge v-if="s.no_discount" label="不折" color="warning" variant="soft" size="xs" class="absolute top-1" :class="cartQty(s.id) > 0 ? 'right-4' : 'right-1'" />
               <div class="text-sm font-medium truncate pr-6 text-stone-900 dark:text-stone-100">{{ s.name }}</div>
               <div class="mt-1 flex items-baseline gap-1.5">
                 <span class="text-base font-semibold tabular-nums text-stone-900 dark:text-stone-100">¥{{ s.price }}</span>
@@ -249,7 +257,7 @@
           </div>
 
           <!-- 常用 5 个员工卡片 -->
-          <div v-if="quickStaff.length > 0" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
+          <div v-if="quickStaff.length > 0" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5 gap-2">
             <button
               v-for="s in quickStaff" :key="s.id"
               type="button"
@@ -386,7 +394,7 @@
       </section>
 
       <!-- 右：消费详情 + 结算（占 2 列） -->
-      <aside class="lg:col-span-2">
+      <aside ref="cartEl" class="md:col-span-2">
         <div class="rounded-lg ring-1 ring-stone-200 dark:ring-stone-800 bg-white dark:bg-stone-900 sticky top-6">
           <div class="px-4 py-3 border-b border-stone-200 dark:border-stone-800 flex items-center justify-between">
             <h2 class="inline-flex items-center gap-2 text-base font-semibold">
@@ -407,7 +415,7 @@
           <!-- 项目表格 -->
           <div class="px-4 py-3 min-h-36">
             <div v-if="items.length === 0" class="text-center text-sm text-stone-400 py-8">
-              请从左侧选择服务项目
+              请选择服务项目
             </div>
             <table v-else class="w-full text-sm">
               <thead>
@@ -430,13 +438,13 @@
                     <div class="flex items-center justify-center gap-0.5">
                       <button
                         type="button"
-                        class="size-6 inline-flex items-center justify-center rounded bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 active:scale-95 transition"
+                        class="size-8 inline-flex items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 active:scale-95 transition"
                         @click="changeQty(idx, -1)"
                       ><UIcon name="i-lucide-minus" class="size-3.5" /></button>
                       <span class="tabular-nums w-6 text-center text-sm">{{ it.quantity }}</span>
                       <button
                         type="button"
-                        class="size-6 inline-flex items-center justify-center rounded bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 active:scale-95 transition"
+                        class="size-8 inline-flex items-center justify-center rounded-md bg-stone-100 dark:bg-stone-800 text-stone-600 dark:text-stone-300 hover:bg-stone-200 dark:hover:bg-stone-700 active:scale-95 transition"
                         @click="changeQty(idx, 1)"
                       ><UIcon name="i-lucide-plus" class="size-3.5" /></button>
                     </div>
@@ -445,7 +453,7 @@
                     <div class="tabular-nums text-sm font-medium">¥{{ lineSubtotal(it).toFixed(2) }}</div>
                     <button
                       type="button"
-                      class="text-xs text-stone-500 dark:text-stone-400 hover:text-error-600 dark:hover:text-error-400 mt-0.5 transition"
+                      class="inline-block px-2 py-1 -mr-2 text-xs text-stone-500 dark:text-stone-400 hover:text-error-600 dark:hover:text-error-400 transition"
                       @click="items.splice(idx, 1)"
                     >移除</button>
                   </td>
@@ -548,6 +556,24 @@
           </div>
         </div>
       </aside>
+    </div>
+
+    <!-- 手机单列时购物车沉在页面底部，收银主动线断裂：底部常驻结算条兜住
+         「确认金额 → 结算」，点摘要滚回明细。小面积毛玻璃固定条，内容从其下滚过 -->
+    <div
+      v-if="items.length > 0"
+      class="fixed bottom-0 inset-x-0 z-40 md:hidden
+             bg-white/85 dark:bg-stone-900/85 backdrop-blur-md
+             border-t border-stone-200/60 dark:border-stone-800
+             px-4 py-2.5 flex items-center gap-3"
+    >
+      <button type="button" class="flex-1 min-w-0 text-left active:scale-[0.98] transition" @click="scrollToCart">
+        <div class="text-xs text-stone-500">已选 {{ items.reduce((n, i) => n + i.quantity, 0) }} 项 · 点击看明细</div>
+        <div class="text-lg font-semibold tabular-nums text-stone-900 dark:text-stone-100">¥{{ actualPaid.toFixed(2) }}</div>
+      </button>
+      <UButton size="lg" :disabled="!canSubmit" :loading="submitting" @click="submit">
+        结算
+      </UButton>
     </div>
 
     <!-- 底部：今日消费记录 -->
@@ -1307,6 +1333,15 @@ async function pickMember(m: Member) {
     const mc = paymentMethods.value.find(p => p.name === '会员卡')
     if (mc) selectedPm.value = mc.id
   }
+}
+
+const cartEl = ref<HTMLElement | null>(null)
+function scrollToCart() {
+  cartEl.value?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+}
+function cartQty(id: string): number {
+  const it = items.value.find(i => i.id === id)
+  return it ? it.quantity : 0
 }
 
 function addItem(s: Service) {
