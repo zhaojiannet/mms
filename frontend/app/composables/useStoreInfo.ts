@@ -1,5 +1,4 @@
-// 状态与缓存都住在 useStoreInfoState（叶子模块，auth store 也从那边引
-// resetStoreInfo）；这里只挂请求逻辑，避免经 useApi 绕回 auth 的循环 import
+// 状态在 useStoreInfoState（叶子模块）；这里只挂请求逻辑，防经 useApi 绕回 auth 的循环 import
 import { globalStoreInfo, rememberBg, type StoreInfo } from '~/composables/useStoreInfoState'
 
 export type { StoreInfo }

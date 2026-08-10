@@ -11,8 +11,7 @@ FROM debian:bookworm-slim
 ARG UID=1000
 ARG GID=1000
 
-# uploads 建进镜像：具名卷首次创建时继承镜像内目录的属主；不建的话
-# Docker 以 root 初始化空卷，容器进程（UID 1000）上传 logo 直接 500
+# uploads 建进镜像：具名卷首挂载继承目录属主，否则 root 卷让 UID 1000 上传 500
 RUN ( getent group ${GID} || groupadd -g ${GID} app ) && \
     ( id -u app 2>/dev/null || useradd -u ${UID} -g ${GID} -m -s /bin/bash app ) && \
     mkdir -p /app/uploads && chown -R ${UID}:${GID} /app

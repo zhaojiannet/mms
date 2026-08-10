@@ -50,7 +50,7 @@
     </div>
 
     <!-- Mobile drawer -->
-    <!-- 抽屉底色必须与桌面侧栏一致（stone-100/900）：默认白底会让激活项的白胶囊隐形 -->
+    <!-- 抽屉底色与桌面侧栏一致：默认白底会让激活白胶囊隐形 -->
     <USlideover v-model:open="drawerOpen" side="left" :ui="{ content: 'w-72 max-w-[80vw] bg-stone-100 dark:bg-stone-900' }">
       <template #content>
         <SidebarContent mobile @navigate="drawerOpen = false" />

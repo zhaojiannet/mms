@@ -89,8 +89,7 @@
         </template>
 
         <template #card_count-cell="{ row }">
-          <!-- 多卡明细用 UPopover（teleport 顶层）：手写 absolute 悬浮层会被
-               overflow-hidden 的表格容器裁掉最末行，与报表流水同类问题 -->
+          <!-- 多卡明细用 UPopover（teleport）：absolute 悬浮层会被 overflow-hidden 容器裁掉末行 -->
           <UPopover
             v-if="row.original.card_count > 1"
             mode="hover"
@@ -723,8 +722,6 @@ const ops = useMemberOps(() => detailMember.value?.id ?? '')
 
 const loaded = ref<Member[]>([])
 const total = ref(0)
-// 挂账/备注列显隐：后端租户级聚合标志，不从已加载分页切片推导——
-// 切片推导会让未加载页的欠款整列被藏、翻页时列突然插入导致整表横移
 const hasPending = ref(true)
 const hasNotes = ref(true)
 const loading = ref(true)
@@ -744,9 +741,7 @@ const hasMore = computed(() => loaded.value.length < total.value)
 const auth = useAuthStore()
 const isStaff = computed(() => auth.user?.role === 'staff')
 
-// 挂账/备注列按租户数据有无显示：多数店这两列长期全空，白占横宽还把
-// 操作列挤出平板视口。依据是后端聚合标志（每次 fetch 更新一次的布尔），
-// 列身份只在标志翻转时变化，不随每页加载重建
+// 挂账/备注列按后端租户级标志显隐：从分页切片推导会藏掉未加载页的欠款、翻页时列跳变
 const columns = computed<TableColumn<Member>[]>(() => {
   const cols: TableColumn<Member>[] = [
     { accessorKey: 'name',          header: '会员' },

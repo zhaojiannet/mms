@@ -558,8 +558,7 @@
       </aside>
     </div>
 
-    <!-- 手机单列时购物车沉在页面底部，收银主动线断裂：底部常驻结算条兜住
-         「确认金额 → 结算」，点摘要滚回明细。小面积毛玻璃固定条，内容从其下滚过 -->
+    <!-- 手机单列时购物车沉底，结算条兜住主动线；点摘要滚回明细 -->
     <div
       v-if="items.length > 0"
       class="fixed bottom-0 inset-x-0 z-40 md:hidden
@@ -876,8 +875,7 @@ function isCreditTx(t: TodayTx) { return parseFloat(t.credit_amount || '0') > 0 
 
 // 折数：实付/应收 × 10，整数不带小数（8折），否则一位小数（8.5折）
 // 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
-// 加价额：消费单实付高于应付的部分（现场加项目没改单，老系统迁入数据常见）。
-// 挂账实付本来就是 0，充值的差价语义是卖卡折扣，都不算加价
+// 加价额：消费单实付高于应付的部分；挂账实付为 0、充值差价是卖卡折扣，均不算
 function surcharge(t: TodayTx): number {
   if (t.kind !== 'sale' || isCreditTx(t)) return 0
   // 原应收优先取明细标价合计：迁移把加价单的 total 抬平到实收，原标价只在明细里
@@ -912,8 +910,7 @@ function nominalRate(t: TodayTx): number | null {
   return m ? parseFloat(m[1]!) / 10 : null
 }
 
-// 折扣描述：反推率与卡的标称折扣吻合才写「N折 省」；对不上（手动调价）
-// 只写「减」——拿实付/应付反推出的"6.9折"是没人定过的伪折扣，不展示
+// 反推率与卡标称折扣吻合才写「N折 省」，否则只写「减」——反推的伪折扣率不展示
 function discountLabel(t: TodayTx): string {
   const total = parseFloat(t.total_amount)
   const paid = parseFloat(t.actual_paid_amount)

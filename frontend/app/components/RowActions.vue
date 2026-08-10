@@ -26,8 +26,7 @@ defineEmits<{
       class="active:scale-95 transition-transform"
       @click="$emit('edit')"
     >{{ editLabel }}</UButton>
-    <!-- 平时中性、hover 转红：列表页几十行常驻红删除是红色海洋，
-         会让真正的 error 失去警示力；确认弹窗仍是删除的把关线 -->
+    <!-- 平时中性、hover 转红：几十行常驻红会让真正的 error 失去警示力 -->
     <UButton
       v-if="canDelete"
       size="xs" variant="ghost" color="neutral"

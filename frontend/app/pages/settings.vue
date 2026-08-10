@@ -55,9 +55,7 @@ const tabs: Tab[] = [
   { to: '/settings/audit',           label: '操作日志',   icon: 'i-lucide-history',        requires: 'admin' },
 ]
 
-// 子页标题从 tabs 单一来源取：逐个子页手写 useHead 已被证明会漏。
-// 必须放在 tabs 声明之后：useHead 注册时会立即求值一次 computed，
-// 放前面会撞未初始化的 tabs（TDZ），整个 settings 区直接 500
+// 子页标题从 tabs 单一来源取；useHead 注册即求值，必须位于 tabs 声明之后（TDZ 会 500）
 const route = useRoute()
 useHead({
   title: computed(() => {

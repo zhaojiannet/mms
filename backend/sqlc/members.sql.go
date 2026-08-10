@@ -295,8 +295,7 @@ const tenantHasPendingCredits = `-- name: TenantHasPendingCredits :one
 SELECT EXISTS(SELECT 1 FROM member_credits WHERE settled_at IS NULL)
 `
 
-// 是否存在任何未清挂账（租户级，RLS 限定）：前端会员表按此决定挂账列显隐，
-// 不能从已加载的分页切片推导——未加载页的欠款会被整列藏掉
+// 前端按此决定挂账列显隐；从分页切片推导会藏掉未加载页的欠款
 func (q *Queries) TenantHasPendingCredits(ctx context.Context) (bool, error) {
 	row := q.db.QueryRow(ctx, tenantHasPendingCredits)
 	var exists bool

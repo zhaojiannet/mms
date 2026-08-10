@@ -193,8 +193,7 @@ SELECT
              THEN ' ' || rtrim(rtrim(to_char(c.final_discount_rate * 10, 'FM90.9'), '0'), '.') || '折'
              ELSE '' END, '')::text AS card_type_name,
   COALESCE((SELECT SUM(quantity)::int FROM transaction_items WHERE transaction_id = t.id), 0)::int AS item_qty,
-  -- 明细标价合计：加价单的原应收。迁移把加价单 total 抬平到实收（新系统禁止加价），
-  -- 原标价只保留在明细单价里，前端靠它显示「加 ¥N」
+  -- 明细标价合计：迁移把加价单 total 抬平到实收，原应收只在明细单价里，前端靠它显示「加 ¥N」
   COALESCE((SELECT SUM(ti.price * ti.quantity) FROM transaction_items ti WHERE ti.transaction_id = t.id), 0)::numeric(10,2) AS items_total,
   -- 挂账登记交易（0 实收）关联的挂账金额：流水里显示「挂账 ¥N」而不是令人困惑的 ¥0
   COALESCE((SELECT mc.amount FROM member_credits mc WHERE mc.charged_tx_id = t.id LIMIT 1), 0)::numeric(10,2) AS credit_amount,

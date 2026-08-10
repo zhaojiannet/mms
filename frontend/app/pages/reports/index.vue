@@ -163,10 +163,7 @@
                   </td>
                   <!-- 数量 -->
                   <td class="px-4 py-2 text-center tabular-nums text-stone-600 dark:text-stone-400 whitespace-nowrap">{{ t.item_qty || (isCreditTx(t) || t.kind === 'recharge' ? 1 : '—') }}</td>
-                  <!-- 金额（实付大号 + 应收划线 + 省/已撤销 + 余额快照 hover）
-                       快照用 UPopover（teleport 到页面顶层）：手写 absolute tooltip 隐藏时
-                       仍占滚动空间，最末行会把 overflow-x-auto 容器底撑出十几像素，
-                       整个表格多出一根纵向滚动条，hover 时还会被容器裁掉 -->
+                  <!-- 快照用 UPopover（teleport）：手写 absolute 悬浮层隐藏时占滚动空间，末行会撑出第二根滚动条 -->
                   <td class="px-4 py-2 text-right align-middle">
                     <UPopover
                       v-if="t.card_snapshots && t.card_snapshots.length > 0"
@@ -784,8 +781,7 @@ function isMultiCard(t: Tx) {
   return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
 }
 
-// 加价额：消费单实付高于应付的部分（现场加项目没改单，老系统迁入数据常见）。
-// 挂账实付本来就是 0，充值的差价语义是卖卡折扣，都不算加价
+// 加价额：消费单实付高于应付的部分；挂账实付为 0、充值差价是卖卡折扣，均不算
 function surcharge(t: Tx): number {
   if (t.kind !== 'sale' || isCreditTx(t)) return 0
   // 原应收优先取明细标价合计：迁移把加价单的 total 抬平到实收，原标价只在明细里
@@ -816,8 +812,7 @@ function nominalRate(t: Tx): number | null {
   return m ? parseFloat(m[1]!) / 10 : null
 }
 
-// 折扣描述：反推率与卡的标称折扣吻合才写「N折 省」；对不上（手动调价）
-// 只写「减」——拿实付/应付反推出的"6.9折"是没人定过的伪折扣，不展示
+// 反推率与卡标称折扣吻合才写「N折 省」，否则只写「减」——反推的伪折扣率不展示
 function discountLabel(t: Tx): string {
   const total = parseFloat(t.total_amount)
   const paid = parseFloat(t.actual_paid_amount)

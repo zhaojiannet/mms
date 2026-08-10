@@ -39,7 +39,7 @@ type MemberDTO struct {
 type ListResponse struct {
 	Items []MemberDTO `json:"items"`
 	Total int64       `json:"total"`
-	// 租户级聚合标志：挂账/备注列的显隐依据（分页切片推导会随翻页跳变）
+	// 挂账/备注列显隐依据：租户级标志，分页切片推导会随翻页跳变
 	HasPending bool `json:"has_pending"`
 	HasNotes   bool `json:"has_notes"`
 }

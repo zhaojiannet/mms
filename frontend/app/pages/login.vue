@@ -168,10 +168,7 @@ const captchaNeeded = ref(false)
 const captchaId = ref('')
 const captchaImage = ref('')
 
-// 主路径是缓存命中（login_bg 记在 localStorage）：首帧即正确背景，零闪换。
-// 首访无缓存时先纯色底，接口返回后图片就绪即显示——background-image 是离散
-// 属性不可插值，这一步是直接切换而非渐变，但从纯色切到正确图不算闪（闪的
-// 定义是先画了一张错的图再换掉）
+// 主路径缓存命中首帧即正确；首访纯色底到图是直切（background-image 不可插值）
 const leftBg = computed(() => loginBgStyle(storeInfo.login_bg))
 
 onMounted(refresh)

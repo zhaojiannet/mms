@@ -29,9 +29,7 @@ export default defineNuxtConfig({
 
   app: {
     head: {
-      // SPA 壳的 title：ssr:false 下 titleTemplate 是客户端运行时才执行的，
-      // 没有这行，JS 加载完成前标签页显示裸 URL。值必须与 titleTemplate 的
-      // 兜底值相同——模板遇到该值不再拼接，避免「X · X」重复
+      // SPA 壳 title：没有它 JS 加载前标签页是裸 URL；须与 titleTemplate 兜底同值防重复拼接
       title: '通用会员管理系统',
 
       meta: [

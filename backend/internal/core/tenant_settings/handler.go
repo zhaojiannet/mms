@@ -342,8 +342,7 @@ func RegenerateBookingCode(c *echo.Context) error {
 }
 
 // DisableBookingCode DELETE /api/tenant-settings/booking-code
-// 关闭在线预约：预约码置 null 后 verifyBookingCode 一律拒绝，C 端 /b/<code>
-// 立即失效；重新生成即恢复
+// 预约码置 null 后 C 端立即失效，重新生成即恢复
 func DisableBookingCode(c *echo.Context) error {
 	t := mw.TenantFrom(c)
 	q := sqlc.New(mw.TxFrom(c))
