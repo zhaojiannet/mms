@@ -52,8 +52,8 @@ export const useTheme = () => {
   return { current, apply, init, find, themes: THEMES }
 }
 
-// 导航激活态「白胶囊」——商户侧栏与运营后台顶栏共用，改样式只动这里。
-// 侧栏经 NuxtLink active-class 注入需要 ! 提权，由同一份基串派生防漂移
-const NAV_ACTIVE = 'bg-white dark:bg-stone-800 shadow-xs dark:ring-1 dark:ring-stone-700 text-primary-700 dark:text-primary-300 font-medium'
-export const navActiveClass = NAV_ACTIVE
-export const navActiveClassImportant = NAV_ACTIVE.split(' ').map(c => `${c}!`).join(' ')
+// 导航激活态「白胶囊」——商户侧栏与运营后台顶栏共用，改样式两行同步改。
+// 两份必须都是完整类名字面量（Tailwind 官方规则：类名只从源码文本提取，
+// 运行时拼接的类不会生成 CSS）；侧栏经 NuxtLink active-class 注入需 ! 提权
+export const navActiveClass = 'bg-white dark:bg-stone-800 shadow-xs dark:ring-1 dark:ring-stone-700 text-primary-700 dark:text-primary-300 font-medium'
+export const navActiveClassImportant = 'bg-white! dark:bg-stone-800! shadow-xs! dark:ring-1! dark:ring-stone-700! text-primary-700! dark:text-primary-300! font-medium'
