@@ -49,6 +49,7 @@ type DTO struct {
 	ItemQty          int32           `json:"item_qty,omitempty"`       // 列表场景由 SUM(transaction_items.quantity) 填充
 	ItemsSummary     *string         `json:"items_summary,omitempty"`  // 列表场景由明细快照名聚合填充；summary 为空时前端回退显示
 	CreditAmount     decimal.Decimal `json:"credit_amount"`            // 挂账登记交易关联的挂账金额，非挂账行为 0
+	ItemsTotal       decimal.Decimal `json:"items_total"`              // 明细标价合计：迁移抬平的加价单靠它还原原应收
 	Notes            *string         `json:"notes"`
 	VoidedAt         *time.Time      `json:"voided_at,omitempty"`
 	VoidedByName     *string         `json:"voided_by_name,omitempty"`
@@ -696,7 +697,8 @@ func SettleCredit(c *echo.Context) error {
 // 数据没变但响应新增/变更了字段时，旧 ETag 会让浏览器 304 沿用旧结构的缓存体，
 // 新字段在前端"看起来没生效"。每次改动列表响应的字段集合都要递增。
 // v2: 增加 credit_amount / items_summary；v3: card_type_name 改为完整展示名（自定义面值+折扣）
-const listRespVersion = "v3"
+// v4: 增加 items_total
+const listRespVersion = "v4"
 
 // buildListETag 把响应结构版本 + filter 指纹 + max(updated_at) + 分页 hash 成弱 ETag
 //
@@ -883,6 +885,7 @@ func List(c *echo.Context) error {
 		}
 		dto.ItemQty = r.ItemQty
 		dto.CreditAmount = r.CreditAmount
+		dto.ItemsTotal = r.ItemsTotal
 		if len(r.ItemsSummary) > 0 {
 			s := string(r.ItemsSummary)
 			dto.ItemsSummary = &s

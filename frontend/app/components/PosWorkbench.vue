@@ -30,7 +30,7 @@
                   </span>
                   <span v-if="parseFloat(member.total_pending ?? '0') > 0" class="inline-flex items-baseline gap-1.5">
                     <span class="text-stone-500">未结挂账</span>
-                    <span class="tabular-nums font-medium text-error-600">¥{{ member.total_pending }}</span>
+                    <span class="tabular-nums font-medium text-warning-600 dark:text-warning-400">¥{{ member.total_pending }}</span>
                   </span>
                 </div>
                 <div
@@ -104,7 +104,7 @@
                       <span class="text-xs text-stone-400 mr-1.5 font-normal">余额</span>¥{{ m.total_balance }}
                     </div>
                     <div v-else class="text-xs text-stone-400">未办卡</div>
-                    <div v-if="parseFloat(m.total_pending ?? '0') > 0" class="text-xs text-error-600 tabular-nums">
+                    <div v-if="parseFloat(m.total_pending ?? '0') > 0" class="text-xs text-warning-600 dark:text-warning-400 tabular-nums">
                       <span class="text-stone-400 font-normal mr-1.5">挂账</span>¥{{ m.total_pending }}
                     </div>
                     <div
@@ -627,13 +627,13 @@
               >
                 <div class="inline-block cursor-help">
                   <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
-                    <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                    <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
                     <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                     <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                   </div>
                   <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                     <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">挂账 · 暂未收款</span>
-                    <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountLabel(t) }} ¥{{ t.discount_amount }}</span>
+                    <span v-else-if="parseFloat(t.discount_amount) > 0" :class="discountLabel(t) === '减' ? 'text-stone-500 dark:text-stone-400' : 'text-error-600'">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountLabel(t) }} ¥{{ t.discount_amount }}</span>
                     <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                     <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                   </div>
@@ -658,13 +658,13 @@
               </UPopover>
               <div v-else class="inline-block">
                 <div class="flex items-baseline justify-end gap-1.5 leading-tight">
-                  <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ t.total_amount }}</span>
+                  <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
                   <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                   <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                 </div>
                 <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                   <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">挂账 · 暂未收款</span>
-                  <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountLabel(t) }} ¥{{ t.discount_amount }}</span>
+                  <span v-else-if="parseFloat(t.discount_amount) > 0" :class="discountLabel(t) === '减' ? 'text-stone-500 dark:text-stone-400' : 'text-error-600'">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountLabel(t) }} ¥{{ t.discount_amount }}</span>
                   <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                   <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                 </div>
@@ -840,7 +840,7 @@ interface TodayTx {
   transaction_time: string; summary: string | null
   item_qty: number
   items_summary: string | null
-  credit_amount: string
+  credit_amount: string; items_total: string
   notes: string | null
   card_snapshots: CardSnapshot[] | null
 }
@@ -854,8 +854,15 @@ function isCreditTx(t: TodayTx) { return parseFloat(t.credit_amount || '0') > 0 
 // 挂账实付本来就是 0，充值的差价语义是卖卡折扣，都不算加价
 function surcharge(t: TodayTx): number {
   if (t.kind !== 'sale' || isCreditTx(t)) return 0
-  const d = parseFloat(t.actual_paid_amount) - parseFloat(t.total_amount)
+  // 原应收优先取明细标价合计：迁移把加价单的 total 抬平到实收，原标价只在明细里
+  const base = parseFloat(t.items_total) > 0 ? parseFloat(t.items_total) : parseFloat(t.total_amount)
+  const d = parseFloat(t.actual_paid_amount) - base
   return d > 0.001 ? d : 0
+}
+
+// 划线展示的原价：加价单显示明细标价合计（total 已被抬平，划 total 等于没划）
+function strikePrice(t: TodayTx): string {
+  return surcharge(t) > 0 && parseFloat(t.items_total) > 0 ? t.items_total : t.total_amount
 }
 
 function isMultiCard(t: TodayTx) {
