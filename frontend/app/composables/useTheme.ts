@@ -5,12 +5,14 @@ export interface ThemeOption {
   hex: string     // 色盘 500 号代表色
 }
 
-// 10 色方案基于头部美业/零售 SaaS 真实数据调研修订：
-//   - Fresha（美业预约#1）用 Prince 紫 + Limelight 荧光黄，不走传统"行业匹配"
-//   - Mindbody 2024 用绿+深炭+亮粉三色
-//   - GlossGenius 让商户自选 21 色，官方原话："品牌是商户的艺术 DNA"
-//   - Pantone 2026 Color of the Year: Cloud Dancer 纯净白，趋势是极简+个性强调
-// 设计取向：不绑行业，给纯粹好色 + 调性文案，让商户按品牌气质自选
+// 色盘按商户品牌气质自选（参考 GlossGenius，不绑行业）。
+// 原 10 色实测后撤掉 3 个功能性退化的：
+//   - 金 amber：与 warning 语义色同源同色，「挂账」「补录」等警示与品牌色无差，
+//     且 solid 按钮白字对比 ~2.2:1 远低于可读线
+//   - 摩卡 stone / 玄 zinc：与中性色盘同源，侧栏激活、KPI 数字、结算按钮
+//     全部失去强调身份，暗色下 solid 按钮与禁用态无法区分
+// init 对已存被撤色的商户自动回退默认青。再增色先过一遍
+// 明/暗 × warning 撞色 × solid 对比的组合检查
 export const THEMES: ThemeOption[] = [
   { key: 'teal',    name: '青',    tone: '沉静自然',  hex: '#0d9488' },
   { key: 'rose',    name: '胭',    tone: '温柔生机',  hex: '#e11d48' },
@@ -19,9 +21,6 @@ export const THEMES: ThemeOption[] = [
   { key: 'emerald', name: '竹',    tone: '清新治愈',  hex: '#10b981' },
   { key: 'blue',    name: '海',    tone: '专注信赖',  hex: '#2563eb' },
   { key: 'orange',  name: '橘',    tone: '活力亲和',  hex: '#f97316' },
-  { key: 'amber',   name: '金',    tone: '尊贵传统',  hex: '#f59e0b' },
-  { key: 'stone',   name: '摩卡',  tone: '温润复古',  hex: '#78716c' },
-  { key: 'zinc',    name: '玄',    tone: '高冷克制',  hex: '#27272a' },
 ]
 
 const STORAGE_KEY = 'mms.theme'
