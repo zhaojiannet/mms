@@ -669,6 +669,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '会员' })
 import type { TableColumn, DropdownMenuItem } from '@nuxt/ui'
 import { useAuthStore } from '~/stores/auth'
 

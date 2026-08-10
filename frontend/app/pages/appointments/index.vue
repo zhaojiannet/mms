@@ -1,14 +1,14 @@
 <template>
   <div class="p-6 lg:p-8 max-w-7xl mx-auto space-y-5">
     <!-- Head -->
-    <header class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 sm:gap-4">
+    <header class="flex flex-col sm:flex-row sm:flex-wrap sm:items-center sm:justify-between gap-3 sm:gap-4">
       <div>
         <h1 class="text-2xl sm:text-3xl font-semibold tracking-tight">预约</h1>
         <p class="mt-1 text-sm text-stone-500">
           今日 {{ todayCount }} 条待处理 · 共 {{ items.length }} 条
         </p>
       </div>
-      <div class="flex items-center gap-2 w-full sm:w-auto">
+      <div class="flex items-center gap-2 flex-wrap w-full sm:w-auto min-w-0">
         <UPopover :ui="{ content: 'p-2 w-auto' }" class="flex-1 sm:flex-none">
           <UInputDate
             :model-value="rangeCalValue"
@@ -250,6 +250,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '预约' })
 import type { TableColumn } from '@nuxt/ui'
 import { CalendarDate, CalendarDateTime } from '@internationalized/date'
 

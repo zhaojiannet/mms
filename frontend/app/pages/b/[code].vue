@@ -104,6 +104,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '在线预约' })
 import { CalendarDate, CalendarDateTime } from '@internationalized/date'
 
 definePageMeta({ layout: 'public' })

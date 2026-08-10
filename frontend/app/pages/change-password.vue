@@ -66,6 +66,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '设置新密码' })
 import { useAuthStore } from '~/stores/auth'
 
 definePageMeta({ layout: 'public' })

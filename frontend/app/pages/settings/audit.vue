@@ -67,6 +67,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '操作日志' })
 interface Log {
   id: number
   actor_id: string | null

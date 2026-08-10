@@ -32,6 +32,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '设置' })
 import { useAuthStore } from '~/stores/auth'
 
 // 整个设置页：admin 及以上才能进入（staff 直接跳首页）

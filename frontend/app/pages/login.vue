@@ -18,7 +18,7 @@
 
       <div class="relative space-y-6 max-w-md">
         <h1 class="text-6xl leading-tight font-semibold tracking-tight">
-          简单高效<br />管理不用愁
+          简单高效<br />管理不用愁<br />经营更省心
         </h1>
         <p class="text-base text-white/80 leading-relaxed">
           面向美业 · 美容 · 美发 · 美甲 · 按摩 · 瑜伽 · 培训 · 宠物等小微商户的会员管理 SaaS
@@ -144,6 +144,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '登录' })
 import { useAuthStore } from '~/stores/auth'
 import { getThemeByKey, bgStyle } from '~/composables/useLoginBgThemes'
 
@@ -166,7 +167,10 @@ const captchaNeeded = ref(false)
 const captchaId = ref('')
 const captchaImage = ref('')
 
-const leftBg = computed(() => bgStyle(getThemeByKey(storeInfo.login_bg)))
+// login_bg 为空 = 首次访问且接口未返回：先给纯色底，避免默认图闪现一帧再切换；
+// 接口返回后由已有的 transition-[background] 平滑渐入商户自选背景
+const leftBg = computed(() =>
+  storeInfo.login_bg ? bgStyle(getThemeByKey(storeInfo.login_bg)) : '#44403c')
 
 onMounted(refresh)
 

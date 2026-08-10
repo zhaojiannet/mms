@@ -230,6 +230,7 @@
 </template>
 
 <script setup lang="ts">
+useHead({ title: '会员详情' })
 const api = useApi()
 const route = useRoute()
 const router = useRouter()
