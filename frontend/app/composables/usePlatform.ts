@@ -9,13 +9,12 @@ interface PlatformSession {
   operator: { email: string; name: string }
 }
 
-// isPlatformHost 当前访问域是否运营后台
+// isPlatformOnlyHost 该域名是否专供运营后台（商户界面在此域名下不该出现）
 // 与后端 RequirePlatformHost 保持同一判定来源：优先 NUXT_PUBLIC_PLATFORM_HOST
-// 指定的完整主机名（逗号分隔），否则退回 admin. 前缀；本地开发放行
-export function isPlatformHost(): boolean {
+// 指定的完整主机名（逗号分隔），否则退回 admin. 前缀
+export function isPlatformOnlyHost(): boolean {
   if (import.meta.server) return false
   const host = window.location.hostname.toLowerCase()
-  if (host === 'localhost' || host === '127.0.0.1') return true
 
   const configured = String(useRuntimeConfig().public.platformHost || '')
     .split(',')
@@ -24,6 +23,15 @@ export function isPlatformHost(): boolean {
   if (configured.length > 0) return configured.includes(host)
 
   return host.startsWith('admin.')
+}
+
+// isPlatformHost 当前访问域能否进 /platform 路由
+// 本地开发两侧都要调，localhost 一律放行
+export function isPlatformHost(): boolean {
+  if (import.meta.server) return false
+  const host = window.location.hostname.toLowerCase()
+  if (host === 'localhost' || host === '127.0.0.1') return true
+  return isPlatformOnlyHost()
 }
 
 export function platformSession(): PlatformSession | null {

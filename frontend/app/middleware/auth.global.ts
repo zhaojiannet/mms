@@ -23,8 +23,8 @@ export default defineNuxtRouteMiddleware((to) => {
     }
     return
   }
-  // admin 子域只提供运营后台，不展示商户界面
-  if (import.meta.client && window.location.hostname.startsWith('admin.')) {
+  // 运营后台域名只提供运营后台，不展示商户界面
+  if (isPlatformOnlyHost()) {
     return navigateTo('/platform')
   }
 
