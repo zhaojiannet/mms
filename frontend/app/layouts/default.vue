@@ -36,7 +36,7 @@
             class="w-9 h-9 rounded-md flex items-center justify-center
                    bg-primary-500 text-white font-semibold shrink-0"
           >{{ (storeInfo.name || 'S').slice(0, 1) }}</div>
-          <span class="font-semibold truncate">{{ storeInfo.name || 'Demo Store' }}</span>
+          <span class="font-semibold truncate">{{ storeInfo.name || '通用会员管理系统' }}</span>
         </div>
         <div class="ml-auto shrink-0">
           <UserMenu compact />

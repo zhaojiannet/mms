@@ -17,8 +17,9 @@
                font-semibold text-xl shrink-0 bg-primary-500 text-white shadow-xs"
       >{{ (info.name || 'S').slice(0, 1) }}</div>
       <div class="leading-tight min-w-0">
-        <div class="font-semibold text-base truncate">{{ info.name || 'Demo Store' }}</div>
-        <div class="text-xs text-stone-500 dark:text-stone-400 truncate">
+        <div class="font-semibold text-base truncate">{{ info.name || '通用会员管理系统' }}</div>
+        <!-- 拿不到店铺信息时整行不显示：只有域名后缀的半截文本会盖住"接口没通"这个真实故障 -->
+        <div v-if="info.slug || cfg.tenantSlug" class="text-xs text-stone-500 dark:text-stone-400 truncate">
           {{ info.slug || cfg.tenantSlug }}.{{ cfg.appDomain }}
         </div>
       </div>

@@ -9,8 +9,9 @@
       <div class="absolute inset-0 bg-linear-to-b from-stone-900/10 via-transparent to-stone-900/40" />
 
       <div class="relative leading-tight">
-        <div class="font-semibold text-base">{{ storeInfo.name || 'Demo Store' }}</div>
-        <div class="text-xs text-white/70 tabular-nums">
+        <div class="font-semibold text-base">{{ storeInfo.name || '通用会员管理系统' }}</div>
+        <!-- 拿不到店铺信息时整行不显示：只有域名后缀的半截文本会盖住"接口没通"这个真实故障 -->
+        <div v-if="storeInfo.slug || cfg.tenantSlug" class="text-xs text-white/70 tabular-nums">
           {{ storeInfo.slug || cfg.tenantSlug }}.{{ cfg.appDomain }}
         </div>
       </div>
@@ -39,7 +40,7 @@
           >
             <span>{{ (storeInfo.name || 'S').slice(0, 1) }}</span>
           </div>
-          <span class="font-semibold text-base">{{ storeInfo.name || 'Demo Store' }}</span>
+          <span class="font-semibold text-base">{{ storeInfo.name || '通用会员管理系统' }}</span>
         </div>
 
         <div class="space-y-4">
