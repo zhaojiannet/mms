@@ -85,7 +85,8 @@ docker compose up -d
 
 - 后端 health：http://localhost:8081/health（宿主 8081 → 容器 8080）
 - 前端：http://localhost:3001（宿主 3001 → 容器 3000）
-- 管理员账号：`.env` 的 `BOOTSTRAP_ADMIN_EMAIL` + `BOOTSTRAP_ADMIN_PASSWORD`（首次启动自动创建）
+- 运营后台：http://localhost:3001/platform，账号为 `.env` 的 `PLATFORM_ADMIN_EMAIL` + `PLATFORM_ADMIN_PASSWORD`（首次启动自动创建）
+- 商户账号：在运营后台开通商户时生成，密码一次性返回，请当场记下
 
 ## 套餐（仅官方托管）
 

@@ -67,13 +67,8 @@ func main() {
 	}
 	defer pool.Close()
 
-	// 幂等 bootstrap：若 BOOTSTRAP_* 齐全且首次启动，则为目标 tenant 创建首个 admin
-	if err := bootstrap.EnsureAdmin(context.Background(), pool); err != nil {
-		slog.Error("bootstrap admin failed", "err", err)
-		os.Exit(1)
-	}
-
 	// 幂等 bootstrap：平台操作员（PLATFORM_ADMIN_* 齐全时创建，运营后台登录用）
+	// 商户管理员不在这里建：全部经运营后台开通，一条路径产出一致的 super_admin
 	if err := bootstrap.EnsureOperator(context.Background(), pool); err != nil {
 		slog.Error("bootstrap operator failed", "err", err)
 		os.Exit(1)
@@ -394,13 +389,6 @@ func validateCriticalEnv() error {
 	}
 	if strings.Contains(dbPass, "change_me") {
 		return fmt.Errorf("DB_PASSWORD still has default placeholder 'change_me_*'; please set a real value")
-	}
-
-	// BOOTSTRAP_ADMIN_PASSWORD：仅在非空时校验（空=已有 admin 跳过 bootstrap）
-	// 避免默认 "change_me_on_first_login" 成为事实默认密码
-	bootstrapPwd := os.Getenv("BOOTSTRAP_ADMIN_PASSWORD")
-	if bootstrapPwd != "" && strings.Contains(bootstrapPwd, "change_me") {
-		return fmt.Errorf("BOOTSTRAP_ADMIN_PASSWORD contains 'change_me' placeholder; set a real initial password or leave empty")
 	}
 
 	// 平台操作员是权限最高的账号，起码要和自助改密同档（≥8 位）
