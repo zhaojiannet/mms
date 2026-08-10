@@ -32,7 +32,6 @@
 </template>
 
 <script setup lang="ts">
-useHead({ title: '设置' })
 import { useAuthStore } from '~/stores/auth'
 
 // 整个设置页：admin 及以上才能进入（staff 直接跳首页）
@@ -55,6 +54,17 @@ const tabs: Tab[] = [
   { to: '/settings/booking',         label: '预约配置',   icon: 'i-lucide-calendar-check', requires: 'admin' },
   { to: '/settings/audit',           label: '操作日志',   icon: 'i-lucide-history',        requires: 'admin' },
 ]
+
+// 子页标题从 tabs 单一来源取：逐个子页手写 useHead 已被证明会漏。
+// 必须放在 tabs 声明之后：useHead 注册时会立即求值一次 computed，
+// 放前面会撞未初始化的 tabs（TDZ），整个 settings 区直接 500
+const route = useRoute()
+useHead({
+  title: computed(() => {
+    const tab = tabs.find(t => t.to === route.path)
+    return tab ? tab.label : '设置'
+  }),
+})
 
 const visibleTabs = computed(() => {
   const role = auth.user?.role

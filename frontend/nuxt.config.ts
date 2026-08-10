@@ -29,8 +29,10 @@ export default defineNuxtConfig({
 
   app: {
     head: {
-      // 不设默认 title：app.vue 的 titleTemplate 统一兜底为「通用会员管理系统」，
-      // 这里再设一个会被当作页面名拼进模板，产生「SaaS 版 · 通用会员管理系统」这种重复
+      // SPA 壳的 title：ssr:false 下 titleTemplate 是客户端运行时才执行的，
+      // 没有这行，JS 加载完成前标签页显示裸 URL。值必须与 titleTemplate 的
+      // 兜底值相同——模板遇到该值不再拼接，避免「X · X」重复
+      title: '通用会员管理系统',
 
       meta: [
         { charset: 'utf-8' },
