@@ -89,6 +89,7 @@ docker compose up -d
 2. 打开运营后台 http://localhost:3001/platform ，用 `.env` 的 `PLATFORM_ADMIN_EMAIL` + `PLATFORM_ADMIN_PASSWORD` 登录（首次启动自动创建）
 3. 开通第一个商户，自己定 slug；返回的管理员密码只显示这一次，当场记下
 4. 本地没有子域可用，把该 slug 填进 `.env` 的 `NUXT_PUBLIC_TENANT_SLUG` 后重启前端容器，再访问 http://localhost:3001 用商户管理员登录
+5. 首次登录会被要求先改密码——开通时那个密码是运营员生成、经人手转达的，不改掉等于运营方长期持有该账号。改完需用新密码重新登录（改密会吊销所有已签发 token）
 
 ## 套餐（仅官方托管）
 
@@ -135,18 +136,47 @@ docker compose up -d
 ### 服务器初始化（一次性）
 
 1. 1Panel 应用商店装 OpenResty
-2. 在 1Panel "网站" 给**每个商户**建一个反代站点（`<slug>.vip.zhaojian.net`，DNS 手动加 A 记录），站点配置内按路径分流，后端按 Host 子域解析租户：
+2. 在 1Panel "网站" 给**每个商户**建一个反代站点（`<slug>.vip.zhaojian.net`，DNS 手动加 A 记录），站点配置内按路径分流。`proxy_set_header Host $host` 一行都不能少：后端靠 Host 从子域解析租户，传丢了整站 404，运营后台的主机名校验也会失效：
 
    ```nginx
-   location /api/     { proxy_pass http://127.0.0.1:8081; }   # Go 后端
-   location /uploads/ { proxy_pass http://127.0.0.1:8081; }   # 店铺 logo 等上传资产
-   location = /health { proxy_pass http://127.0.0.1:8081; access_log off; }
-   location /         { proxy_pass http://127.0.0.1:3001; }   # Nuxt 前端
+   location /api/ {                                    # Go 后端
+       proxy_pass http://127.0.0.1:8081;
+       proxy_set_header Host              $host;
+       proxy_set_header X-Real-IP         $remote_addr;
+       proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       proxy_http_version 1.1;
+       proxy_set_header Connection "";
+       proxy_read_timeout 60s;
+   }
+   location /uploads/ {                                # 店铺 logo 等上传资产
+       proxy_pass http://127.0.0.1:8081;
+       proxy_set_header Host $host;
+       proxy_http_version 1.1;
+       proxy_set_header Connection "";
+   }
+   location = /health {
+       proxy_pass http://127.0.0.1:8081;
+       proxy_set_header Host $host;
+       access_log off;
+   }
+   location / {                                        # Nuxt 前端
+       proxy_pass http://127.0.0.1:3001;
+       proxy_set_header Host              $host;
+       proxy_set_header X-Real-IP         $remote_addr;
+       proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+       proxy_set_header X-Forwarded-Proto $scheme;
+       proxy_http_version 1.1;
+       proxy_set_header Upgrade $http_upgrade;
+       proxy_set_header Connection "upgrade";
+   }
    ```
+
+   反代落在本机回环，`.env` 记得配 `TRUSTED_PROXIES=127.0.0.1/32,::1/128`，否则 `ClientIP` 只看得到 `127.0.0.1`，per-IP 限流会把所有访客算作同一个来源——任何人打满登录限额，全站一分钟内都登不进去。
 
 3. 每个站点单独申请 Let's Encrypt 证书（HTTP 验证，自动续期）。有意不用通配符证书：通配须 DNS 验证，等于把域名解析的 API 密钥存进服务器；单域手动建站每商户约 5 分钟，规模上来（约 30 商户/月）再考虑自动化
 4. 另建两个平台站点（配置与商户站点相同的路径分流）：
-   - `admin.<你的域名>` → 运营后台（商户管理 / 申请审批 / 套餐管理），操作员账号由 `.env` 的 `PLATFORM_ADMIN_*` 首次启动创建；后端只接受 `admin.<APP_DOMAIN>` 这一个主机名
+   - 运营后台（商户管理 / 申请审批 / 套餐管理）：主机名由 `PLATFORM_HOST` 指定，留空则默认 `admin.<APP_DOMAIN>`。换个不好猜的名字本身也是一层防护。操作员账号由 `.env` 的 `PLATFORM_ADMIN_*` 首次启动创建
    - 主域名 `vip.zhaojian.net` → 产品主页，`/apply` 为商户开通申请表单
 4. clone 仓库到服务器（如 `/opt/mms`），`cp .env.example .env` 填好配置，然后生产模式启动（PG 复用全局 `postgres-server`）：
 
@@ -158,7 +188,7 @@ docker compose up -d
    生产镜像不含 Go 工具链与 pnpm：构建产物全部由 `ops/deploy.sh` 从本机推送，**服务器不下载任何依赖**（`proxy.golang.org` 在部分地区不可达，让服务器拉 Go 依赖必然失败）。服务器唯一的外网动作是拉两个基础镜像（`debian:bookworm-slim` + `node:22-bookworm-slim`，约 344MB）。
 
 5. 备份定时任务：`crontab -e` 加 `0 3 * * * /opt/mms/ops/backup_pg.sh >> /var/log/mms_backup.log 2>&1`
-6. **端口收口（必做）**：防火墙与云安全组只放行 `22 / 80 / 443`，不要放行 `8081`（后端）、`3001`（前端）、`5432`（数据库）。容器端口发布在宿主机上仅供本机反代访问；一旦对外可直连，反代层的 TLS、限流与「运营后台仅 admin 子域可达」的 Host 限制都会被绕过。
+6. **端口收口（必做）**：防火墙与云安全组只放行 `22 / 80 / 443`，不要放行 `8081`（后端）、`3001`（前端）、`5432`（数据库）。容器端口发布在宿主机上仅供本机反代访问；一旦对外可直连，反代层的 TLS、限流与「运营后台仅指定主机名可达」的 Host 限制都会被绕过。
 
 ### 日常发布
 
