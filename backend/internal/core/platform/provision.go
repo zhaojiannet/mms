@@ -132,9 +132,10 @@ func provisionTenant(ctx context.Context, tx pgx.Tx, in provisionInput) (provisi
 		return out, fmt.Errorf("hash password: %w", err)
 	}
 	// 商户老板给 super_admin：要能自管员工账号（users CRUD 是 superOnly 路由）
+	// must_change_password：这个密码由运营员生成、经人手转达，不改掉就等于运营长期持有该账号
 	if _, err := tx.Exec(ctx, `
-		INSERT INTO users (tenant_id, email, password_hash, name, role)
-		VALUES ($1, $2, $3, $4, 'super_admin')
+		INSERT INTO users (tenant_id, email, password_hash, name, role, must_change_password)
+		VALUES ($1, $2, $3, $4, 'super_admin', TRUE)
 	`, out.TenantID, in.AdminEmail, hash, in.AdminName); err != nil {
 		var pgErr *pgconn.PgError
 		if errors.As(err, &pgErr) && pgErr.Code == "23505" {

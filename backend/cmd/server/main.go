@@ -213,8 +213,17 @@ func main() {
 	// secured        : 所有登录用户（super_admin + admin + staff）
 	// adminAndAbove  : super_admin + admin（staff 不可）
 	// superOnly      : 仅 super_admin
+	//
+	// loggedIn 是强制改密期间唯一可达的一层，只有改密端点挂在它下面。
+	// 必须从 api 派生：挂到 secured 上会连 RequirePasswordChanged 一起继承，
+	// 那样待改密的用户连改密都调不了，直接把自己锁在门外。
+	loggedIn := api.Group("")
+	loggedIn.Use(mw.RequireAuth())
+
 	secured := api.Group("")
 	secured.Use(mw.RequireAuth())
+	// 必须在派生任何子组之前挂：子组只继承创建那一刻父组已有的中间件
+	secured.Use(mw.RequirePasswordChanged())
 
 	adminAndAbove := secured.Group("")
 	adminAndAbove.Use(mw.RequireAtLeastAdmin())
@@ -319,10 +328,12 @@ func main() {
 	adminAndAbove.GET("/audit-logs/lookup", auditlogs.Lookup)
 
 	// --------------- 自助修改密码 / 续签 / 登出 ---------------
-	secured.POST("/auth/change-password", auth.ChangePasswordHandler, pwdLimit)
-	secured.POST("/auth/refresh", auth.RefreshHandler)
+	// 挂 loggedIn 而非 secured：这三个只管会话本身、不碰业务数据，待改密的用户
+	// 必须够得着，否则他既改不了密码也退不出去，只能干等 token 过期
+	loggedIn.POST("/auth/change-password", auth.ChangePasswordHandler, pwdLimit)
+	loggedIn.POST("/auth/refresh", auth.RefreshHandler)
 	// 登出 = token_version+1，吊销该用户所有已签发 token（含 remember 长 token）
-	secured.POST("/auth/logout", auth.LogoutHandler)
+	loggedIn.POST("/auth/logout", auth.LogoutHandler)
 
 	// --------------- 店铺 logo（admin 及以上） ---------------
 	adminAndAbove.POST("/store/logo", uploads.UploadLogo)

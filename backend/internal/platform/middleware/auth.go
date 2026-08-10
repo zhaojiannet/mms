@@ -120,3 +120,21 @@ func RequireAtLeastAdmin() echo.MiddlewareFunc {
 		}
 	}
 }
+
+// PasswordChangeRequiredMsg 前端据此把用户送去改密页，改文案要同步前端
+const PasswordChangeRequiredMsg = "首次登录需先修改密码"
+
+// RequirePasswordChanged 密码由他人设定时，除改密端点外一概拒绝
+//   - 必须在 RequireAuth 之后挂载（依赖 ctx 里的 user 行）
+//   - 只挡后端：前端拿登录响应里的 must_change_password 主动跳转，这里防的是绕过前端直接调 API
+//   - 读的是 RequireAuth 同事务查出的 user 行，改密下一个请求即放行，不必等 token 刷新
+func RequirePasswordChanged() echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c *echo.Context) error {
+			if UserFrom(c).MustChangePassword {
+				return echo.NewHTTPError(http.StatusForbidden, PasswordChangeRequiredMsg)
+			}
+			return next(c)
+		}
+	}
+}

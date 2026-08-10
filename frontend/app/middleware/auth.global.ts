@@ -30,11 +30,20 @@ export default defineNuxtRouteMiddleware((to) => {
 
   const auth = useAuthStore()
   const isLoginPage = to.path === '/login'
+  const isChangePwdPage = to.path === '/change-password'
 
   if (!auth.isAuthenticated && !isLoginPage) {
     return navigateTo({ path: '/login', query: { redirect: to.fullPath } })
   }
   if (auth.isAuthenticated && isLoginPage) {
+    return navigateTo('/')
+  }
+  // 密码由他人代设的账号，改掉之前哪都去不了。后端 RequirePasswordChanged 才是
+  // 强制力所在，这里只是免得用户点进业务页面撞一脸 403
+  if (auth.isAuthenticated && auth.user?.must_change_password && !isChangePwdPage) {
+    return navigateTo('/change-password')
+  }
+  if (auth.isAuthenticated && !auth.user?.must_change_password && isChangePwdPage) {
     return navigateTo('/')
   }
 })

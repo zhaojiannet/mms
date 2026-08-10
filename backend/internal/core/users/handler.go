@@ -211,8 +211,9 @@ func ResetPassword(c *echo.Context) error {
 		return mw.InternalError(c, "hash: ", err)
 	}
 	q := sqlc.New(mw.TxFrom(c))
+	// 管理员代设的密码要经人手转达，本人登录后必须先改掉
 	if err := q.UpdateUserPassword(c.Request().Context(), sqlc.UpdateUserPasswordParams{
-		ID: id, PasswordHash: hash,
+		ID: id, PasswordHash: hash, MustChange: true,
 	}); err != nil {
 		return mw.InternalError(c, "update password: ", err)
 	}

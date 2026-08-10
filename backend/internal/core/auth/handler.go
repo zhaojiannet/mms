@@ -64,6 +64,9 @@ type UserDTO struct {
 	Email string    `json:"email"`
 	Name  string    `json:"name"`
 	Role  string    `json:"role"`
+	// MustChangePassword 密码由他人设定，前端据此把用户送去改密页。
+	// 强制力在后端 RequirePasswordChanged，这里只为免去先撞一次 403 才知道
+	MustChangePassword bool `json:"must_change_password"`
 }
 
 // --------------- handlers ---------------
@@ -152,10 +155,11 @@ func LoginHandler(c *echo.Context) error {
 		AccessToken: token,
 		ExpiresAt:   expiresAt,
 		User: UserDTO{
-			ID:    user.ID,
-			Email: user.Email,
-			Name:  user.Name,
-			Role:  user.Role,
+			ID:                 user.ID,
+			Email:              user.Email,
+			Name:               user.Name,
+			Role:               user.Role,
+			MustChangePassword: user.MustChangePassword,
 		},
 	})
 }
@@ -273,8 +277,9 @@ func ChangePasswordHandler(c *echo.Context) error {
 	if err != nil {
 		return mw.InternalError(c, "hash: ", err)
 	}
+	// 本人验过旧密码后自己设的新密码，强制改密要求到此为止
 	if err := q.UpdateUserPassword(ctx, sqlc.UpdateUserPasswordParams{
-		ID: user.ID, PasswordHash: hash,
+		ID: user.ID, PasswordHash: hash, MustChange: false,
 	}); err != nil {
 		return mw.InternalError(c, "update: ", err)
 	}

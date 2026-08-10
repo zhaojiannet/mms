@@ -14,11 +14,11 @@ import (
 
 const createUser = `-- name: CreateUser :one
 INSERT INTO users (
-    tenant_id, email, phone, password_hash, name, role
+    tenant_id, email, phone, password_hash, name, role, must_change_password
 ) VALUES (
-    $1, $2, $3, $4, $5, COALESCE($6::text, 'staff')
+    $1, $2, $3, $4, $5, COALESCE($6::text, 'staff'), TRUE
 )
-RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at
+RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at, must_change_password
 `
 
 type CreateUserParams struct {
@@ -30,6 +30,7 @@ type CreateUserParams struct {
 	Role         *string   `json:"role"`
 }
 
+// must_change_password 恒为 true：建号时的密码由管理员设定，本人首次登录必须改掉
 func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, error) {
 	row := q.db.QueryRow(ctx, createUser,
 		arg.TenantID,
@@ -57,6 +58,7 @@ func (q *Queries) CreateUser(ctx context.Context, arg CreateUserParams) (User, e
 		&i.LockedUntil,
 		&i.TokenVersion,
 		&i.PasswordChangedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -71,7 +73,7 @@ func (q *Queries) DeleteUser(ctx context.Context, id uuid.UUID) error {
 }
 
 const getUserByEmail = `-- name: GetUserByEmail :one
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at FROM users WHERE email = $1
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at, must_change_password FROM users WHERE email = $1
 `
 
 func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error) {
@@ -94,12 +96,13 @@ func (q *Queries) GetUserByEmail(ctx context.Context, email string) (User, error
 		&i.LockedUntil,
 		&i.TokenVersion,
 		&i.PasswordChangedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
 
 const getUserByID = `-- name: GetUserByID :one
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at FROM users WHERE id = $1
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at, must_change_password FROM users WHERE id = $1
 `
 
 func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
@@ -122,6 +125,7 @@ func (q *Queries) GetUserByID(ctx context.Context, id uuid.UUID) (User, error) {
 		&i.LockedUntil,
 		&i.TokenVersion,
 		&i.PasswordChangedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -137,7 +141,7 @@ func (q *Queries) IncrementUserTokenVersion(ctx context.Context, id uuid.UUID) e
 }
 
 const listUsersByTenant = `-- name: ListUsersByTenant :many
-SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at FROM users
+SELECT id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at, must_change_password FROM users
 WHERE ($3::text IS NULL OR status = $3::text)
 ORDER BY created_at DESC
 LIMIT $1 OFFSET $2
@@ -175,6 +179,7 @@ func (q *Queries) ListUsersByTenant(ctx context.Context, arg ListUsersByTenantPa
 			&i.LockedUntil,
 			&i.TokenVersion,
 			&i.PasswordChangedAt,
+			&i.MustChangePassword,
 		); err != nil {
 			return nil, err
 		}
@@ -255,7 +260,7 @@ SET name   = COALESCE($2::text,   name),
     status = COALESCE($5::text, status),
     updated_at = now()
 WHERE id = $1
-RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at
+RETURNING id, tenant_id, email, phone, password_hash, name, role, status, last_login_at, created_at, updated_at, legacy_id, failed_login_attempts, locked_until, token_version, password_changed_at, must_change_password
 `
 
 type UpdateUserParams struct {
@@ -292,6 +297,7 @@ func (q *Queries) UpdateUser(ctx context.Context, arg UpdateUserParams) (User, e
 		&i.LockedUntil,
 		&i.TokenVersion,
 		&i.PasswordChangedAt,
+		&i.MustChangePassword,
 	)
 	return i, err
 }
@@ -312,20 +318,23 @@ func (q *Queries) UpdateUserLastLogin(ctx context.Context, id uuid.UUID) error {
 
 const updateUserPassword = `-- name: UpdateUserPassword :exec
 UPDATE users
-SET password_hash       = $2,
-    token_version       = token_version + 1,
-    password_changed_at = now(),
-    updated_at          = now()
+SET password_hash        = $2,
+    must_change_password = $3::boolean,
+    token_version        = token_version + 1,
+    password_changed_at  = now(),
+    updated_at           = now()
 WHERE id = $1
 `
 
 type UpdateUserPasswordParams struct {
 	ID           uuid.UUID `json:"id"`
 	PasswordHash string    `json:"password_hash"`
+	MustChange   bool      `json:"must_change"`
 }
 
 // 改密同时递增 token_version + 更新 password_changed_at：旧 token 立即失效
+// must_change 由调用方决定：本人自助改密传 false，管理员代设/重置传 true
 func (q *Queries) UpdateUserPassword(ctx context.Context, arg UpdateUserPasswordParams) error {
-	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash)
+	_, err := q.db.Exec(ctx, updateUserPassword, arg.ID, arg.PasswordHash, arg.MustChange)
 	return err
 }

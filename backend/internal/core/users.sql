@@ -5,10 +5,11 @@ SELECT * FROM users WHERE id = $1;
 SELECT * FROM users WHERE email = $1;
 
 -- name: CreateUser :one
+-- must_change_password 恒为 true：建号时的密码由管理员设定，本人首次登录必须改掉
 INSERT INTO users (
-    tenant_id, email, phone, password_hash, name, role
+    tenant_id, email, phone, password_hash, name, role, must_change_password
 ) VALUES (
-    $1, $2, $3, $4, $5, COALESCE(sqlc.narg('role')::text, 'staff')
+    $1, $2, $3, $4, $5, COALESCE(sqlc.narg('role')::text, 'staff'), TRUE
 )
 RETURNING *;
 
@@ -50,11 +51,13 @@ RETURNING *;
 
 -- name: UpdateUserPassword :exec
 -- 改密同时递增 token_version + 更新 password_changed_at：旧 token 立即失效
+-- must_change 由调用方决定：本人自助改密传 false，管理员代设/重置传 true
 UPDATE users
-SET password_hash       = $2,
-    token_version       = token_version + 1,
-    password_changed_at = now(),
-    updated_at          = now()
+SET password_hash        = $2,
+    must_change_password = sqlc.arg('must_change')::boolean,
+    token_version        = token_version + 1,
+    password_changed_at  = now(),
+    updated_at           = now()
 WHERE id = $1;
 
 -- name: IncrementUserTokenVersion :exec

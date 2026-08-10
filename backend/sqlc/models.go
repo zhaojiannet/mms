@@ -359,4 +359,6 @@ type User struct {
 	TokenVersion int32 `json:"token_version"`
 	// 最近一次密码变更时刻；JWT iat 早于此则拒绝
 	PasswordChangedAt pgtype.Timestamptz `json:"password_changed_at"`
+	// 密码由他人设定，登录后必须先改密；期间除改密端点外一律 403
+	MustChangePassword bool `json:"must_change_password"`
 }

@@ -243,7 +243,8 @@ func ResetAdminPassword(c *echo.Context) error {
 	}
 	tag, err := tx.Exec(ctx, `
 		UPDATE users
-		SET password_hash = $3, token_version = token_version + 1,
+		SET password_hash = $3, must_change_password = TRUE,
+		    token_version = token_version + 1,
 		    password_changed_at = now(), failed_login_attempts = 0, locked_until = NULL,
 		    updated_at = now()
 		WHERE tenant_id = $1 AND email = $2 AND role = 'super_admin'

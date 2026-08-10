@@ -7,6 +7,8 @@ export interface User {
   email: string
   name: string
   role: Role
+  // 密码由他人设定（开通商户 / 管理员建号或重置），改掉之前后端只放行会话自管端点
+  must_change_password?: boolean
 }
 
 export const roleLabel = (r: Role | string): string =>
