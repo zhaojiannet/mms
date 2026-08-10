@@ -67,7 +67,6 @@
 </template>
 
 <script setup lang="ts">
-useHead({ title: '操作日志' })
 interface Log {
   id: number
   actor_id: string | null
@@ -129,6 +128,8 @@ function parseAction(r: Log): { method: string; path: string } {
   if (q >= 0) path = path.slice(0, q)
   // UUID → :id（兼容 v4/v7 各种形态）
   path = path.replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:id')
+  // 公告已读的路径段是版本号（26.5）而非 UUID，单独归一化；read-all 只有两段不受影响
+  path = path.replace(/^\/api\/notifications\/[^/]+\/read$/, '/api/notifications/:version/read')
   // tenant-settings 的 key（非特殊动作路径）→ :key 以便查映射表
   // 排除 enable-void / disable-void / booking-code / super-password 这些单独的动作端点
   if ((method === 'PUT' || method === 'DELETE') &&
@@ -200,6 +201,10 @@ const actionMap: Record<string, string> = {
   'POST /api/tenant-settings/enable-void':          '开启交易撤销',
   'POST /api/tenant-settings/disable-void':         '关闭交易撤销',
   'POST /api/tenant-settings/booking-code':         '重新生成预约码',
+  'DELETE /api/tenant-settings/booking-code':       '关闭在线预约',
+  // 公告
+  'POST /api/notifications/:version/read':          '标记公告已读',
+  'POST /api/notifications/read-all':               '全部公告标记已读',
   'PUT /api/tenant-settings/:key':                  '修改系统设置',
   'DELETE /api/tenant-settings/:key':               '清除系统设置',
   // 店铺 Logo
@@ -234,6 +239,7 @@ const resourceMap: Record<string, string> = {
   pending: '挂账',
   audit: '日志',
   store: '店铺',
+  notifications: '公告',
 }
 
 // 复合路径精确匹配（typeKey/subKey[/subSubKey]）
@@ -290,6 +296,10 @@ function targetInfo(r: Log): { typeLabel: string; shortId: string } | null {
   }
   if (typeKey === 'auth') {
     return { typeLabel: '认证', shortId: '' }
+  }
+  // 公告：路径段是版本号（26.5），带上便于定位是哪条公告；read-all 无具体对象
+  if (typeKey === 'notifications') {
+    return { typeLabel: '公告', shortId: sub && sub !== 'read-all' ? sub : '' }
   }
 
   // 嵌套资源：/members/:id/pending[/:pid[/settle]] / /members/:id/cards[/with-transaction]

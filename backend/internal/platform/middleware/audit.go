@@ -215,11 +215,9 @@ func buildAuditJob(c *echo.Context, method, path string, body []byte, handlerErr
 		job.payload = data
 	}
 
-	// IP（从 RemoteAddr 提取；X-Forwarded-For 处理见 clientIP()）
-	if s := c.Request().RemoteAddr; s != "" {
-		if i := strings.LastIndex(s, ":"); i > 0 {
-			s = s[:i]
-		}
+	// IP 走与限流同一条信任链：反代在 TRUSTED_PROXIES 内才读 X-Real-IP/XFF，
+	// 否则容器部署下记到的是 Docker 网桥地址而不是访客真实 IP
+	if s := ClientIP(c.Request()); s != "" {
 		if a, err := netip.ParseAddr(s); err == nil {
 			job.ipAddr = &a
 		}
