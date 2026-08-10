@@ -145,8 +145,8 @@
                     </span>
                     <!-- 多卡联合支付无单一 card_id，从余额流水判定，别让它显示成"—" -->
                     <span v-else-if="isMultiCard(t)" class="inline-flex items-center gap-1.5 text-primary-600 dark:text-primary-400">
-                      <UIcon name="i-lucide-layers" class="size-4 shrink-0" />
-                      <span>多卡</span>
+                      <UIcon name="i-lucide-wallet-cards" class="size-4 shrink-0" />
+                      <span>多卡支付</span>
                     </span>
                     <span v-else class="text-stone-400">—</span>
                   </td>
@@ -182,7 +182,7 @@
                         </div>
                         <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                           <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">暂未收款</span>
-                          <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
+                          <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountLabel(t) }} ¥{{ t.discount_amount }}</span>
                           <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                           <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                         </div>
@@ -213,7 +213,7 @@
                       </div>
                       <div class="h-4 text-xs tabular-nums leading-none mt-0.5">
                         <span v-if="isCreditTx(t)" class="text-warning-600 dark:text-warning-400">暂未收款</span>
-                        <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountRate(t) }} 省 ¥{{ t.discount_amount }}</span>
+                        <span v-else-if="parseFloat(t.discount_amount) > 0" class="text-error-600">{{ isMultiCard(t) ? '多卡 · ' : '' }}{{ discountLabel(t) }} ¥{{ t.discount_amount }}</span>
                         <span v-else-if="surcharge(t) > 0" class="text-stone-500 dark:text-stone-400">加 ¥{{ surcharge(t).toFixed(2) }}</span>
                         <span v-else-if="t.status === 'voided'" class="text-error-600">已撤销</span>
                       </div>
@@ -798,12 +798,27 @@ function multiCardText(t: Tx): string {
     .join(' + ')
 }
 
-function discountRate(t: Tx): string {
+// 标称折扣率：从卡显示名（"500元储值卡 7折"）提取；多卡取第一张扣款卡
+function nominalRate(t: Tx): number | null {
+  const name = t.card_type_name
+    || (t.card_snapshots || []).find(s => s.change_type === 'consume')?.card_type_name
+  const m = (name || '').match(/([0-9]+(?:\.[0-9])?)\s*折/)
+  return m ? parseFloat(m[1]!) / 10 : null
+}
+
+// 折扣描述：反推率与卡的标称折扣吻合才写「N折 省」；对不上（手动调价）
+// 只写「减」——拿实付/应付反推出的"6.9折"是没人定过的伪折扣，不展示
+function discountLabel(t: Tx): string {
   const total = parseFloat(t.total_amount)
   const paid = parseFloat(t.actual_paid_amount)
-  if (!(total > 0) || !(paid >= 0) || paid >= total) return ''
-  const zhe = Math.round((paid / total) * 100) / 10
-  return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折`
+  if (!(total > 0) || paid >= total) return ''
+  const rate = paid / total
+  const nominal = nominalRate(t)
+  if (nominal != null && Math.abs(rate - nominal) < 0.005) {
+    const zhe = Math.round(rate * 100) / 10
+    return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折 省`
+  }
+  return '减'
 }
 
 async function fetchTx(reset = false) {
