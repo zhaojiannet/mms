@@ -89,7 +89,9 @@ func main() {
 		os.Exit(1)
 	}
 
-	e := echo.New()
+	// 关掉 group 自动注册的 404 路由：开着会让未注册的 /api/* 走完整条组中间件链，
+	// 每个请求白开一次 DB 事务才 401，而这些路径不在任何限流之下
+	e := echo.NewWithConfig(echo.Config{NoGroupAutoRegister404Routes: true})
 
 	// 全局 body 上限 2MB：防存储型 DoS（notes / name 塞巨大字符串）
 	// logo 上传走独立 multipart 路径，handler 内自校验 2MB 限制
