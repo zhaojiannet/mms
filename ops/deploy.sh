@@ -72,8 +72,16 @@ sync_image() {
 			| xargs -r -I{} docker rmi '${img}:{}' || true
 	"
 
-	echo "== ${svc}：推送镜像"
-	docker save "${img}" | gzip | ssh "${SERVER}" "gunzip | docker load"
+	# 落临时文件再用 rsync 推，不走 ssh 管道：管道传几十 MB 期间屏幕上什么都没有，
+	# 看不出是在传还是卡死。rsync --progress 有速率与百分比
+	local tgz="/tmp/${img}.tar.gz"
+	echo "== ${svc}：打包镜像"
+	docker save "${img}" | gzip > "${tgz}"
+	echo "== ${svc}：推送镜像（$(du -h "${tgz}" | cut -f1)）"
+	rsync -a --progress "${tgz}" "${SERVER}:${APP_DIR}/.image_load.tar.gz" || { rm -f "${tgz}"; return 1; }
+	rm -f "${tgz}"
+	echo "== ${svc}：服务器加载镜像"
+	ssh "${SERVER}" "cd '${APP_DIR}' && gunzip -c .image_load.tar.gz | docker load && rm -f .image_load.tar.gz"
 	ssh "${SERVER}" "echo '${want}' > '${APP_DIR}/${svc}/.image_stamp'"
 }
 
