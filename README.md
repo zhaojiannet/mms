@@ -178,14 +178,13 @@ docker compose up -d
 4. 另建两个平台站点（配置与商户站点相同的路径分流）：
    - 运营后台（商户管理 / 申请审批 / 套餐管理）：主机名由 `PLATFORM_HOST` 指定，留空则默认 `admin.<APP_DOMAIN>`。换个不好猜的名字本身也是一层防护。操作员账号由 `.env` 的 `PLATFORM_ADMIN_*` 首次启动创建
    - 主域名 `vip.zhaojian.net` → 产品主页，`/apply` 为商户开通申请表单
-4. clone 仓库到服务器（如 `/opt/mms`），`cp .env.example .env` 填好配置，然后生产模式启动（PG 复用全局 `postgres-server`）：
+4. clone 仓库到服务器（如 `/opt/mms`），`cp .env.example .env` 填好配置，建好产物占位目录：
 
    ```bash
    mkdir -p frontend/.output   # 产物占位；首次推送前前后端容器起不来属正常
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d --build
    ```
 
-   生产镜像不含 Go 工具链与 pnpm：构建产物全部由 `ops/deploy.sh` 从本机推送，**服务器不下载任何依赖**（`proxy.golang.org` 在部分地区不可达，让服务器拉 Go 依赖必然失败）。服务器唯一的外网动作是拉两个基础镜像（`debian:bookworm-slim` + `node:22-bookworm-slim`，约 344MB）。
+   然后回本机执行一次 `./ops/deploy.sh`——它会把镜像和产物一起推上去并拉起容器（PG 复用全局 `postgres-server`）。**服务器不下载任何依赖，也不构建镜像**：生产镜像同样在本机 `docker buildx` 构建成 linux/amd64 后整包推送。这样服务器一次外网都不用连（`proxy.golang.org` 与 Docker Hub 在部分地区都不可达），代价是 Dockerfile.prod 改动时多传一次约 75MB(前端)/27MB(后端)，没改则一个字节都不传。
 
 
 5. 备份定时任务：`crontab -e` 加 `0 3 * * * /opt/mms/ops/backup_pg.sh >> /var/log/mms_backup.log 2>&1`
@@ -201,9 +200,11 @@ docker compose up -d
 ./ops/deploy.sh backend    # 只改了后端
 ```
 
-脚本自动完成：本机容器内构建（前端 `nuxi build`、后端交叉编译 linux 二进制）→ 服务器留回滚快照（上一版二进制 + `pg_dump`）→ rsync 推送（永不触碰服务器 `.env` 和商户上传文件）→ 重启（后端启动时 goose 自动迁移）→ 轮询 `/health` 健康检查。失败时打印回滚命令。服务器只跑产物，不联网拉依赖、不编译。
+脚本自动完成：本机容器内构建（前端 `nuxi build`、后端交叉编译 linux 二进制）→ 同步 compose 与 `Dockerfile.prod` → 生产镜像有变则本机构建 linux/amd64 后整包推送 → 服务器留回滚快照（上一版二进制 + `pg_dump` + 上一版镜像标签）→ rsync 推送（永不触碰服务器 `.env` 和商户上传文件）→ `up -d --no-build` + 重启（后端启动时 goose 自动迁移）→ 轮询 `/health` 健康检查。失败时打印回滚命令。服务器只跑产物，不联网拉依赖、不编译、不构建镜像。
 
-前端回滚不靠快照：本机 checkout 上一个正常 commit 重新 `./ops/deploy.sh frontend` 即可。
+首次使用需在 `ops/deploy.env` 里核对 `PROD_UID` / `PROD_GID`（默认 1000）——镜像改在本机构建，这两个值必须和服务器上 compose 实际取到的 `HOST_UID` / `HOST_GID` 一致，否则容器读不了自己的产物。
+
+回滚分三层：后端二进制留 3 代快照，生产镜像留 3 代 `rb_<时间戳>` 标签，数据库留 10 次 `pg_dump`。前端产物不留快照——本机 checkout 上一个正常 commit 重新 `./ops/deploy.sh frontend` 即可。
 
 ## 开发
 
