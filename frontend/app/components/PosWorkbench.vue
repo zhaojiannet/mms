@@ -1419,23 +1419,32 @@ async function submit() {
   const pendingAmt = isPending
     ? (pendingMode.value === 'full' ? discountedTotal.value : discountedTotal.value - parseFloat(memberTotalBalance.value))
     : 0
+  // 客户身份结算后即清空，余额改由提示条带出（收银员当场要回答「我卡里还剩多少」）。
+  // 用提交前余额减本单扣卡额本地算，不再查一次接口：那次 await 挂住会让已入账的单子卡在结账中
+  const deducted = ((body.card_allocations as { deduct: string }[] | undefined) ?? [])
+    .reduce((s, a) => s + parseFloat(a.deduct), 0)
+  const balanceTip = member.value && memberCards.value.length > 0
+    ? `，${member.value.name} 卡内余额 ¥${(parseFloat(memberTotalBalance.value) - deducted).toFixed(2)}`
+    : ''
   try {
     await api('/api/transactions', { method: 'POST', body })
     if (isPending) {
       toast.add({
         title: '已挂账',
-        description: `挂账 ¥${pendingAmt.toFixed(2)}${pendingMode.value === 'use_balance' ? `，扣卡 ¥${memberTotalBalance.value}` : ''}`,
+        description: `挂账 ¥${pendingAmt.toFixed(2)}${pendingMode.value === 'use_balance' ? `，扣卡 ¥${memberTotalBalance.value}` : ''}${balanceTip}`,
         color: 'warning',
         icon: 'i-lucide-clock',
       })
     } else {
       toast.add({
         title: '已记账',
-        description: `本单实收 ¥${settled.toFixed(2)}`,
+        description: `本单实收 ¥${settled.toFixed(2)}${balanceTip}`,
         color: 'success',
         icon: 'i-lucide-check-circle',
       })
     }
+    clearMember()
+    walkInName.value = ''
     items.value = []
     notes.value = ''
     useManualPrice.value = false
@@ -1447,12 +1456,6 @@ async function submit() {
     // 结账成功 → 换一句祝福语（仪式感 + 正反馈）+ 刷新今日记录
     useGreeting().refresh()
     fetchTodayTx()
-    if (member.value) {
-      const cards = await api<{ items: Card[] }>(`/api/members/${member.value.id}/cards`)
-      memberCards.value = cards.items.filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
-      const sum = memberCards.value.reduce((s, c) => s + parseFloat(c.balance), 0)
-      member.value = { ...member.value, total_balance: sum.toFixed(2) }
-    }
   } catch (e: any) {
     err.value = e?.data?.message || '结账失败'
   } finally { submitting.value = false }
