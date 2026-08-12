@@ -77,11 +77,14 @@ sync_image() {
 	ssh "${SERVER}" "echo '${want}' > '${APP_DIR}/${svc}/.image_stamp'"
 }
 
-echo "== 同步部署配置（compose 与生产 Dockerfile）"
-# 服务器上这几个文件靠 clone 得来、之后从不更新，不推的话镜像与编排永远停在初版
+echo "== 同步部署配置（compose、生产 Dockerfile、备份脚本）"
+# 服务器上这几个文件靠 clone 得来、之后从不更新，不推的话镜像与编排永远停在初版。
+# backup_pg.sh 由服务器 crontab 直接调用，同理不推就一直是旧版。
+# 迁移与 announcements.json 无须同步：都已 go:embed 进二进制
 rsync -az docker-compose.yml docker-compose.prod.yml "${SERVER}:${APP_DIR}/"
 rsync -az backend/Dockerfile.prod "${SERVER}:${APP_DIR}/backend/"
 rsync -az frontend/Dockerfile.prod "${SERVER}:${APP_DIR}/frontend/"
+rsync -az ops/backup_pg.sh "${SERVER}:${APP_DIR}/ops/"
 
 if [ "${PART}" != "backend" ]; then
 	echo "== 前端：本机容器内构建"
