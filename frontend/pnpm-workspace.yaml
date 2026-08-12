@@ -1,0 +1,13 @@
+# pnpm 11 起依赖的构建脚本默认不执行，必须逐个批准（供应链防护）。
+# 这三个不跑脚本就装不成：esbuild 取平台二进制、@parcel/watcher 取原生监听模块、
+# vue-demi 按当前 Vue 版本切入口
+allowBuilds:
+  '@parcel/watcher': true
+  esbuild: true
+  vue-demi: true
+
+# fontless（@nuxt/fonts 的依赖）钉着 esbuild ^0.27，那一支拉进的 0.27.7 带
+# Windows 路径遍历漏洞 GHSA-g7r4-m6w7-qqqr。依赖树里本来就装着 0.28.1（Vite 用），
+# 这里只把 fontless 这一支对齐过去，不影响其他包各自解析的 esbuild
+overrides:
+  "fontless>esbuild": "^0.28.1"

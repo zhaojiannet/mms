@@ -1,15 +1,15 @@
 # ============================================
-# Nuxt 4 + pnpm 开发容器
+# Nuxt 4 + pnpm 开发容器（Node 24 = Active LTS）
 # UID/GID 由 build args 传入（macOS 501/20，Linux 1000/1000）
 # ============================================
 
-FROM node:22-bookworm-slim
+FROM node:24-bookworm-slim
 
 ARG UID=1000
 ARG GID=1000
 
 # 启用 Corepack
-RUN corepack enable && corepack prepare pnpm@10.33.0 --activate
+RUN corepack enable && corepack prepare pnpm@11.21.0 --activate
 
 # 【关键】调整 node 用户 UID/GID 与宿主机一致
 USER root
