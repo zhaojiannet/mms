@@ -55,9 +55,10 @@
                   <UBadge v-if="c.is_custom" label="定制" color="info" variant="soft" size="sm" class="ml-2" />
                 </div>
               </div>
+              <!-- 过期卡 status 仍是 active，按「正常」显示会误导 -->
               <UBadge
-                :label="statusLabel(c.status)"
-                :color="c.status === 'active' ? 'success' : 'neutral'"
+                :label="c.status === 'active' && isCardExpired(c) ? '已过期' : statusLabel(c.status)"
+                :color="c.status === 'active' ? (isCardExpired(c) ? 'warning' : 'success') : 'neutral'"
                 variant="soft" size="sm"
               />
             </div>
@@ -231,7 +232,7 @@ const id = route.params.id as string
 const ops = useMemberOps(() => id)
 
 interface Member { id: string; name: string; phone: string | null; gender: string; birthday: string | null; notes: string | null; status: string }
-interface Card { id: string; card_type_name: string; card_type_id: string; final_price: string; final_discount_rate: string; balance: string; status: string; issued_at: string; is_custom: boolean }
+interface Card { id: string; card_type_name: string; card_type_id: string; final_price: string; final_discount_rate: string; balance: string; status: string; issued_at: string; expires_at: string | null; is_custom: boolean }
 interface Pending { id: string; amount: string; summary: string | null; charged_at: string }
 interface Tx { id: string; kind: string; summary: string | null; actual_paid_amount: string; transaction_time: string }
 
@@ -252,7 +253,8 @@ const totalBalance = computed(() => {
 })
 
 const paymentOptions = computed(() => paymentMethods.value.map(p => ({ label: p.name, value: p.id })))
-const cardOptions = computed(() => cards.value.filter(c => c.status === 'active' && parseFloat(c.balance) > 0).map(c => ({ label: `${c.card_type_name}（余额 ¥${c.balance}）`, value: c.id })))
+// 清账选卡：过期卡后端拒绝，判据与收银页共用 utils/cards.ts
+const cardOptions = computed(() => cards.value.filter(isUsableCard).map(c => ({ label: `${c.card_type_name}（余额 ¥${c.balance}）`, value: c.id })))
 const cardTypeOptions = computed(() => cardTypes.value.map(c => ({ label: `${c.name}  ¥${c.price}`, value: c.id })))
 
 async function fetchAll() {

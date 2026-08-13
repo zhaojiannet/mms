@@ -352,9 +352,10 @@
                     <UIcon name="i-lucide-credit-card" class="size-4 text-primary-500" />
                     <span class="font-medium">{{ c.card_type_name }}</span>
                     <span class="text-xs text-primary-600 dark:text-primary-400">{{ displayRate(c.final_discount_rate) }}</span>
+                    <!-- 过期卡 status 仍是 active，按「正常」显示会误导 -->
                     <UBadge
-                      :label="cardStatusLabel(c.status)"
-                      :color="c.status === 'active' ? 'success' : 'neutral'"
+                      :label="c.status === 'active' && isCardExpired(c) ? '已过期' : cardStatusLabel(c.status)"
+                      :color="c.status === 'active' ? (isCardExpired(c) ? 'warning' : 'success') : 'neutral'"
                       variant="soft" size="sm"
                     />
                   </div>
@@ -701,6 +702,7 @@ interface CardInfo {
   balance: string
   status: string
   issued_at: string
+  expires_at: string | null
   is_custom: boolean
 }
 
@@ -977,7 +979,8 @@ const nonCardPaymentOptions = computed(() =>
 
 const settleCardOptions = computed(() =>
   detailCards.value
-    .filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
+    // 过期卡后端清账直接拒绝，列出来只会选中后 400；判据与收银页共用 utils/cards.ts
+    .filter(isUsableCard)
     .map(c => ({ label: `${c.card_type_name}（余额 ¥${c.balance}）`, value: c.id }))
 )
 
