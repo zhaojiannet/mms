@@ -182,27 +182,37 @@
 
           <!-- 常用 8 个卡片 -->
           <div v-if="quickServices.length > 0" class="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-4 gap-2">
-            <button
-              v-for="s in quickServices" :key="s.id"
-              type="button"
-              class="group relative px-3 py-2.5 rounded-lg text-left bg-white dark:bg-stone-900 shadow-xs hover:shadow-sm active:scale-[0.97] transition"
-              :class="cartQty(s.id) > 0
-                ? 'ring-2 ring-primary-500/60'
-                : 'ring-1 ring-stone-200 dark:ring-stone-700 hover:ring-2 hover:ring-primary-500/40 hover:bg-primary-50/30 dark:hover:bg-primary-950/20'"
-              @click="addItem(s)"
-            >
-              <!-- 已加入购物车的数量角标：平板单列时购物车不在视口内，点击必须当场有反馈 -->
-              <span
+            <!-- 角标是独立按钮，不能嵌在选品按钮里（button 不许嵌套），故外层包一层定位容器 -->
+            <div v-for="s in quickServices" :key="s.id" class="relative">
+              <button
+                type="button"
+                class="group w-full relative px-3 py-2.5 rounded-lg text-left bg-white dark:bg-stone-900 shadow-xs hover:shadow-sm active:scale-[0.97] transition"
+                :class="cartQty(s.id) > 0
+                  ? 'ring-2 ring-primary-500/60'
+                  : 'ring-1 ring-stone-200 dark:ring-stone-700 hover:ring-2 hover:ring-primary-500/40 hover:bg-primary-50/30 dark:hover:bg-primary-950/20'"
+                @click="addItem(s)"
+              >
+                <UBadge v-if="s.no_discount" label="不折" color="warning" variant="soft" size="xs" class="absolute top-1" :class="cartQty(s.id) > 0 ? 'right-4' : 'right-1'" />
+                <div class="text-sm font-medium truncate pr-6 text-stone-900 dark:text-stone-100">{{ s.name }}</div>
+                <div class="mt-1 flex items-baseline gap-1.5">
+                  <span class="text-base font-semibold tabular-nums text-stone-900 dark:text-stone-100">¥{{ s.price }}</span>
+                  <span v-if="previewRate < 1 && !s.no_discount" class="text-xs tabular-nums text-primary-600 dark:text-primary-400">→ ¥{{ (parseFloat(s.price) * previewRate).toFixed(2) }}</span>
+                </div>
+              </button>
+              <!-- 数量角标兼作减一件：平板单列时购物车不在视口内，点错了不必滚回去改 -->
+              <button
                 v-if="cartQty(s.id) > 0"
-                class="absolute -top-1.5 -right-1.5 size-5 rounded-full bg-primary-500 text-white text-xs font-medium flex items-center justify-center tabular-nums shadow-xs"
-              >{{ cartQty(s.id) }}</span>
-              <UBadge v-if="s.no_discount" label="不折" color="warning" variant="soft" size="xs" class="absolute top-1" :class="cartQty(s.id) > 0 ? 'right-4' : 'right-1'" />
-              <div class="text-sm font-medium truncate pr-6 text-stone-900 dark:text-stone-100">{{ s.name }}</div>
-              <div class="mt-1 flex items-baseline gap-1.5">
-                <span class="text-base font-semibold tabular-nums text-stone-900 dark:text-stone-100">¥{{ s.price }}</span>
-                <span v-if="previewRate < 1 && !s.no_discount" class="text-xs tabular-nums text-primary-600 dark:text-primary-400">→ ¥{{ (parseFloat(s.price) * previewRate).toFixed(2) }}</span>
-              </div>
-            </button>
+                type="button"
+                :title="`已选 ${cartQty(s.id)} 件，点击减 1`"
+                :aria-label="`${s.name} 减 1`"
+                class="group/qty absolute -top-1.5 -right-1.5 size-5 rounded-full bg-primary-500 hover:bg-error-500 text-white text-xs font-medium flex items-center justify-center tabular-nums shadow-xs transition cursor-pointer"
+                @click="removeOne(s.id)"
+              >
+                <span class="group-hover/qty:hidden">{{ cartQty(s.id) }}</span>
+                <!-- 用图标而非「−」字符：字形对齐数学中线，在 20px 圆里会偏上半像素 -->
+                <UIcon name="i-lucide-minus" class="hidden group-hover/qty:block size-3" />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -1507,6 +1517,12 @@ function addItem(s: Service) {
 function addFirstMatch() {
   if (filteredServices.value.length > 0) addItem(filteredServices.value[0]!)
 }
+// 选品区角标点击：减一件，减到 0 自动移出购物车（复用 changeQty 的收尾逻辑）
+function removeOne(serviceId: string) {
+  const idx = items.value.findIndex(i => i.id === serviceId)
+  if (idx >= 0) changeQty(idx, -1)
+}
+
 function changeQty(idx: number, delta: number) {
   const it = items.value[idx]!
   const next = it.quantity + delta
