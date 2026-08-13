@@ -478,7 +478,9 @@
                 <span class="text-sm font-medium text-stone-700 dark:text-stone-300">实付金额</span>
                 <UBadge v-if="useManualPrice" label="已改价" color="warning" variant="soft" size="xs" />
               </div>
-              <UPopover :ui="{ content: 'p-3 w-64' }">
+              <!-- 会员卡支付实付由扣卡方案决定，不开放改价（后端也互斥拒绝两者同发） -->
+              <span v-if="isMemberCardPay" class="text-3xl font-semibold tabular-nums text-primary-600 dark:text-primary-400 leading-none">¥{{ actualPaid.toFixed(2) }}</span>
+              <UPopover v-else :ui="{ content: 'p-3 w-64' }">
                 <UTooltip :text="useManualPrice ? '已自定义，点击重新调整' : '点击自定义实付金额（折扣 / 抹零）'" :delay-duration="200">
                   <button
                     type="button"
@@ -1139,6 +1141,15 @@ watch(
   { deep: true },
 )
 
+// 切到会员卡支付时清掉残留改价：改价只属于非卡支付，同发会被后端互斥校验拒绝
+watch(isMemberCardPay, (v) => {
+  if (v && useManualPrice.value) {
+    useManualPrice.value = false
+    manualPrice.value = ''
+    manualReason.value = ''
+  }
+})
+
 const discountedTotal = computed(() => {
   if (!isMemberCardPay.value || previewRate.value >= 1) return total.value
   const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
@@ -1403,8 +1414,8 @@ async function submit() {
     // 双保险：余额已够扣（allocationPlan 非空）时绝不挂账，兜住 watch 之外的任何状态残留
     if (pendingMode.value && allocationPlan.value.length > 0) pendingMode.value = ''
     if (pendingMode.value === 'full') {
+      // 不带 manual_price：实收置零由后端 full 分支决定，多传会撞「改价与挂账互斥」校验被 400
       body.pending_mode = 'full'
-      body.manual_price = '0'
     } else if (pendingMode.value === 'use_balance') {
       body.pending_mode = 'use_balance'
       body.card_allocations = useBalanceAllocations.value
