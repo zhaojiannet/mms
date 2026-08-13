@@ -84,7 +84,7 @@ func SettleAllCredits(c *echo.Context) error {
 		if card.Status != "active" {
 			return echo.NewHTTPError(http.StatusBadRequest, "card not active")
 		}
-		if card.ExpiresAt.Valid && card.ExpiresAt.Time.Before(time.Now()) {
+		if cardExpired(card.ExpiresAt) {
 			return echo.NewHTTPError(http.StatusBadRequest, "卡已过期")
 		}
 		if card.Balance.LessThan(total) {

@@ -13,6 +13,18 @@ JOIN card_types ct ON ct.id = c.card_type_id
 WHERE c.member_id = $1
 ORDER BY c.issued_at DESC;
 
+-- name: ListCardsByMemberForUpdate :many
+-- 挂账定价路径：先锁会员全部卡再取折扣率，防并发把卡扣空/作废后仍按旧折扣入账
+-- 带 member_id / card_type_name：挂账分支的扣卡校验直接复用锁行，不再二次 SELECT
+-- ORDER BY c.id 与 LockCardsForUpdate 同序加锁，防死锁
+SELECT c.id, c.member_id, c.final_discount_rate, c.balance, c.status, c.expires_at,
+       ct.name AS card_type_name
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.member_id = $1
+ORDER BY c.id
+FOR UPDATE OF c;
+
 -- name: LockCardForUpdate :one
 -- 扣款路径专用：SELECT FOR UPDATE 锁单行，防并发双扣
 -- 注：JOIN 的 card_types 不加锁（只读关联）

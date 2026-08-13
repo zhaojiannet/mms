@@ -107,12 +107,6 @@ func Create(c *echo.Context) error {
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
 	}
-	if len(req.Items) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "items is required")
-	}
-	if len(req.Items) > 50 {
-		return echo.NewHTTPError(http.StatusBadRequest, "最多支持 50 个商品项")
-	}
 	if len(req.CardAllocations) > 10 {
 		return echo.NewHTTPError(http.StatusBadRequest, "最多支持 10 张卡组合支付")
 	}
@@ -132,46 +126,16 @@ func Create(c *echo.Context) error {
 	}
 
 	// 1. 查 services + 算 total_amount（总应收，按标价）
-	// 一次性批量取所有 service，避免 N+1：原 for 循环 GetServiceByID
-	if len(req.Items) == 0 {
-		return echo.NewHTTPError(http.StatusBadRequest, "items required")
-	}
-	svcIDs := make([]uuid.UUID, 0, len(req.Items))
-	for _, it := range req.Items {
-		if it.Quantity <= 0 {
-			return echo.NewHTTPError(http.StatusBadRequest, "quantity must be > 0")
-		}
-		svcIDs = append(svcIDs, it.ServiceID)
-	}
-	svcRows, err := q.GetServicesByIDs(ctx, svcIDs)
+	itemRows, total, noDiscTotal, err := computeTotals(c, q, req.Items)
 	if err != nil {
-		return mw.InternalError(c, "transactions.get_services", err)
+		return err
 	}
-	svcByID := make(map[uuid.UUID]sqlc.Service, len(svcRows))
-	for _, s := range svcRows {
-		svcByID[s.ID] = s
-	}
-
-	total := decimal.Zero
-	itemRows := make([]struct {
-		svc sqlc.Service
-		qty int32
-	}, 0, len(req.Items))
-	summaryParts := make([]string, 0, len(req.Items))
-	for _, it := range req.Items {
-		svc, ok := svcByID[it.ServiceID]
-		if !ok {
-			return echo.NewHTTPError(http.StatusNotFound, "service not found: "+it.ServiceID.String())
-		}
-		total = total.Add(svc.Price.Mul(decimal.NewFromInt32(it.Quantity)))
-		itemRows = append(itemRows, struct {
-			svc sqlc.Service
-			qty int32
-		}{svc, it.Quantity})
-		if it.Quantity == 1 {
-			summaryParts = append(summaryParts, svc.Name)
+	summaryParts := make([]string, 0, len(itemRows))
+	for _, ir := range itemRows {
+		if ir.qty == 1 {
+			summaryParts = append(summaryParts, ir.svc.Name)
 		} else {
-			summaryParts = append(summaryParts, fmt.Sprintf("%s×%d", svc.Name, it.Quantity))
+			summaryParts = append(summaryParts, fmt.Sprintf("%s×%d", ir.svc.Name, ir.qty))
 		}
 	}
 
@@ -185,6 +149,10 @@ func Create(c *echo.Context) error {
 	}
 	if pendingMode != "" && req.MemberID == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "挂账必须指定会员")
+	}
+	// 无分配的 use_balance 会让 actualPaid 落到默认 total，账面矛盾且不建挂账
+	if pendingMode == "use_balance" && len(req.CardAllocations) == 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "利用余额挂账必须携带扣卡分配")
 	}
 	// 互斥：manual_price 接管实收后若仍按 allocations 扣卡，账面实收与实际扣卡可任意背离
 	if req.ManualPrice != nil && (len(req.CardAllocations) > 0 || pendingMode != "") {
@@ -230,11 +198,44 @@ func Create(c *echo.Context) error {
 	}
 	discount := total.Sub(actualPaid)
 
+	// 挂账应收按折后价（唯一权威实现在 pendingPricing，收银页展示走
+	// PendingPreview 取同一函数的结果），老系统同口径；清账时按此金额收。
+	// 入账路径先 FOR UPDATE 锁会员全部卡再定折扣率：不锁的话并发扣空/作废
+	// 低折扣卡的事务提交后，本单仍按已失效的折扣入账
+	discountedTotal := total
+	// 挂账路径的锁行缓存：定价已 FOR UPDATE 锁回全部卡，扣卡校验直接复用，
+	// 同一事务不再对已锁子集二次 SELECT（缩短全卡锁持有窗口）
+	var lockedByID map[uuid.UUID]lockedCard
+	if pendingMode != "" {
+		lockedRows, lockErr := q.ListCardsByMemberForUpdate(ctx, *req.MemberID)
+		if lockErr != nil {
+			return mw.InternalError(c, "lock member cards: ", lockErr)
+		}
+		cards := make([]pricingCard, 0, len(lockedRows))
+		lockedByID = make(map[uuid.UUID]lockedCard, len(lockedRows))
+		for _, lc := range lockedRows {
+			cards = append(cards, pricingCard{status: lc.Status, balance: lc.Balance, rate: lc.FinalDiscountRate, expiresAt: lc.ExpiresAt})
+			lockedByID[lc.ID] = lockedCard{
+				ID: lc.ID, MemberID: lc.MemberID, Status: lc.Status,
+				ExpiresAt: lc.ExpiresAt, Balance: lc.Balance, CardTypeName: lc.CardTypeName,
+			}
+		}
+		_, discountedTotal = pendingPricing(cards, total, noDiscTotal)
+		// 扣卡以折后应收为上限：超过即超额扣卡且无凭证；恰好扣平（含全 0 元单）
+		// 等同正常卡支付，放行且不建挂账
+		if actualPaid.GreaterThan(discountedTotal) {
+			return echo.NewHTTPError(http.StatusBadRequest, "扣卡金额超过折后应收")
+		}
+		// 挂账单的 discount 是真实折扣（标价-折后应收），未收部分记在 member_credits，
+		// 不混入 discount；与「余额够扣」的正常卡支付口径一致
+		discount = total.Sub(discountedTotal)
+	}
+
 	// 3. 扣卡前置校验
 	// 批量 FOR UPDATE 锁卡：避免 N 张卡 N 次 RTT；ORDER BY id 保证多事务统一加锁顺序，防死锁
 	var primaryCardID *uuid.UUID
 	type allocLine struct {
-		card   sqlc.LockCardsForUpdateRow
+		card   lockedCard
 		deduct decimal.Decimal
 	}
 	allocs := make([]allocLine, 0, len(req.CardAllocations))
@@ -244,20 +245,26 @@ func Create(c *echo.Context) error {
 	}
 
 	if len(req.CardAllocations) > 0 {
-		ids := make([]uuid.UUID, len(req.CardAllocations))
-		for i, a := range req.CardAllocations {
-			ids[i] = a.CardID
-		}
-		// 排序传入也无所谓（PG 端 ORDER BY 也保证），这里冗余排序便于调试日志一致
-		sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
+		cardByID := lockedByID
+		if cardByID == nil {
+			ids := make([]uuid.UUID, len(req.CardAllocations))
+			for i, a := range req.CardAllocations {
+				ids[i] = a.CardID
+			}
+			// 排序传入也无所谓（PG 端 ORDER BY 也保证），这里冗余排序便于调试日志一致
+			sort.Slice(ids, func(i, j int) bool { return bytes.Compare(ids[i][:], ids[j][:]) < 0 })
 
-		rows, err := q.LockCardsForUpdate(ctx, ids)
-		if err != nil {
-			return mw.InternalError(c, "lock cards", err)
-		}
-		cardByID := make(map[uuid.UUID]sqlc.LockCardsForUpdateRow, len(rows))
-		for _, r := range rows {
-			cardByID[r.ID] = r
+			rows, err := q.LockCardsForUpdate(ctx, ids)
+			if err != nil {
+				return mw.InternalError(c, "lock cards", err)
+			}
+			cardByID = make(map[uuid.UUID]lockedCard, len(rows))
+			for _, r := range rows {
+				cardByID[r.ID] = lockedCard{
+					ID: r.ID, MemberID: r.MemberID, Status: r.Status,
+					ExpiresAt: r.ExpiresAt, Balance: r.Balance, CardTypeName: r.CardTypeName,
+				}
+			}
 		}
 
 		// 按 req 原顺序遍历做业务校验 + 保留 primaryCardID 语义（首张卡）
@@ -272,7 +279,7 @@ func Create(c *echo.Context) error {
 			if card.Status != "active" {
 				return echo.NewHTTPError(http.StatusBadRequest, "card is not active: "+card.Status)
 			}
-			if card.ExpiresAt.Valid && card.ExpiresAt.Time.Before(time.Now()) {
+			if cardExpired(card.ExpiresAt) {
 				return echo.NewHTTPError(http.StatusBadRequest, "卡已过期："+card.CardTypeName)
 			}
 			if card.Balance.LessThan(a.Deduct) {
@@ -367,30 +374,169 @@ func Create(c *echo.Context) error {
 		}
 	}
 
-	// 8. 挂账模式：创建 member_credits 记录
-	if pendingMode != "" && req.MemberID != nil {
-		pendingAmount := total.Sub(actualPaid)
-		if pendingAmount.GreaterThan(decimal.Zero) {
-			if _, err := q.CreateCredit(ctx, sqlc.CreateCreditParams{
-				TenantID:    t.ID,
-				MemberID:    *req.MemberID,
-				Amount:      pendingAmount,
-				Summary:     pgtypex.StrPtr(summary),
-				ChargedAt:   txTime,
-				ChargedTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
-			}); err != nil {
-				return mw.InternalError(c, "create pending: ", err)
-			}
-			slog.Info("pending credit created",
-				"member_id", req.MemberID,
-				"amount", pendingAmount,
-				"tx_id", trx.ID,
-				"mode", pendingMode,
-			)
+	// 8. 挂账模式：创建 member_credits 记录（按折后应收，扣掉已实收部分；
+	// 金额为 0 时不建——扣卡恰好扣平或全 0 元单没有账可挂，按普通消费落单）
+	dto := toDTO(trx)
+	if pendingMode != "" && discountedTotal.GreaterThan(actualPaid) {
+		pendingAmount := discountedTotal.Sub(actualPaid)
+		if _, err := q.CreateCredit(ctx, sqlc.CreateCreditParams{
+			TenantID:    t.ID,
+			MemberID:    *req.MemberID,
+			Amount:      pendingAmount,
+			Summary:     pgtypex.StrPtr(summary),
+			ChargedAt:   txTime,
+			ChargedTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
+		}); err != nil {
+			return mw.InternalError(c, "create pending: ", err)
 		}
+		slog.Info("pending credit created",
+			"member_id", req.MemberID,
+			"amount", pendingAmount,
+			"tx_id", trx.ID,
+			"mode", pendingMode,
+		)
+		// 回填挂账额：toast 等前端展示以后端入账值为权威，不再本地估算
+		dto.CreditAmount = pendingAmount
 	}
 
-	return c.JSON(http.StatusCreated, toDTO(trx))
+	return c.JSON(http.StatusCreated, dto)
+}
+
+// itemRow 一行购物项：服务快照 + 数量
+type itemRow struct {
+	svc sqlc.Service
+	qty int32
+}
+
+// lockedCard 扣卡校验所需的卡信息，屏蔽两种 FOR UPDATE 行类型的差异
+type lockedCard struct {
+	ID           uuid.UUID
+	MemberID     uuid.UUID
+	Status       string
+	ExpiresAt    pgtype.Timestamptz
+	Balance      decimal.Decimal
+	CardTypeName string
+}
+
+// computeTotals 校验 items、批量载入服务并求标价合计与 no_discount 合计。
+// Create 与 PendingPreview 共用：合计口径分叉会让预览承诺与入账金额不一致
+func computeTotals(c *echo.Context, q *sqlc.Queries, items []ItemInput) ([]itemRow, decimal.Decimal, decimal.Decimal, error) {
+	if len(items) == 0 {
+		return nil, decimal.Zero, decimal.Zero, echo.NewHTTPError(http.StatusBadRequest, "items is required")
+	}
+	if len(items) > 50 {
+		return nil, decimal.Zero, decimal.Zero, echo.NewHTTPError(http.StatusBadRequest, "最多支持 50 个商品项")
+	}
+	svcIDs := make([]uuid.UUID, 0, len(items))
+	for _, it := range items {
+		if it.Quantity <= 0 {
+			return nil, decimal.Zero, decimal.Zero, echo.NewHTTPError(http.StatusBadRequest, "quantity must be > 0")
+		}
+		svcIDs = append(svcIDs, it.ServiceID)
+	}
+	svcRows, err := q.GetServicesByIDs(c.Request().Context(), svcIDs)
+	if err != nil {
+		return nil, decimal.Zero, decimal.Zero, mw.InternalError(c, "transactions.get_services", err)
+	}
+	svcByID := make(map[uuid.UUID]sqlc.Service, len(svcRows))
+	for _, s := range svcRows {
+		svcByID[s.ID] = s
+	}
+
+	rows := make([]itemRow, 0, len(items))
+	total, noDiscTotal := decimal.Zero, decimal.Zero
+	for _, it := range items {
+		svc, ok := svcByID[it.ServiceID]
+		if !ok {
+			return nil, decimal.Zero, decimal.Zero, echo.NewHTTPError(http.StatusNotFound, "service not found: "+it.ServiceID.String())
+		}
+		line := svc.Price.Mul(decimal.NewFromInt32(it.Quantity))
+		total = total.Add(line)
+		if svc.NoDiscount {
+			noDiscTotal = noDiscTotal.Add(line)
+		}
+		rows = append(rows, itemRow{svc: svc, qty: it.Quantity})
+	}
+	return rows, total, noDiscTotal, nil
+}
+
+// cardExpired 过期判定的唯一比较实现：定价遴选、扣卡校验、清账三处共用，
+// 比较边界（Before now）不许各写各的
+func cardExpired(expiresAt pgtype.Timestamptz) bool {
+	return expiresAt.Valid && expiresAt.Time.Before(time.Now())
+}
+
+// pricingCard 定价所需的最小卡信息，屏蔽两种 sqlc 行类型的差异
+type pricingCard struct {
+	status    string
+	balance   decimal.Decimal
+	rate      decimal.Decimal
+	expiresAt pgtype.Timestamptz
+}
+
+// pendingPricing 挂账定价的唯一权威实现：折扣率取会员「未过期、余额>0 的
+// 活跃卡」中最低者（过期卡不参与：同包的扣卡与清账路径都拒绝过期卡，口径
+// 必须一致），no_discount 项不打折，Round(2)。入账（Create，持卡锁）与
+// 收银页展示（PendingPreview，只读）共用，杜绝承诺与入账分歧
+func pendingPricing(cards []pricingCard, total, noDiscTotal decimal.Decimal) (rate, discountedTotal decimal.Decimal) {
+	rate = decimal.NewFromInt(1)
+	for _, card := range cards {
+		if card.status != "active" || !card.balance.GreaterThan(decimal.Zero) || cardExpired(card.expiresAt) {
+			continue
+		}
+		if card.rate.LessThan(rate) {
+			rate = card.rate
+		}
+	}
+	discountedTotal = total
+	if rate.LessThan(decimal.NewFromInt(1)) {
+		discountedTotal = noDiscTotal.Add(total.Sub(noDiscTotal).Mul(rate)).Round(2)
+	}
+	return rate, discountedTotal
+}
+
+type PendingPreviewRequest struct {
+	MemberID *uuid.UUID  `json:"member_id"`
+	Items    []ItemInput `json:"items"`
+}
+
+// PendingPreview POST /api/transactions/pending-preview
+// 挂账定价预览：只读不加锁，收银页的挂账金额展示以此为准
+func PendingPreview(c *echo.Context) error {
+	var req PendingPreviewRequest
+	if err := c.Bind(&req); err != nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
+	}
+	if req.MemberID == nil {
+		return echo.NewHTTPError(http.StatusBadRequest, "member_id is required")
+	}
+
+	ctx := c.Request().Context()
+	q := sqlc.New(mw.TxFrom(c))
+
+	// 空购物车合法：收银页选中会员后即拉折扣率给服务按钮的折后提示用
+	total, noDiscTotal := decimal.Zero, decimal.Zero
+	if len(req.Items) > 0 {
+		var err error
+		_, total, noDiscTotal, err = computeTotals(c, q, req.Items)
+		if err != nil {
+			return err
+		}
+	}
+	cardRows, err := q.ListCardsByMember(ctx, *req.MemberID)
+	if err != nil {
+		return mw.InternalError(c, "preview.list_cards", err)
+	}
+	cards := make([]pricingCard, 0, len(cardRows))
+	for _, cr := range cardRows {
+		cards = append(cards, pricingCard{status: cr.Status, balance: cr.Balance, rate: cr.FinalDiscountRate, expiresAt: cr.ExpiresAt})
+	}
+	rate, discountedTotal := pendingPricing(cards, total, noDiscTotal)
+	return c.JSON(http.StatusOK, map[string]any{
+		"total":            total,
+		"discounted_total": discountedTotal,
+		"rate":             rate,
+	})
 }
 
 // checkRefsBelongToTenant 用 RLS 范围内的 SELECT 校验外键引用归属本租户。
@@ -622,7 +768,7 @@ func SettleCredit(c *echo.Context) error {
 		if card.Status != "active" {
 			return echo.NewHTTPError(http.StatusBadRequest, "card not active")
 		}
-		if card.ExpiresAt.Valid && card.ExpiresAt.Time.Before(time.Now()) {
+		if cardExpired(card.ExpiresAt) {
 			return echo.NewHTTPError(http.StatusBadRequest, "卡已过期")
 		}
 		if card.Balance.LessThan(credit.Amount) {

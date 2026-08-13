@@ -146,6 +146,57 @@ func (q *Queries) ListCardsByMember(ctx context.Context, memberID uuid.UUID) ([]
 	return items, nil
 }
 
+const listCardsByMemberForUpdate = `-- name: ListCardsByMemberForUpdate :many
+SELECT c.id, c.member_id, c.final_discount_rate, c.balance, c.status, c.expires_at,
+       ct.name AS card_type_name
+FROM cards c
+JOIN card_types ct ON ct.id = c.card_type_id
+WHERE c.member_id = $1
+ORDER BY c.id
+FOR UPDATE OF c
+`
+
+type ListCardsByMemberForUpdateRow struct {
+	ID                uuid.UUID          `json:"id"`
+	MemberID          uuid.UUID          `json:"member_id"`
+	FinalDiscountRate decimal.Decimal    `json:"final_discount_rate"`
+	Balance           decimal.Decimal    `json:"balance"`
+	Status            string             `json:"status"`
+	ExpiresAt         pgtype.Timestamptz `json:"expires_at"`
+	CardTypeName      string             `json:"card_type_name"`
+}
+
+// 挂账定价路径：先锁会员全部卡再取折扣率，防并发把卡扣空/作废后仍按旧折扣入账
+// 带 member_id / card_type_name：挂账分支的扣卡校验直接复用锁行，不再二次 SELECT
+// ORDER BY c.id 与 LockCardsForUpdate 同序加锁，防死锁
+func (q *Queries) ListCardsByMemberForUpdate(ctx context.Context, memberID uuid.UUID) ([]ListCardsByMemberForUpdateRow, error) {
+	rows, err := q.db.Query(ctx, listCardsByMemberForUpdate, memberID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var items []ListCardsByMemberForUpdateRow
+	for rows.Next() {
+		var i ListCardsByMemberForUpdateRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.MemberID,
+			&i.FinalDiscountRate,
+			&i.Balance,
+			&i.Status,
+			&i.ExpiresAt,
+			&i.CardTypeName,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const lockCardForUpdate = `-- name: LockCardForUpdate :one
 SELECT
   c.id, c.tenant_id, c.member_id, c.card_type_id,

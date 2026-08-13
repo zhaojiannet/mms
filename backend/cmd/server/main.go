@@ -237,6 +237,11 @@ func main() {
 	// 员工查询限流：仅 role=staff 生效，admin/super_admin 不受限
 	// 覆盖会员/交易 list + detail，防止通过 :id 逐个枚举绕过 List 的 search≥3 限制
 	staffReadLimit := mw.RateLimitStaffOnly(30, time.Minute)
+	// 挂账定价预览独立限流桶：收银页购物车每次变动发一次（250ms 防抖），
+	// 与会员搜索 / 流水共桶会在连续开单时把整个 POS 429 到限流窗口结束。
+	// 额度给到 120：只读轻查询，30 次在余额不足会员上反复增删项目即可耗尽，
+	// 耗尽后挂账入口被 previewReady 门控锁死到窗口结束
+	previewLimit := mw.RateLimitStaffOnly(120, time.Minute)
 
 	// --------------- 会员 ---------------
 	// staff 可查、可创建（录入新会员）；编辑/删除需 admin（防离职员工批量改 phone 劫持续费通知）
@@ -287,6 +292,8 @@ func main() {
 	// --------------- 交易 ---------------
 	secured.GET("/transactions", transactions.List, staffReadLimit)
 	secured.POST("/transactions", transactions.Create)
+	// 挂账定价预览：只读，与 Create 共用同一定价函数
+	secured.POST("/transactions/pending-preview", transactions.PendingPreview, previewLimit)
 	secured.GET("/transactions/:id", transactions.Get, staffReadLimit)
 	// 交易撤销：仅 super_admin（敏感操作）
 	superOnly.POST("/transactions/:id/void", transactions.Void)

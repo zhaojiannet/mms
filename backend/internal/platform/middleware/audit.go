@@ -129,6 +129,11 @@ func shouldAuditRequest(method, path string) (record, readBody bool) {
 		strings.HasSuffix(path, "/refresh") || strings.HasSuffix(path, "/logout") {
 		return false, false
 	}
+	// 挂账定价预览是只读查询（POST 仅为带 body），购物车每次变动都调，
+	// 全量入审计会用键击级噪音淹没 append-only 审计表里的真实写操作
+	if strings.HasSuffix(path, "/transactions/pending-preview") {
+		return false, false
+	}
 	return true, true
 }
 
