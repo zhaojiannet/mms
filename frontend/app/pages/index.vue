@@ -28,7 +28,7 @@
 
       <!-- 右：KPI 紧贴通知按钮；md 显示今日+挂账，lg 显示全部 4 项 -->
       <div class="flex items-center gap-4 shrink-0">
-        <div class="hidden md:flex items-center gap-3 text-sm tabular-nums">
+        <div v-if="canSeeKpi" class="hidden md:flex items-center gap-3 text-sm tabular-nums">
           <div class="flex items-baseline gap-1.5">
             <span class="text-xs text-stone-500">今日</span>
             <span class="font-semibold text-stone-900 dark:text-stone-100">¥{{ kpi.todaySaleRevenue }}</span>
@@ -105,7 +105,7 @@
 
     <!-- 主体：POS 收银工作区 -->
     <div class="px-6 py-5 max-w-7xl mx-auto">
-      <PosWorkbench />
+      <PosWorkbench @settled="loadKpi" />
     </div>
   </div>
 </template>
@@ -132,7 +132,13 @@ const kpi = reactive({
   pending: '0',
 })
 
+// KPI 全部来自 /api/reports/*，后端限 admin 及以上；staff 请求必 403，
+// 拿不到数据时展示 ¥0 会被当成「今天没生意」，所以对 staff 整块隐藏、也不发请求
+const auth = useAuthStore()
+const canSeeKpi = computed(() => isAtLeastAdmin(auth.user?.role))
+
 async function loadKpi() {
+  if (!canSeeKpi.value) return
   try {
     // 本地日期（非 toISOString 的 UTC 日期）：凌晨 0-8 点 UTC 日期是昨天，会查错业务日
     const now = new Date()
@@ -162,6 +168,8 @@ async function loadKpi() {
   }
 }
 onMounted(loadKpi)
+// 兜底轮询：同事在别的终端开单 / 撤单后，这里一分钟内跟上（与今日记录同频）
+useIntervalFn(loadKpi, 60 * 1000)
 
 // 祝福语：从 useGreeting composable 取（可被 PosWorkbench 结算成功时刷新）
 const { greeting, refresh: refreshGreeting } = useGreeting()

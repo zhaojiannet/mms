@@ -527,16 +527,22 @@
           </div>
           <div v-else-if="isMemberCardPay && member && allocationPlan.length === 0 && items.length > 0" class="px-4 pb-3">
             <div class="p-3 rounded-lg bg-warning-50/60 dark:bg-warning-950/20 ring-1 ring-warning-200 dark:ring-warning-800 space-y-2.5">
+              <!-- 两个数字都是标价口径：可抵金额来自扣款方案同一处计算，
+                   与本单金额直接可比，不会出现「余额比应付多却说不足」 -->
               <div class="text-sm text-warning-700 dark:text-warning-300">
-                {{ manualCardMode && manualCardId ? '所选会员卡余额不足' : '会员卡余额不足以完成扣款' }}（余额 ¥{{ availableBalanceLabel }}，应付 {{ previewReady ? `¥${discountedTotal.toFixed(2)}` : (previewFailed ? '计算失败' : '计算中…') }}）
-                <UButton v-if="!previewReady && previewFailed" size="xs" variant="ghost" color="warning" icon="i-lucide-refresh-cw" class="ml-1" @click="retryPreview()">重试</UButton>
+                {{ manualCardMode && manualCardId ? '所选会员卡' : '会员卡余额' }}最多可抵 ¥{{ cardCoverage.coverable.toFixed(2) }}，本单 ¥{{ total.toFixed(2) }}
               </div>
-              <div v-if="manualCardMode && manualCardId && parseFloat(memberTotalBalance) >= discountedTotal" class="text-xs text-warning-600 dark:text-warning-400">
-                该会员其他卡还有余额，关掉「手动选卡」可自动分配扣款
+              <div v-if="autoCanCover" class="text-xs text-warning-600 dark:text-warning-400">
+                该会员其他卡还有余额，关掉「手动选卡」即可刷卡付清
               </div>
               <div class="flex items-center gap-2">
                 <UButton size="xs" variant="soft" color="neutral" @click="pendingMode = ''; selectOtherPm()">选择其他支付方式</UButton>
                 <UButton size="xs" variant="soft" color="warning" :disabled="!previewReady" @click="pendingMode = 'full'">挂账</UButton>
+                <!-- 挂账金额由后端定价，未拿到前按钮禁用，这里交代原因并给出重试 -->
+                <span v-if="!previewReady" class="text-xs text-warning-600 dark:text-warning-400">
+                  {{ previewFailed ? '挂账金额计算失败' : '挂账金额计算中…' }}
+                </span>
+                <UButton v-if="!previewReady && previewFailed" size="xs" variant="ghost" color="warning" icon="i-lucide-refresh-cw" @click="retryPreview()">重试</UButton>
               </div>
               <div v-if="pendingMode" class="pt-2 border-t border-warning-200/60 dark:border-warning-800">
                 <URadioGroup
@@ -760,6 +766,9 @@
 </template>
 
 <script setup lang="ts">
+// settled：本页任何入账变动（结算 / 撤单）后触发，供首页立即重算顶部 KPI
+const emit = defineEmits<{ settled: [] }>()
+
 const api = useApi()
 const route = useRoute()
 const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
@@ -767,6 +776,8 @@ const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
 interface Service { id: string; name: string; price: string; no_discount: boolean; sort_order: number; status: string }
 interface Member { id: string; name: string; phone: string | null; status?: string; total_balance?: string; total_pending?: string; card_count?: number }
 interface Card { id: string; card_type_name: string; balance: string; final_discount_rate: string; status: string; expires_at: string | null }
+// 扣款方案与「卡最多能抵的标价」，由 cardCoverage 一次算出
+interface CardCoverage { plan: { card_id: string; deduct: string }[]; coverable: number }
 // 可用卡判据用共享的 utils/cards.ts isUsableCard（清账选卡器同源），此处不再内联
 interface PaymentMethod { id: string; name: string }
 interface Staff { id: string; name: string; position: string }
@@ -1034,6 +1045,7 @@ async function doVoid() {
     voidOpen.value = false
     // 撤销改变实收合计与卡余额：整体重拉今日记录（撤单后 updated_at 变化，ETag 必失效拿到新数据）
     fetchTodayTx()
+    emit('settled')
     if (member.value) {
       await loadMemberCards(member.value.id)
       const sum = memberCards.value.reduce((s, c) => s + parseFloat(c.balance), 0)
@@ -1044,10 +1056,9 @@ async function doVoid() {
   } finally { voidLoading.value = false }
 }
 
-function autoAllocate(): { card_id: string; deduct: string }[] {
-  if (!isMemberCardPay.value || !member.value) return []
-  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+// 自动分配：按折扣率从低到高用卡。同时给出「卡最多能抵多少标价」——
+// 它与分配方案必须同源，分头计算就会出现「余额比应付多却说余额不足」
+function autoAllocate(discountable: number, noDiscount: number): CardCoverage {
   const cards = [...memberCards.value]
     .filter(c => parseFloat(c.balance) > 0)
     .sort((a, b) => parseFloat(a.final_discount_rate) - parseFloat(b.final_discount_rate) || parseFloat(b.balance) - parseFloat(a.balance))
@@ -1071,26 +1082,45 @@ function autoAllocate(): { card_id: string; deduct: string }[] {
     // 半分以下的 deduct 是上一张卡的浮点残渣，push 会产生 ¥0.00 的幽灵分配行
     if (deduct >= 0.005) result.push({ card_id: c.id, deduct: deduct.toFixed(2) })
   }
+  const uncovered = Math.max(0, remainNoDiscount) + Math.max(0, remainDiscountable)
+  const coverable = Math.max(0, noDiscount + discountable - uncovered)
   // 半分以下的剩余是浮点残渣，不是真缺口：按此判「不足」会把余额恰好够扣的
   // 单（如 33.33×0.85 对 28.33 余额）错推进挂账
-  if (remainNoDiscount > 0.005 || remainDiscountable > 0.005) return []
-  return result
+  if (uncovered > 0.005) return { plan: [], coverable }
+  return { plan: result, coverable }
 }
 
-const allocationPlan = computed<{ card_id: string; deduct: string }[]>(() => {
-  if (!isMemberCardPay.value || !member.value || items.value.length === 0) return []
+// 卡的覆盖能力：扣款方案 + 最多能抵的标价金额，一次算清。
+// 余额不足横幅拿 coverable、结算拿 plan，同源保证两者永远说得通
+const cardCoverage = computed<CardCoverage>(() => {
+  if (!isMemberCardPay.value || !member.value || items.value.length === 0) return { plan: [], coverable: 0 }
+  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+  const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
   if (manualCardMode.value && manualCardId.value) {
     const c = memberCards.value.find(x => x.id === manualCardId.value)
-    if (!c) return []
+    if (!c) return { plan: [], coverable: 0 }
     const rate = parseFloat(c.final_discount_rate)
-    const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-    const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+    const bal = parseFloat(c.balance)
     // 按分舍入后再与余额比较：未舍入浮点会在半分边界把够扣判成不足
     const need = Math.round((noDiscount + discountable * rate) * 100) / 100
-    if (parseFloat(c.balance) < need) return []
-    return [{ card_id: c.id, deduct: need.toFixed(2) }]
+    if (bal >= need) return { plan: [{ card_id: c.id, deduct: need.toFixed(2) }], coverable: total.value }
+    // 付不动：这张卡最多抵多少标价——先抵不打折的项，剩下的按折扣率放大
+    const forNoDisc = Math.min(noDiscount, bal)
+    const rest = bal - forNoDisc
+    return { plan: [], coverable: Math.min(total.value, forNoDisc + (rate > 0 ? rest / rate : 0)) }
   }
-  return autoAllocate()
+  return autoAllocate(discountable, noDiscount)
+})
+
+const allocationPlan = computed(() => cardCoverage.value.plan)
+
+// 手选卡付不动时，自动分配能否覆盖——能就提示关掉手选，别白挂账
+const autoCanCover = computed(() => {
+  if (!manualCardMode.value || !manualCardId.value) return false
+  if (!isMemberCardPay.value || !member.value || items.value.length === 0) return false
+  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+  const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+  return autoAllocate(discountable, noDiscount).plan.length > 0
 })
 
 const previewRate = computed(() => {
@@ -1270,16 +1300,6 @@ const useBalanceAllocations = computed<{ card_id: string; deduct: string }[]>(()
 
 const useBalanceDeduct = computed(() =>
   useBalanceAllocations.value.reduce((s, a) => s + parseFloat(a.deduct), 0))
-
-// 余额不足横幅里的可用余额：手选卡时只有那张卡能扣，显示全卡合计会自相矛盾
-// （合计 50.4 够付 14，横幅却说余额不足）
-const availableBalanceLabel = computed(() => {
-  if (manualCardMode.value && manualCardId.value) {
-    const c = memberCards.value.find(x => x.id === manualCardId.value)
-    return c ? parseFloat(c.balance).toFixed(2) : '0.00'
-  }
-  return memberTotalBalance.value
-})
 
 function selectOtherPm() {
   const cash = paymentMethods.value.find(p => p.name === '现金')
@@ -1585,9 +1605,10 @@ async function submit() {
     useCustomTime.value = false
     transactionTime.value = ''
     pendingMode.value = ''
-    // 结账成功 → 换一句祝福语（仪式感 + 正反馈）+ 刷新今日记录
+    // 结账成功 → 换一句祝福语（仪式感 + 正反馈）+ 刷新今日记录 + 顶部 KPI
     useGreeting().refresh()
     fetchTodayTx()
+    emit('settled')
   } catch (e: any) {
     err.value = e?.data?.message || '结账失败'
   } finally { submitting.value = false }
