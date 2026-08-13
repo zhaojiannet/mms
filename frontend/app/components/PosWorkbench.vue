@@ -27,6 +27,7 @@
                   </span>
                   <span class="inline-flex items-baseline gap-1 text-stone-500">
                     共 {{ memberCards.length }} 张卡
+                    <span v-if="expiredCardCount > 0" class="text-warning-600 dark:text-warning-400">（另有 {{ expiredCardCount }} 张已过期）</span>
                   </span>
                   <span v-if="parseFloat(member.total_pending ?? '0') > 0" class="inline-flex items-baseline gap-1.5">
                     <span class="text-stone-500">未结挂账</span>
@@ -475,7 +476,9 @@
             <!-- 实付金额：可点击改价；金额本身大字，旁边明显"改价"按钮提示可操作 -->
             <div class="flex items-baseline justify-between pt-2 mt-1 border-t border-stone-200/60 dark:border-stone-800">
               <div class="flex items-center gap-2">
-                <span class="text-sm font-medium text-stone-700 dark:text-stone-300">实付金额</span>
+                <!-- 挂账态这个数字是应收（客人欠多少的依据），不是收银台收到的钱：
+                     use_balance 下实收为扣卡额、full 下为 0，标签必须如实说明 -->
+                <span class="text-sm font-medium text-stone-700 dark:text-stone-300">{{ pendingMode ? '本单应收' : '实付金额' }}</span>
                 <UBadge v-if="useManualPrice" label="已改价" color="warning" variant="soft" size="xs" />
               </div>
               <!-- 会员卡支付实付由扣卡方案决定，不开放改价（后端也互斥拒绝两者同发） -->
@@ -498,7 +501,7 @@
                     <p v-if="manualPriceError" class="text-xs text-error-600 dark:text-error-400">{{ manualPriceError }}</p>
                     <div class="flex gap-1.5 pt-1">
                       <UButton size="xs" color="primary" :disabled="!manualPrice || !manualReason || !!manualPriceError" @click="useManualPrice = true">应用</UButton>
-                      <UButton v-if="useManualPrice" size="xs" variant="ghost" color="neutral" @click="useManualPrice = false; manualPrice = ''; manualReason = ''">恢复</UButton>
+                      <UButton v-if="useManualPrice" size="xs" variant="ghost" color="neutral" @click="resetManualPrice()">恢复</UButton>
                     </div>
                   </div>
                 </template>
@@ -520,25 +523,26 @@
             </div>
           </div>
           <div v-else-if="isMemberCardPay && member && memberCards.length === 0" class="px-4 pb-3 text-xs text-warning-600">
-            该会员无可用卡，请改其他支付方式
+            {{ expiredCardCount > 0 ? `该会员无可用卡（其中 ${expiredCardCount} 张已过期），请改其他支付方式` : '该会员无可用卡，请改其他支付方式' }}
           </div>
           <div v-else-if="isMemberCardPay && member && allocationPlan.length === 0 && items.length > 0" class="px-4 pb-3">
             <div class="p-3 rounded-lg bg-warning-50/60 dark:bg-warning-950/20 ring-1 ring-warning-200 dark:ring-warning-800 space-y-2.5">
               <div class="text-sm text-warning-700 dark:text-warning-300">
-                会员卡余额不足（余额 ¥{{ memberTotalBalance }}，应付 ¥{{ discountedTotal.toFixed(2) }}）
+                {{ manualCardMode && manualCardId ? '所选会员卡余额不足' : '会员卡余额不足以完成扣款' }}（余额 ¥{{ availableBalanceLabel }}，应付 {{ previewReady ? `¥${discountedTotal.toFixed(2)}` : (previewFailed ? '计算失败' : '计算中…') }}）
+                <UButton v-if="!previewReady && previewFailed" size="xs" variant="ghost" color="warning" icon="i-lucide-refresh-cw" class="ml-1" @click="retryPreview()">重试</UButton>
+              </div>
+              <div v-if="manualCardMode && manualCardId && parseFloat(memberTotalBalance) >= discountedTotal" class="text-xs text-warning-600 dark:text-warning-400">
+                该会员其他卡还有余额，关掉「手动选卡」可自动分配扣款
               </div>
               <div class="flex items-center gap-2">
                 <UButton size="xs" variant="soft" color="neutral" @click="pendingMode = ''; selectOtherPm()">选择其他支付方式</UButton>
-                <UButton size="xs" variant="soft" color="warning" @click="pendingMode = 'full'">挂账</UButton>
+                <UButton size="xs" variant="soft" color="warning" :disabled="!previewReady" @click="pendingMode = 'full'">挂账</UButton>
               </div>
               <div v-if="pendingMode" class="pt-2 border-t border-warning-200/60 dark:border-warning-800">
                 <URadioGroup
                   v-model="pendingMode"
                   orientation="horizontal"
-                  :items="[
-                    { value: 'full', label: `全额挂账 ¥${discountedTotal.toFixed(2)}` },
-                    { value: 'use_balance', label: `利用余额（扣卡 ¥${memberTotalBalance} + 挂账 ¥${(discountedTotal - parseFloat(memberTotalBalance)).toFixed(2)}）` },
-                  ]"
+                  :items="pendingOptions"
                 />
               </div>
             </div>
@@ -762,7 +766,8 @@ const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
 
 interface Service { id: string; name: string; price: string; no_discount: boolean; sort_order: number; status: string }
 interface Member { id: string; name: string; phone: string | null; status?: string; total_balance?: string; total_pending?: string; card_count?: number }
-interface Card { id: string; card_type_name: string; balance: string; final_discount_rate: string; status: string }
+interface Card { id: string; card_type_name: string; balance: string; final_discount_rate: string; status: string; expires_at: string | null }
+// 可用卡判据用共享的 utils/cards.ts isUsableCard（清账选卡器同源），此处不再内联
 interface PaymentMethod { id: string; name: string }
 interface Staff { id: string; name: string; position: string }
 
@@ -775,6 +780,8 @@ const walkInName = ref('')
 const memberSearch = ref('')
 const memberOptions = ref<Member[]>([])
 const memberCards = ref<Card[]>([])
+// 已过期的活跃卡数量：不可用但要在界面上交代，避免「卡怎么不见了」
+const expiredCardCount = ref(0)
 
 const svcSearch = ref('')
 const svcDropdownOpen = ref(false)
@@ -1028,8 +1035,7 @@ async function doVoid() {
     // 撤销改变实收合计与卡余额：整体重拉今日记录（撤单后 updated_at 变化，ETag 必失效拿到新数据）
     fetchTodayTx()
     if (member.value) {
-      const cards = await api<{ items: Card[] }>(`/api/members/${member.value.id}/cards`)
-      memberCards.value = cards.items.filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
+      await loadMemberCards(member.value.id)
       const sum = memberCards.value.reduce((s, c) => s + parseFloat(c.balance), 0)
       member.value = { ...member.value, total_balance: sum.toFixed(2) }
     }
@@ -1062,9 +1068,12 @@ function autoAllocate(): { card_id: string; deduct: string }[] {
       const take = Math.min(remainDiscountable, maxCoverable)
       deduct += take * rate; remainDiscountable -= take
     }
-    if (deduct > 0) result.push({ card_id: c.id, deduct: deduct.toFixed(2) })
+    // 半分以下的 deduct 是上一张卡的浮点残渣，push 会产生 ¥0.00 的幽灵分配行
+    if (deduct >= 0.005) result.push({ card_id: c.id, deduct: deduct.toFixed(2) })
   }
-  if (remainNoDiscount > 0 || remainDiscountable > 0) return []
+  // 半分以下的剩余是浮点残渣，不是真缺口：按此判「不足」会把余额恰好够扣的
+  // 单（如 33.33×0.85 对 28.33 余额）错推进挂账
+  if (remainNoDiscount > 0.005 || remainDiscountable > 0.005) return []
   return result
 }
 
@@ -1076,7 +1085,8 @@ const allocationPlan = computed<{ card_id: string; deduct: string }[]>(() => {
     const rate = parseFloat(c.final_discount_rate)
     const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
     const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-    const need = noDiscount + discountable * rate
+    // 按分舍入后再与余额比较：未舍入浮点会在半分边界把够扣判成不足
+    const need = Math.round((noDiscount + discountable * rate) * 100) / 100
     if (parseFloat(c.balance) < need) return []
     return [{ card_id: c.id, deduct: need.toFixed(2) }]
   }
@@ -1085,12 +1095,23 @@ const allocationPlan = computed<{ card_id: string; deduct: string }[]>(() => {
 
 const previewRate = computed(() => {
   if (!isMemberCardPay.value || !member.value || memberCards.value.length === 0) return 1
-  if (manualCardMode.value && manualCardId.value) {
+  // 手选卡折扣率只在该卡真付得动时用于行级预览；付不动只剩挂账一条路，
+  // 行级与挂账金额统一按后端定价的 rate，避免同屏两套折扣对不上。
+  // memberRate 只随会员变化，购物车编辑期间行级提示不再闪没
+  if (manualCardMode.value && manualCardId.value && allocationPlan.value.length > 0) {
     const c = memberCards.value.find(x => x.id === manualCardId.value)
     return c ? parseFloat(c.final_discount_rate) : 1
   }
+  if (memberRate.value?.memberId === member.value.id) return memberRate.value.rate
+  // 预览未回来或失败时按本地最优折扣率估算：这里只驱动行级「折后 ¥」预览，
+  // 回退成原价等于告诉收银员没有折扣，比估算差 1 分严重得多。
+  // 入账与挂账金额始终取后端 discountedTotal，不受这里影响
+  return localBestRate.value
+})
+
+// 本地最优折扣率，规则同后端 pendingPricing：可用卡里取最低
+const localBestRate = computed(() => {
   const best = [...memberCards.value]
-    .filter(c => parseFloat(c.balance) > 0)
     .sort((a, b) => parseFloat(a.final_discount_rate) - parseFloat(b.final_discount_rate))[0]
   return best ? parseFloat(best.final_discount_rate) : 1
 })
@@ -1109,6 +1130,9 @@ const discount = computed(() => {
     return isNaN(mp) ? 0 : total.value - mp
   }
   if (!isMemberCardPay.value) return 0
+  // 挂账态：实付大字与结算按钮显示折后应收（实收 0 的口径在提示条里说明），
+  // 不再残留标价全额误导收银员报价
+  if (pendingMode.value) return total.value - discountedTotal.value
   const totalDeduct = allocationPlan.value.reduce((s, a) => s + parseFloat(a.deduct), 0)
   if (totalDeduct === 0) return 0
   return total.value - totalDeduct
@@ -1143,18 +1167,72 @@ watch(
 
 // 切到会员卡支付时清掉残留改价：改价只属于非卡支付，同发会被后端互斥校验拒绝
 watch(isMemberCardPay, (v) => {
-  if (v && useManualPrice.value) {
-    useManualPrice.value = false
-    manualPrice.value = ''
-    manualReason.value = ''
-  }
+  if (v && useManualPrice.value) resetManualPrice()
 })
 
+// 挂账定价预览：定价公式（折扣率遴选 + no_discount 拆分 + 舍入）只在后端
+// `pendingPricing` 一份，前端不自行实现——展示的挂账金额与入账金额同源。
+// 请求收敛成两层，避免购物车每次变动都打接口（曾把 staff 限流桶打满锁死挂账）：
+//   - memberRate：会员级折扣率（空 items 预览），每个会员取一次，行级折后提示用；
+//     取不到时下次输入变动自动重试
+//   - pendingPreview：含购物车的全量预览，仅在分配不出方案（挂账语境）时按购物车变化拉取
+// 序号防竞态：输入变化即作废在途响应，只采纳最新一次；失败置标记供横幅重试
+const memberRate = ref<{ memberId: string; rate: number } | null>(null)
+const pendingPreview = ref<{ discounted_total: string; rate: string } | null>(null)
+const previewFailed = ref(false)
+let previewSeq = 0
+const previewReady = computed(() => pendingPreview.value !== null)
+const inPendingContext = computed(() =>
+  isMemberCardPay.value && !!member.value && items.value.length > 0 && allocationPlan.value.length === 0)
+const fetchPendingPreview = useDebounceFn(async () => {
+  if (!isMemberCardPay.value || !member.value) return
+  const seq = ++previewSeq
+  const memberId = member.value.id
+  const wantFull = inPendingContext.value
+  try {
+    const res = await api<{ discounted_total: string; rate: string }>('/api/transactions/pending-preview', {
+      method: 'POST',
+      body: {
+        member_id: memberId,
+        items: wantFull ? items.value.map(i => ({ service_id: i.id, quantity: i.quantity })) : [],
+      },
+    })
+    if (seq === previewSeq) {
+      memberRate.value = { memberId, rate: parseFloat(res.rate) }
+      if (wantFull) pendingPreview.value = res
+      previewFailed.value = false
+    }
+  } catch {
+    if (seq === previewSeq) previewFailed.value = true
+  }
+}, 250)
+// 手选卡也要监听：切到一张余额不够的卡会让 allocationPlan 变空从而进入挂账语境，
+// 不监听就永远停在「计算中…」且挂账按钮点不动
+watch(
+  [items, member, memberCards, isMemberCardPay, manualCardMode, manualCardId],
+  () => {
+    pendingPreview.value = null
+    previewFailed.value = false
+    previewSeq++
+    const needRate = !!member.value && memberRate.value?.memberId !== member.value.id
+    if (isMemberCardPay.value && member.value && (needRate || inPendingContext.value)) {
+      fetchPendingPreview()
+    }
+  },
+  { deep: true },
+)
+
+// 重试先清失败标记：否则点了按钮界面纹丝不动（仍显示「计算失败」），
+// 收银员无从判断是否点中
+function retryPreview() {
+  previewFailed.value = false
+  fetchPendingPreview()
+}
+
+// 折后应收：仅在预览就绪后有意义；未就绪时回退标价，挂账入口由 previewReady 把关
 const discountedTotal = computed(() => {
-  if (!isMemberCardPay.value || previewRate.value >= 1) return total.value
-  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  const noDiscount = items.value.filter(i => i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  return noDiscount + discountable * previewRate.value
+  if (!isMemberCardPay.value || !pendingPreview.value) return total.value
+  return parseFloat(pendingPreview.value.discounted_total)
 })
 
 const memberTotalBalance = computed(() => {
@@ -1164,14 +1242,43 @@ const memberTotalBalance = computed(() => {
     .toFixed(2)
 })
 
+// 挂账方式选项：扣卡额达到折后应收时「利用余额」无账可挂（差额 ≤ 0），
+// 不提供该选项，后端同样会 400 拒绝这种请求
+const pendingOptions = computed(() => {
+  const opts = [{ value: 'full', label: `全额挂账 ¥${discountedTotal.value.toFixed(2)}` }]
+  // 挂账差额按实际扣卡合计算（受 10 张卡上限约束），不是全部余额
+  const gap = discountedTotal.value - useBalanceDeduct.value
+  if (gap > 0) {
+    opts.push({ value: 'use_balance', label: `利用余额（扣卡 ¥${useBalanceDeduct.value.toFixed(2)} + 挂账 ¥${gap.toFixed(2)}）` })
+  }
+  return opts
+})
+
 const useBalanceAllocations = computed<{ card_id: string; deduct: string }[]>(() => {
   if (!member.value || memberCards.value.length === 0) return []
-  const result: { card_id: string; deduct: string }[] = []
-  for (const c of memberCards.value) {
-    const bal = parseFloat(c.balance)
-    if (bal > 0) result.push({ card_id: c.id, deduct: bal.toFixed(2) })
+  // 手选卡时只扣选中那张：收银员明确排除的卡不能被「利用余额」顺手扣走
+  if (manualCardMode.value && manualCardId.value) {
+    const c = memberCards.value.find(x => x.id === manualCardId.value)
+    return c ? [{ card_id: c.id, deduct: parseFloat(c.balance).toFixed(2) }] : []
   }
-  return result
+  // 后端最多接受 10 张卡组合支付：按余额降序取前 10，小额卡多的会员不至于整条路 400
+  return [...memberCards.value]
+    .sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance))
+    .slice(0, 10)
+    .map(c => ({ card_id: c.id, deduct: parseFloat(c.balance).toFixed(2) }))
+})
+
+const useBalanceDeduct = computed(() =>
+  useBalanceAllocations.value.reduce((s, a) => s + parseFloat(a.deduct), 0))
+
+// 余额不足横幅里的可用余额：手选卡时只有那张卡能扣，显示全卡合计会自相矛盾
+// （合计 50.4 够付 14，横幅却说余额不足）
+const availableBalanceLabel = computed(() => {
+  if (manualCardMode.value && manualCardId.value) {
+    const c = memberCards.value.find(x => x.id === manualCardId.value)
+    return c ? parseFloat(c.balance).toFixed(2) : '0.00'
+  }
+  return memberTotalBalance.value
 })
 
 function selectOtherPm() {
@@ -1184,6 +1291,8 @@ const canSubmit = computed(() => {
   if (isMemberCardPay.value) {
     if (!member.value) return false
     if (allocationPlan.value.length === 0 && !pendingMode.value) return false
+    // 挂账金额来自后端定价预览，未就绪不放行提交（防止按过期数字承诺）
+    if (pendingMode.value && !previewReady.value) return false
   }
   return true
 })
@@ -1275,6 +1384,7 @@ function displayRate(r: string) { const n = parseFloat(r); return (Math.round(n 
 function clearMember() {
   member.value = null
   memberCards.value = []
+  expiredCardCount.value = 0
   manualCardId.value = ''
   manualCardMode.value = false
   if (isMemberCardPay.value) {
@@ -1336,13 +1446,22 @@ function handleEnter() {
   }
 }
 
+// 载入会员卡：撤单改变余额后也走这里。memberRate 置空强制重取——
+// 卡集合变了最优折扣率可能跟着变，留着旧值会让行级折后提示报错价
+async function loadMemberCards(memberId: string) {
+  const cards = await api<{ items: Card[] }>(`/api/members/${memberId}/cards`)
+  memberCards.value = cards.items.filter(isUsableCard)
+  // 过期卡不可用但要让收银员知道存在，否则「卡去哪了」说不清
+  expiredCardCount.value = cards.items.filter(c => c.status === 'active' && isCardExpired(c)).length
+  memberRate.value = null
+}
+
 async function pickMember(m: Member) {
   member.value = m
   walkInName.value = ''
   memberOptions.value = []
   memberSearch.value = ''
-  const cards = await api<{ items: Card[] }>(`/api/members/${m.id}/cards`)
-  memberCards.value = cards.items.filter(c => c.status === 'active' && parseFloat(c.balance) > 0)
+  await loadMemberCards(m.id)
   if (memberCards.value.length > 0) {
     const mc = paymentMethods.value.find(p => p.name === '会员卡')
     if (mc) selectedPm.value = mc.id
@@ -1374,11 +1493,15 @@ function changeQty(idx: number, delta: number) {
   if (next <= 0) items.value.splice(idx, 1)
   else it.quantity = next
 }
-function clearItems() {
-  items.value = []
+function resetManualPrice() {
   useManualPrice.value = false
   manualPrice.value = ''
   manualReason.value = ''
+}
+
+function clearItems() {
+  items.value = []
+  resetManualPrice()
 }
 
 async function submit() {
@@ -1427,9 +1550,6 @@ async function submit() {
   submitting.value = true
   const settled = actualPaid.value
   const isPending = !!pendingMode.value
-  const pendingAmt = isPending
-    ? (pendingMode.value === 'full' ? discountedTotal.value : discountedTotal.value - parseFloat(memberTotalBalance.value))
-    : 0
   // 客户身份结算后即清空，余额改由提示条带出（收银员当场要回答「我卡里还剩多少」）。
   // 用提交前余额减本单扣卡额本地算，不再查一次接口：那次 await 挂住会让已入账的单子卡在结账中
   const deducted = ((body.card_allocations as { deduct: string }[] | undefined) ?? [])
@@ -1438,18 +1558,21 @@ async function submit() {
     ? `，${member.value.name} 卡内余额 ¥${(parseFloat(memberTotalBalance.value) - deducted).toFixed(2)}`
     : ''
   try {
-    await api('/api/transactions', { method: 'POST', body })
-    if (isPending) {
+    const res = await api<{ credit_amount: string }>('/api/transactions', { method: 'POST', body })
+    // 挂账额用后端入账值：本地估算与 decimal 口径在半分边界会差 1 分。
+    // 后端在折后应收恰好扣平（含全 0 元单）时不建挂账记录，此时如实弹「已记账」
+    const creditAmt = parseFloat(res.credit_amount || '0')
+    if (isPending && creditAmt > 0) {
       toast.add({
         title: '已挂账',
-        description: `挂账 ¥${pendingAmt.toFixed(2)}${pendingMode.value === 'use_balance' ? `，扣卡 ¥${memberTotalBalance.value}` : ''}${balanceTip}`,
+        description: `挂账 ¥${creditAmt.toFixed(2)}${deducted > 0 ? `，扣卡 ¥${deducted.toFixed(2)}` : ''}${balanceTip}`,
         color: 'warning',
         icon: 'i-lucide-clock',
       })
     } else {
       toast.add({
         title: '已记账',
-        description: `本单实收 ¥${settled.toFixed(2)}${balanceTip}`,
+        description: `本单实收 ¥${(isPending ? deducted : settled).toFixed(2)}${balanceTip}`,
         color: 'success',
         icon: 'i-lucide-check-circle',
       })
@@ -1458,9 +1581,7 @@ async function submit() {
     walkInName.value = ''
     items.value = []
     notes.value = ''
-    useManualPrice.value = false
-    manualPrice.value = ''
-    manualReason.value = ''
+    resetManualPrice()
     useCustomTime.value = false
     transactionTime.value = ''
     pendingMode.value = ''
