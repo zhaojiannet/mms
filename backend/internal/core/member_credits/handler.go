@@ -81,16 +81,51 @@ func Create(c *echo.Context) error {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid charged_at: "+err.Error())
 	}
 
+	ctx := c.Request().Context()
 	t := mw.TenantFrom(c)
 	tx := mw.TxFrom(c)
 	q := sqlc.New(tx)
-	m, err := q.CreateCredit(c.Request().Context(), sqlc.CreateCreditParams{
+
+	// 挂账同时登记一条 0 实收交易：收银台挂账走的就是这条路径，只写
+	// member_credits 会让这笔欠款在流水与营业额里彻底看不到。金额口径与
+	// 老系统迁入的挂账一致——标价即挂账额、实收 0、支付方式记「其他」
+	active := true
+	pms, err := q.ListPaymentMethods(ctx, &active)
+	if err != nil {
+		return mw.InternalError(c, "list payment methods: ", err)
+	}
+	otherIdx := -1
+	for i := range pms {
+		if pms[i].Name == "其他" {
+			otherIdx = i
+			break
+		}
+	}
+	if otherIdx < 0 {
+		return echo.NewHTTPError(http.StatusBadRequest, "缺少「其他」支付方式，请先在设置中恢复后再登记挂账")
+	}
+
+	trx, err := q.CreateTransaction(ctx, sqlc.CreateTransactionParams{
+		TenantID:         t.ID,
+		Kind:             "sale",
+		PaymentMethodID:  pms[otherIdx].ID,
+		TotalAmount:      req.Amount,
+		ActualPaidAmount: decimal.Zero,
+		MemberID:         pgtype.UUID{Bytes: memberID, Valid: true},
+		TransactionTime:  chargedAt,
+		Summary:          req.Summary,
+	})
+	if err != nil {
+		return mw.InternalError(c, "create credit transaction: ", err)
+	}
+
+	m, err := q.CreateCredit(ctx, sqlc.CreateCreditParams{
 		TenantID:    t.ID,
 		MemberID:    memberID,
 		Amount:      req.Amount,
 		Summary:     req.Summary,
 		ChargedAt:   chargedAt,
-		ChargedTxID: pgtype.UUID{Valid: false},
+		ChargedTxID: pgtype.UUID{Bytes: trx.ID, Valid: true},
 	})
 	if err != nil {
 		return mw.InternalError(c, "create: ", err)
@@ -118,6 +153,11 @@ func Delete(c *echo.Context) error {
 	}
 	if m.SettledAt.Valid {
 		return echo.NewHTTPError(http.StatusBadRequest, "已清挂账不能直接删除，请走撤单流程")
+	}
+	// 挂账已计入流水与营业额，删掉就是改账，必须留痕：走撤单（记操作人与原因）。
+	// 早期只写挂账表、没有关联交易的历史记录不受此限，仍可直接删
+	if m.ChargedTxID.Valid {
+		return echo.NewHTTPError(http.StatusBadRequest, "该挂账已计入营业流水，请在报表流水或收银记录中撤销对应交易")
 	}
 
 	if err := q.DeleteCredit(c.Request().Context(), id); err != nil {
