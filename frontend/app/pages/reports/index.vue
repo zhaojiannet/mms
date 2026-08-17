@@ -175,7 +175,7 @@
                     >
                       <div class="inline-block cursor-help">
                         <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
-                          <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
+                          <span v-if="strikePrice(t)" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
                           <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                           <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                         </div>
@@ -206,7 +206,7 @@
                     </UPopover>
                     <div v-else class="inline-block">
                       <div class="flex items-baseline justify-end gap-1.5 leading-tight">
-                        <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
+                        <span v-if="strikePrice(t)" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
                         <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                         <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                       </div>
@@ -774,59 +774,7 @@ const txFilters = [
 function kindLabel(k: string) { return (TX_KIND_LABEL as Record<string, string>)[k] ?? k }
 function kindColor(k: string) { return (TX_KIND_COLOR as Record<string, 'primary' | 'info' | 'neutral'>)[k] ?? 'neutral' }
 
-// 挂账登记交易：0 实收 + 关联着一笔挂账（老系统迁入与新系统原生开单同构）
-function isCreditTx(t: Tx) { return parseFloat(t.credit_amount || '0') > 0 }
-
-// 折数：实付/应收 × 10，整数不带小数（8折），否则一位小数（8.5折）
-// 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
-function isMultiCard(t: Tx) {
-  return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
-}
-
-// 加价额：消费单实付高于应付的部分；挂账实付为 0、充值差价是卖卡折扣，均不算
-function surcharge(t: Tx): number {
-  if (t.kind !== 'sale' || isCreditTx(t)) return 0
-  // 原应收优先取明细标价合计：迁移把加价单的 total 抬平到实收，原标价只在明细里
-  const base = parseFloat(t.items_total) > 0 ? parseFloat(t.items_total) : parseFloat(t.total_amount)
-  const d = parseFloat(t.actual_paid_amount) - base
-  return d > 0.001 ? d : 0
-}
-
-// 划线展示的原价：加价单显示明细标价合计（total 已被抬平，划 total 等于没划）
-function strikePrice(t: Tx): string {
-  return surcharge(t) > 0 && parseFloat(t.items_total) > 0 ? t.items_total : t.total_amount
-}
-
-// 多卡分卡明细：直接从结构化余额流水组装（老系统靠 notes 文本，这里比它可靠）
-function multiCardText(t: Tx): string {
-  const parts = (t.card_snapshots || []).filter(s => s.change_type === 'consume')
-  if (parts.length < 2) return ''
-  return '多卡：' + parts
-    .map(s => `${s.card_type_name}¥${(parseFloat(s.balance_before) - parseFloat(s.balance_after)).toFixed(2)}`)
-    .join(' + ')
-}
-
-// 标称折扣率：从卡显示名（"500元储值卡 7折"）提取；多卡取第一张扣款卡
-function nominalRate(t: Tx): number | null {
-  const name = t.card_type_name
-    || (t.card_snapshots || []).find(s => s.change_type === 'consume')?.card_type_name
-  const m = (name || '').match(/([0-9]+(?:\.[0-9])?)\s*折/)
-  return m ? parseFloat(m[1]!) / 10 : null
-}
-
-// 反推率与卡标称折扣吻合才写「N折 省」，否则只写「减」——反推的伪折扣率不展示
-function discountLabel(t: Tx): string {
-  const total = parseFloat(t.total_amount)
-  const paid = parseFloat(t.actual_paid_amount)
-  if (!(total > 0) || paid >= total) return ''
-  const rate = paid / total
-  const nominal = nominalRate(t)
-  if (nominal != null && Math.abs(rate - nominal) < 0.005) {
-    const zhe = Math.round(rate * 100) / 10
-    return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折 省`
-  }
-  return '减'
-}
+// 折扣 / 加价 / 多卡展示逻辑在 useTxDisplay.ts，与 POS 今日记录共用
 
 async function fetchTx(reset = false) {
   if (reset) { txPage.value = 1; txItems.value = [] }
