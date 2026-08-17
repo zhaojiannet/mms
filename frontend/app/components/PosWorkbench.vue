@@ -1171,10 +1171,12 @@ const manualPriceError = computed(() => {
 
 const pendingMode = ref('')
 
-// 挂账决定只对「当时的购物车 / 会员 / 卡分配」有效；任一变化后余额可能重新够扣，
-// 残留的挂账标记会把可正常扣卡的单提交成 0 实收全额挂账，故一律重置
+// 挂账决定只对「当时的购物车 / 会员 / 卡分配 / 本单应收」有效；任一变化后
+// 余额可能重新够扣，残留的挂账标记会把可正常扣卡的单提交成 0 实收全额挂账。
+// 改价也必须在列（它直接改本单应收）：0 元改价还会隐藏整块挂账面板，
+// 残留标记届时既看不见也清不掉，只能撞后端 400
 watch(
-  [items, member, memberCards, selectedPm, manualCardMode, manualCardId],
+  [items, member, memberCards, selectedPm, manualCardMode, manualCardId, useManualPrice, manualPrice],
   () => { pendingMode.value = '' },
   { deep: true },
 )
@@ -1224,9 +1226,11 @@ const fetchPendingPreview = useDebounceFn(async () => {
   }
 }, 250)
 // 手选卡也要监听：切到一张余额不够的卡会让 allocationPlan 变空从而进入挂账语境，
-// 不监听就永远停在「计算中…」且挂账按钮点不动
+// 不监听就永远停在「计算中…」且挂账按钮点不动。
+// 改价同理：改价期间 inPendingContext 恒为假不拉预览，恢复改价后若不重新
+// 触发，挂账按钮会永久卡在「计算中…」且重试按钮也不出现
 watch(
-  [items, member, memberCards, isMemberCardPay, manualCardMode, manualCardId],
+  [items, member, memberCards, isMemberCardPay, manualCardMode, manualCardId, useManualPrice],
   () => {
     pendingPreview.value = null
     previewFailed.value = false
