@@ -22,6 +22,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/decx"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/echox"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/pgtypex"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
@@ -154,41 +155,63 @@ func Create(c *echo.Context) error {
 	if pendingMode == "use_balance" && len(req.CardAllocations) == 0 {
 		return echo.NewHTTPError(http.StatusBadRequest, "利用余额挂账必须携带扣卡分配")
 	}
-	// 互斥：manual_price 接管实收后若仍按 allocations 扣卡，账面实收与实际扣卡可任意背离
-	if req.ManualPrice != nil && (len(req.CardAllocations) > 0 || pendingMode != "") {
-		return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能与卡支付或挂账同时使用")
-	}
 	if len(req.CardAllocations) > 0 && req.MemberID == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "卡支付必须指定会员")
 	}
 
-	actualPaid := total
-	if pendingMode == "full" {
-		actualPaid = decimal.Zero
-		req.CardAllocations = nil
-	} else if req.ManualPrice != nil {
-		// ManualPrice 必须 >= 0；上限放开，允许高于标价（加价），
-		// 此时 discount 为负，老系统迁移数据里也有同类记录
+	// 手动定价：一单一价，改价即本单最终应收，与支付方式、挂账正交。
+	// 允许高于标价（加价），此时 discount 为负，老系统迁移数据里也有
+	// 同类记录；上限只拦 NUMERIC(10,2) 溢出
+	if req.ManualPrice != nil {
+		if err := decx.Amount("手动定价", *req.ManualPrice); err != nil {
+			return err
+		}
 		if req.ManualPrice.IsNegative() {
 			return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能为负数")
 		}
 		if !req.ManualPrice.Equal(req.ManualPrice.Round(2)) {
 			return echo.NewHTTPError(http.StatusBadRequest, "手动定价最多两位小数")
 		}
-		actualPaid = *req.ManualPrice
-	} else if len(req.CardAllocations) > 0 {
+	}
+
+	actualPaid := total
+	if pendingMode == "full" {
 		actualPaid = decimal.Zero
-		for _, a := range req.CardAllocations {
-			if a.Deduct.IsNegative() {
-				return echo.NewHTTPError(http.StatusBadRequest, "card_allocations.deduct must be non-negative")
-			}
-			if !a.Deduct.Equal(a.Deduct.Round(2)) {
-				return echo.NewHTTPError(http.StatusBadRequest, "扣卡金额最多两位小数")
-			}
-			actualPaid = actualPaid.Add(a.Deduct)
+		req.CardAllocations = nil
+	} else {
+		if req.ManualPrice != nil {
+			actualPaid = *req.ManualPrice
 		}
-		if actualPaid.GreaterThan(total) {
-			return echo.NewHTTPError(http.StatusBadRequest, "卡支付总额不能超过应收金额")
+		if len(req.CardAllocations) > 0 {
+			deductSum := decimal.Zero
+			for _, a := range req.CardAllocations {
+				if err := decx.Amount("扣卡金额", a.Deduct); err != nil {
+					return err
+				}
+				if a.Deduct.IsNegative() {
+					return echo.NewHTTPError(http.StatusBadRequest, "card_allocations.deduct must be non-negative")
+				}
+				if !a.Deduct.Equal(a.Deduct.Round(2)) {
+					return echo.NewHTTPError(http.StatusBadRequest, "扣卡金额最多两位小数")
+				}
+				deductSum = deductSum.Add(a.Deduct)
+			}
+			switch {
+			case pendingMode == "use_balance":
+				// 实收 = 扣卡合计；上限在挂账定价处按本单应收统一校验
+				actualPaid = deductSum
+			case req.ManualPrice != nil:
+				// 改价即最终价，卡不再套折扣；扣卡合计必须恰好等于定价，
+				// 否则账面实收与实际扣卡背离
+				if !deductSum.Equal(*req.ManualPrice) {
+					return echo.NewHTTPError(http.StatusBadRequest, "扣卡合计必须等于手动定价")
+				}
+			default:
+				actualPaid = deductSum
+				if actualPaid.GreaterThan(total) {
+					return echo.NewHTTPError(http.StatusBadRequest, "卡支付总额不能超过应收金额")
+				}
+			}
 		}
 	}
 	if actualPaid.IsNegative() {
@@ -205,24 +228,31 @@ func Create(c *echo.Context) error {
 	// 同一事务不再对已锁子集二次 SELECT（缩短全卡锁持有窗口）
 	var lockedByID map[uuid.UUID]lockedCard
 	if pendingMode != "" {
-		lockedRows, lockErr := q.ListCardsByMemberForUpdate(ctx, *req.MemberID)
-		if lockErr != nil {
-			return mw.InternalError(c, "lock member cards: ", lockErr)
-		}
-		cards := make([]pricingCard, 0, len(lockedRows))
-		lockedByID = make(map[uuid.UUID]lockedCard, len(lockedRows))
-		for _, lc := range lockedRows {
-			cards = append(cards, pricingCard{status: lc.Status, balance: lc.Balance, rate: lc.FinalDiscountRate, expiresAt: lc.ExpiresAt})
-			lockedByID[lc.ID] = lockedCard{
-				ID: lc.ID, MemberID: lc.MemberID, Status: lc.Status,
-				ExpiresAt: lc.ExpiresAt, Balance: lc.Balance, CardTypeName: lc.CardTypeName,
+		if req.ManualPrice != nil {
+			// 挂账只有一个口径：挂本单实际应收。改价单的应收就是改价金额，
+			// 不走 pendingPricing（无折扣率参与，也无需为定价锁全部卡；
+			// use_balance 的扣卡行照常在下方 LockCardsForUpdate 锁定）
+			discountedTotal = *req.ManualPrice
+		} else {
+			lockedRows, lockErr := q.ListCardsByMemberForUpdate(ctx, *req.MemberID)
+			if lockErr != nil {
+				return mw.InternalError(c, "lock member cards: ", lockErr)
 			}
+			cards := make([]pricingCard, 0, len(lockedRows))
+			lockedByID = make(map[uuid.UUID]lockedCard, len(lockedRows))
+			for _, lc := range lockedRows {
+				cards = append(cards, pricingCard{status: lc.Status, balance: lc.Balance, rate: lc.FinalDiscountRate, expiresAt: lc.ExpiresAt})
+				lockedByID[lc.ID] = lockedCard{
+					ID: lc.ID, MemberID: lc.MemberID, Status: lc.Status,
+					ExpiresAt: lc.ExpiresAt, Balance: lc.Balance, CardTypeName: lc.CardTypeName,
+				}
+			}
+			_, discountedTotal = pendingPricing(cards, total, noDiscTotal)
 		}
-		_, discountedTotal = pendingPricing(cards, total, noDiscTotal)
-		// 扣卡以折后应收为上限：超过即超额扣卡且无凭证；恰好扣平（含全 0 元单）
+		// 扣卡以本单应收为上限：超过即超额扣卡且无凭证；恰好扣平（含全 0 元单）
 		// 等同正常卡支付，放行且不建挂账
 		if actualPaid.GreaterThan(discountedTotal) {
-			return echo.NewHTTPError(http.StatusBadRequest, "扣卡金额超过折后应收")
+			return echo.NewHTTPError(http.StatusBadRequest, "扣卡金额超过本单应收")
 		}
 		// 挂账单的 discount 是真实折扣（标价-折后应收），未收部分记在 member_credits，
 		// 不混入 discount；与「余额够扣」的正常卡支付口径一致
@@ -617,20 +647,21 @@ func IssueCard(c *echo.Context) error {
 
 	finalPrice := ct.Price
 	if req.FinalPrice != nil {
-		// 防篡改：final_price 必须 > 0；非 super_admin 不能低于模板 5 折（防 0.01 办 6999 卡）
+		// 自定义面值即收款即余额（续小额享原卡折扣是常规用法），不设面值
+		// 下限比例；只拦非正数与 NUMERIC(10,2) 溢出
+		if err := decx.Amount("final_price", *req.FinalPrice); err != nil {
+			return err
+		}
 		if !req.FinalPrice.IsPositive() {
 			return echo.NewHTTPError(http.StatusBadRequest, "final_price 必须大于 0")
-		}
-		minFloor := ct.Price.Mul(decimal.NewFromFloat(0.5))
-		claims := mw.ClaimsFrom(c)
-		if claims.Role != mw.RoleSuperAdmin && req.FinalPrice.LessThan(minFloor) {
-			return echo.NewHTTPError(http.StatusBadRequest,
-				"final_price 不能低于模板价的 50%（如需更低折扣，请联系超级管理员）")
 		}
 		finalPrice = *req.FinalPrice
 	}
 	finalRate := ct.DiscountRate
 	if req.FinalDiscountRate != nil {
+		if !decx.Sane(*req.FinalDiscountRate) {
+			return echo.NewHTTPError(http.StatusBadRequest, "final_discount_rate 超出可受理范围")
+		}
 		if req.FinalDiscountRate.LessThanOrEqual(decimal.Zero) || req.FinalDiscountRate.GreaterThan(decimal.NewFromInt(1)) {
 			return echo.NewHTTPError(http.StatusBadRequest, "final_discount_rate must be in (0,1]")
 		}

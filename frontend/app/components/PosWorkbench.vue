@@ -483,6 +483,11 @@
               <span class="text-stone-500">总优惠</span>
               <span class="tabular-nums text-base font-semibold text-error-600 dark:text-error-400">- ¥{{ discount.toFixed(2) }}</span>
             </div>
+            <!-- 加价（实付高于应付）在入账前就要看得见，不能等落账后才在今日记录里首次出现 -->
+            <div v-else-if="discount < 0" class="flex justify-between items-baseline text-sm">
+              <span class="text-stone-500">加价</span>
+              <span class="tabular-nums text-base font-semibold text-warning-600 dark:text-warning-400">+ ¥{{ (-discount).toFixed(2) }}</span>
+            </div>
             <!-- 实付金额：可点击改价；金额本身大字，旁边明显"改价"按钮提示可操作 -->
             <div class="flex items-baseline justify-between pt-2 mt-1 border-t border-stone-200/60 dark:border-stone-800">
               <div class="flex items-center gap-2">
@@ -491,10 +496,9 @@
                 <span class="text-sm font-medium text-stone-700 dark:text-stone-300">{{ pendingMode ? '本单应收' : '实付金额' }}</span>
                 <UBadge v-if="useManualPrice" label="已改价" color="warning" variant="soft" size="xs" />
               </div>
-              <!-- 会员卡支付实付由扣卡方案决定，不开放改价（后端也互斥拒绝两者同发） -->
-              <span v-if="isMemberCardPay" class="text-3xl font-semibold tabular-nums text-primary-600 dark:text-primary-400 leading-none">¥{{ actualPaid.toFixed(2) }}</span>
-              <UPopover v-else :ui="{ content: 'p-3 w-64' }">
-                <UTooltip :text="useManualPrice ? '已自定义，点击重新调整' : '点击自定义实付金额（折扣 / 抹零）'" :delay-duration="200">
+              <!-- 一单一价：改价定义本单最终应收，与支付方式无关，会员卡路径同样开放 -->
+              <UPopover :ui="{ content: 'p-3 w-64' }">
+                <UTooltip :text="useManualPrice ? '已自定义，点击重新调整' : '点击自定义实付金额（折扣 / 抹零 / 加价）'" :delay-duration="200">
                   <button
                     type="button"
                     class="group inline-flex items-end gap-1.5 cursor-pointer"
@@ -506,7 +510,7 @@
                 <template #content>
                   <div class="space-y-2">
                     <div class="text-xs text-stone-500">自定义实付金额</div>
-                    <UInput v-model="manualPrice" type="number" step="0.01" min="0" :placeholder="`原 ¥${(total - (discount > 0 ? discount : 0)).toFixed(2)}`" size="sm" class="w-full" autofocus />
+                    <UInput v-model="manualPrice" type="number" step="0.01" min="0" max="99999999.99" :placeholder="`原 ¥${(total - (discount > 0 ? discount : 0)).toFixed(2)}`" size="sm" class="w-full" autofocus />
                     <UInput v-model="manualReason" placeholder="原因（必填）" size="sm" class="w-full" />
                     <p v-if="manualPriceError" class="text-xs text-error-600 dark:text-error-400">{{ manualPriceError }}</p>
                     <div class="flex gap-1.5 pt-1">
@@ -526,7 +530,8 @@
               <div v-for="a in allocationPlan" :key="a.card_id" class="flex justify-between items-baseline text-sm">
                 <span class="text-stone-700 dark:text-stone-300">
                   {{ cardName(a.card_id) }}
-                  <span class="text-xs text-stone-400">{{ cardRate(a.card_id) }}</span>
+                  <!-- 改价单不套卡折扣，折扣率标签只会误导 -->
+                  <span v-if="!useManualPrice" class="text-xs text-stone-400">{{ cardRate(a.card_id) }}</span>
                 </span>
                 <span class="tabular-nums font-medium">扣 ¥{{ a.deduct }}</span>
               </div>
@@ -535,12 +540,12 @@
           <div v-else-if="isMemberCardPay && member && memberCards.length === 0" class="px-4 pb-3 text-xs text-warning-600">
             {{ expiredCardCount > 0 ? `该会员无可用卡（其中 ${expiredCardCount} 张已过期），请改其他支付方式` : '该会员无可用卡，请改其他支付方式' }}
           </div>
-          <div v-else-if="isMemberCardPay && member && allocationPlan.length === 0 && items.length > 0" class="px-4 pb-3">
+          <div v-else-if="isMemberCardPay && member && allocationPlan.length === 0 && items.length > 0 && !zeroManualOrder" class="px-4 pb-3">
             <div class="p-3 rounded-lg bg-warning-50/60 dark:bg-warning-950/20 ring-1 ring-warning-200 dark:ring-warning-800 space-y-2.5">
               <!-- 两个数字都是标价口径：可抵金额来自扣款方案同一处计算，
                    与本单金额直接可比，不会出现「余额比应付多却说不足」 -->
               <div class="text-sm text-warning-700 dark:text-warning-300">
-                {{ manualCardMode && manualCardId ? '所选会员卡' : '会员卡余额' }}最多可抵 ¥{{ cardCoverage.coverable.toFixed(2) }}，本单 ¥{{ total.toFixed(2) }}
+                {{ manualCardMode && manualCardId ? '所选会员卡' : '会员卡余额' }}最多可抵 ¥{{ cardCoverage.coverable.toFixed(2) }}，本单 ¥{{ (useManualPrice ? discountedTotal : total).toFixed(2) }}
               </div>
               <div v-if="autoCanCover" class="text-xs text-warning-600 dark:text-warning-400">
                 该会员其他卡还有余额，关掉「手动选卡」即可刷卡付清
@@ -681,7 +686,7 @@
               >
                 <div class="inline-block cursor-help">
                   <div class="flex items-baseline justify-end gap-1.5 leading-tight border-b border-dashed border-stone-300 dark:border-stone-600 pb-0.5">
-                    <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
+                    <span v-if="strikePrice(t)" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
                     <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                     <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                   </div>
@@ -712,7 +717,7 @@
               </UPopover>
               <div v-else class="inline-block">
                 <div class="flex items-baseline justify-end gap-1.5 leading-tight">
-                  <span v-if="parseFloat(t.discount_amount) > 0 || surcharge(t) > 0" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
+                  <span v-if="strikePrice(t)" class="text-xs tabular-nums text-stone-400 line-through">¥{{ strikePrice(t) }}</span>
                   <span v-if="isCreditTx(t)" class="text-base font-semibold tabular-nums text-warning-600 dark:text-warning-400">¥{{ t.credit_amount }}</span>
                   <span v-else class="text-base font-semibold tabular-nums text-primary-600 dark:text-primary-400">¥{{ t.actual_paid_amount }}</span>
                 </div>
@@ -907,59 +912,7 @@ interface TodayTx {
   card_snapshots: CardSnapshot[] | null
 }
 
-// 挂账登记交易：0 实收 + 关联着一笔挂账
-function isCreditTx(t: TodayTx) { return parseFloat(t.credit_amount || '0') > 0 }
-
-// 折数：实付/应收 × 10，整数不带小数（8折），否则一位小数（8.5折）
-// 多卡支付：本笔扣了 ≥2 张卡（按余额流水的 consume 行判断）
-// 加价额：消费单实付高于应付的部分；挂账实付为 0、充值差价是卖卡折扣，均不算
-function surcharge(t: TodayTx): number {
-  if (t.kind !== 'sale' || isCreditTx(t)) return 0
-  // 原应收优先取明细标价合计：迁移把加价单的 total 抬平到实收，原标价只在明细里
-  const base = parseFloat(t.items_total) > 0 ? parseFloat(t.items_total) : parseFloat(t.total_amount)
-  const d = parseFloat(t.actual_paid_amount) - base
-  return d > 0.001 ? d : 0
-}
-
-// 划线展示的原价：加价单显示明细标价合计（total 已被抬平，划 total 等于没划）
-function strikePrice(t: TodayTx): string {
-  return surcharge(t) > 0 && parseFloat(t.items_total) > 0 ? t.items_total : t.total_amount
-}
-
-function isMultiCard(t: TodayTx) {
-  return (t.card_snapshots || []).filter(s => s.change_type === 'consume').length >= 2
-}
-
-// 多卡分卡明细：直接从结构化余额流水组装（老系统靠 notes 文本，这里比它可靠）
-function multiCardText(t: TodayTx): string {
-  const parts = (t.card_snapshots || []).filter(s => s.change_type === 'consume')
-  if (parts.length < 2) return ''
-  return '多卡：' + parts
-    .map(s => `${s.card_type_name}¥${(parseFloat(s.balance_before) - parseFloat(s.balance_after)).toFixed(2)}`)
-    .join(' + ')
-}
-
-// 标称折扣率：从卡显示名（"500元储值卡 7折"）提取；多卡取第一张扣款卡
-function nominalRate(t: TodayTx): number | null {
-  const name = t.card_type_name
-    || (t.card_snapshots || []).find(s => s.change_type === 'consume')?.card_type_name
-  const m = (name || '').match(/([0-9]+(?:\.[0-9])?)\s*折/)
-  return m ? parseFloat(m[1]!) / 10 : null
-}
-
-// 反推率与卡标称折扣吻合才写「N折 省」，否则只写「减」——反推的伪折扣率不展示
-function discountLabel(t: TodayTx): string {
-  const total = parseFloat(t.total_amount)
-  const paid = parseFloat(t.actual_paid_amount)
-  if (!(total > 0) || paid >= total) return ''
-  const rate = paid / total
-  const nominal = nominalRate(t)
-  if (nominal != null && Math.abs(rate - nominal) < 0.005) {
-    const zhe = Math.round(rate * 100) / 10
-    return `${Number.isInteger(zhe) ? zhe : zhe.toFixed(1)}折 省`
-  }
-  return '减'
-}
+// 折扣 / 加价 / 多卡展示逻辑在 useTxDisplay.ts，与报表流水共用
 const PAGE_SIZE = 10 // 默认显示 / 每次加载条数
 const todayTx = reactive({
   items: [] as TodayTx[],
@@ -1104,6 +1057,27 @@ function autoAllocate(discountable: number, noDiscount: number): CardCoverage {
 // 余额不足横幅拿 coverable、结算拿 plan，同源保证两者永远说得通
 const cardCoverage = computed<CardCoverage>(() => {
   if (!isMemberCardPay.value || !member.value || items.value.length === 0) return { plan: [], coverable: 0 }
+  // 一单一价：改价即本单最终应收，卡此时只是余额钱包，不再按折扣率放大。
+  // 全程用「分」做整数运算，保证扣卡合计与改价金额分毫不差（后端强校验相等）
+  if (useManualPrice.value) {
+    const mp = parseFloat(manualPrice.value)
+    if (isNaN(mp) || manualPriceError.value) return { plan: [], coverable: 0 }
+    let remainC = Math.round(mp * 100)
+    const usable = (manualCardMode.value && manualCardId.value)
+      ? memberCards.value.filter(c => c.id === manualCardId.value)
+      : [...memberCards.value].sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance))
+    const plan: { card_id: string; deduct: string }[] = []
+    let balSumC = 0
+    for (const c of usable) {
+      const balC = Math.round(parseFloat(c.balance) * 100)
+      if (balC <= 0) continue
+      balSumC += balC
+      const take = Math.min(remainC, balC)
+      if (take > 0) { plan.push({ card_id: c.id, deduct: (take / 100).toFixed(2) }); remainC -= take }
+    }
+    if (remainC > 0) return { plan: [], coverable: Math.min(balSumC, Math.round(mp * 100)) / 100 }
+    return { plan, coverable: mp }
+  }
   const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
   const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
   if (manualCardMode.value && manualCardId.value) {
@@ -1160,7 +1134,8 @@ function lineSubtotal(it: { price: string; quantity: number }) {
   return parseFloat(it.price) * it.quantity
 }
 function lineDiscount(it: { price: string; quantity: number; no_discount: boolean }) {
-  if (it.no_discount || previewRate.value >= 1) return 0
+  // 改价单一单一价，行级折后提示不再成立
+  if (useManualPrice.value || it.no_discount || previewRate.value >= 1) return 0
   return lineSubtotal(it) * (1 - previewRate.value)
 }
 
@@ -1186,11 +1161,11 @@ const actualPaid = computed(() => {
   return total.value - discount.value
 })
 
-// 改价校验：允许高于标价（加价），只拦格式——库内金额是 NUMERIC(10,2)，
-// 值需 ≥ 0 且最多 2 位小数
+// 改价校验：允许高于标价（加价），上限只拦库内 NUMERIC(10,2) 存不下的值
 const manualPriceError = computed(() => {
   if (!manualPrice.value) return ''
   if (!/^\d+(\.\d{1,2})?$/.test(manualPrice.value.trim())) return '金额需为不小于 0 的数字，最多 2 位小数'
+  if (parseFloat(manualPrice.value) > 99999999.99) return '金额超出上限'
   return ''
 })
 
@@ -1204,10 +1179,11 @@ watch(
   { deep: true },
 )
 
-// 切到会员卡支付时清掉残留改价：改价只属于非卡支付，同发会被后端互斥校验拒绝
-watch(isMemberCardPay, (v) => {
-  if (v && useManualPrice.value) resetManualPrice()
-})
+// 改价只对定价那一刻的购物车有效：增删项 / 改数量后残留旧价会静默变成
+// 多收或少收（上限校验已放开，不再有 >total 兜底），购物车一变即失效
+watch(items, () => {
+  if (useManualPrice.value) resetManualPrice()
+}, { deep: true })
 
 // 挂账定价预览：定价公式（折扣率遴选 + no_discount 拆分 + 舍入）只在后端
 // `pendingPricing` 一份，前端不自行实现——展示的挂账金额与入账金额同源。
@@ -1220,9 +1196,11 @@ const memberRate = ref<{ memberId: string; rate: number } | null>(null)
 const pendingPreview = ref<{ discounted_total: string; rate: string } | null>(null)
 const previewFailed = ref(false)
 let previewSeq = 0
-const previewReady = computed(() => pendingPreview.value !== null)
+// 改价单的挂账金额本地即知（= 改价金额 − 扣卡），无需等后端定价预览
+const previewReady = computed(() => useManualPrice.value || pendingPreview.value !== null)
 const inPendingContext = computed(() =>
-  isMemberCardPay.value && !!member.value && items.value.length > 0 && allocationPlan.value.length === 0)
+  isMemberCardPay.value && !!member.value && items.value.length > 0
+  && allocationPlan.value.length === 0 && !useManualPrice.value)
 const fetchPendingPreview = useDebounceFn(async () => {
   if (!isMemberCardPay.value || !member.value) return
   const seq = ++previewSeq
@@ -1268,8 +1246,13 @@ function retryPreview() {
   fetchPendingPreview()
 }
 
-// 折后应收：仅在预览就绪后有意义；未就绪时回退标价，挂账入口由 previewReady 把关
+// 本单应收：改价单即改价金额（本地即知，不依赖后端预览）；
+// 其余仅在预览就绪后有意义，未就绪时回退标价，挂账入口由 previewReady 把关
 const discountedTotal = computed(() => {
+  if (useManualPrice.value) {
+    const mp = parseFloat(manualPrice.value)
+    return isNaN(mp) ? total.value : mp
+  }
   if (!isMemberCardPay.value || !pendingPreview.value) return total.value
   return parseFloat(pendingPreview.value.discounted_total)
 })
@@ -1315,11 +1298,14 @@ function selectOtherPm() {
   if (cash) selectedPm.value = cash.id
 }
 
+// 0 元改价单：无卡可扣也无账可挂，卡支付下直接放行记账
+const zeroManualOrder = computed(() => useManualPrice.value && parseFloat(manualPrice.value) === 0)
+
 const canSubmit = computed(() => {
   if (items.value.length === 0 || !selectedPm.value || submitting.value) return false
   if (isMemberCardPay.value) {
     if (!member.value) return false
-    if (allocationPlan.value.length === 0 && !pendingMode.value) return false
+    if (allocationPlan.value.length === 0 && !pendingMode.value && !zeroManualOrder.value) return false
     // 挂账金额来自后端定价预览，未就绪不放行提交（防止按过期数字承诺）
     if (pendingMode.value && !previewReady.value) return false
   }
@@ -1554,7 +1540,7 @@ async function submit() {
 
   if (useManualPrice.value) {
     if (!manualReason.value) { err.value = '手动改价需要填原因'; return }
-    // 应用改价后购物车可能又变了（应收变小），提交前按当前应收重新校验
+    // 购物车变动时改价已由 watcher 失效，这里只剩格式 / 上限校验守底
     if (manualPriceError.value) { err.value = `改价无效：${manualPriceError.value}`; return }
     body.manual_price = manualPrice.value
   }
@@ -1572,7 +1558,7 @@ async function submit() {
     // 双保险：余额已够扣（allocationPlan 非空）时绝不挂账，兜住 watch 之外的任何状态残留
     if (pendingMode.value && allocationPlan.value.length > 0) pendingMode.value = ''
     if (pendingMode.value === 'full') {
-      // 不带 manual_price：实收置零由后端 full 分支决定，多传会撞「改价与挂账互斥」校验被 400
+      // 改价单挂账时 manual_price 一并携带：后端以它为本单应收，挂账即挂这个数
       body.pending_mode = 'full'
     } else if (pendingMode.value === 'use_balance') {
       body.pending_mode = 'use_balance'

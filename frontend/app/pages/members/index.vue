@@ -626,13 +626,6 @@
               <UInput v-model="issueForm.discountRate" type="number" step="0.01" min="0.01" max="1" placeholder="如:0.8 表示 8 折" class="w-full" />
             </UFormField>
 
-            <p
-              v-if="customPriceFloor"
-              class="text-xs"
-              :class="customPriceTooLow ? 'text-error-600 dark:text-error-400' : 'text-stone-500 dark:text-stone-400'"
-            >
-              最低 ¥{{ customPriceFloor.min.toFixed(2) }}（参照「{{ customPriceFloor.name }}」售价的 50%），低于此金额需超级管理员操作
-            </p>
           </div>
 
           <!-- 常驻：服务员工 + 支付方式 -->
@@ -1075,22 +1068,6 @@ const cardTypeOptions = computed(() =>
   }))
 )
 
-// 后端（非超管）强制自定义面值不得低于参照卡型售价的 50%；未选参照时后端隐式挂靠第一个卡型，
-// 这里按同样规则提前算出下限，避免提交后才收到 400
-const customPriceFloor = computed(() => {
-  if (issueMode.value !== 'custom' || auth.user?.role === 'super_admin') return null
-  const refId = issueForm.cardTypeId || cardTypes.value[0]?.id
-  const ct = cardTypes.value.find(c => c.id === refId)
-  if (!ct) return null
-  return { name: ct.name, min: parseFloat(ct.price) * 0.5 }
-})
-const customPriceTooLow = computed(() => {
-  const f = customPriceFloor.value
-  if (!f) return false
-  const p = parseFloat(issueForm.finalPrice)
-  return p > 0 && p < f.min
-})
-
 const staffList = ref<{ id: string; name: string; position: string | null }[]>([])
 const staffOptions = computed(() =>
   staffList.value.map(s => ({
@@ -1140,10 +1117,6 @@ async function submitIssue() {
     // 自定义面值
     const p = parseFloat(issueForm.finalPrice)
     if (!p || p <= 0) { issueError.value = '请输入自定义金额'; return }
-    if (customPriceTooLow.value && customPriceFloor.value) {
-      issueError.value = `金额低于参照卡型「${customPriceFloor.value.name}」售价的 50%（最低 ¥${customPriceFloor.value.min.toFixed(2)}），需超级管理员操作`
-      return
-    }
     if (issueForm.discountMode === 'inherit') {
       if (!issueForm.cardTypeId) { issueError.value = '请选择参照卡类型'; return }
     } else {
