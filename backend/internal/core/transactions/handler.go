@@ -485,6 +485,11 @@ func computeTotals(c *echo.Context, q *sqlc.Queries, items []ItemInput) ([]itemR
 		}
 		rows = append(rows, itemRow{svc: svc, qty: it.Quantity})
 	}
+	// quantity 只校验了 > 0，乘出来的合计是通向 NUMERIC(10,2) 的最后一条
+	// 无防护路径（如 20 亿件 ¥1 服务），不拦会在落库时溢出成 500
+	if err := decx.Amount("应收合计", total); err != nil {
+		return nil, decimal.Zero, decimal.Zero, err
+	}
 	return rows, total, noDiscTotal, nil
 }
 
