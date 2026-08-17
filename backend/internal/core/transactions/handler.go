@@ -167,12 +167,10 @@ func Create(c *echo.Context) error {
 		actualPaid = decimal.Zero
 		req.CardAllocations = nil
 	} else if req.ManualPrice != nil {
-		// 防恶意洗账：ManualPrice 必须 >= 0（不允许负数）且 <= total（不允许加价）
+		// ManualPrice 必须 >= 0；上限放开，允许高于标价（加价），
+		// 此时 discount 为负，老系统迁移数据里也有同类记录
 		if req.ManualPrice.IsNegative() {
 			return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能为负数")
-		}
-		if req.ManualPrice.GreaterThan(total) {
-			return echo.NewHTTPError(http.StatusBadRequest, "手动定价不能超过应收金额")
 		}
 		if !req.ManualPrice.Equal(req.ManualPrice.Round(2)) {
 			return echo.NewHTTPError(http.StatusBadRequest, "手动定价最多两位小数")

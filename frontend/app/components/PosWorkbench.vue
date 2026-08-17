@@ -506,7 +506,7 @@
                 <template #content>
                   <div class="space-y-2">
                     <div class="text-xs text-stone-500">自定义实付金额</div>
-                    <UInput v-model="manualPrice" type="number" step="0.01" min="0" :max="total.toFixed(2)" :placeholder="`原 ¥${(total - (discount > 0 ? discount : 0)).toFixed(2)}`" size="sm" class="w-full" autofocus />
+                    <UInput v-model="manualPrice" type="number" step="0.01" min="0" :placeholder="`原 ¥${(total - (discount > 0 ? discount : 0)).toFixed(2)}`" size="sm" class="w-full" autofocus />
                     <UInput v-model="manualReason" placeholder="原因（必填）" size="sm" class="w-full" />
                     <p v-if="manualPriceError" class="text-xs text-error-600 dark:text-error-400">{{ manualPriceError }}</p>
                     <div class="flex gap-1.5 pt-1">
@@ -1186,12 +1186,11 @@ const actualPaid = computed(() => {
   return total.value - discount.value
 })
 
-// 改价校验：后端拒绝 manual_price 超过应收金额（不支持加价），且库内金额是 NUMERIC(10,2)，
-// 前端先拦 0 ≤ 值 ≤ 应收、最多 2 位小数
+// 改价校验：允许高于标价（加价），只拦格式——库内金额是 NUMERIC(10,2)，
+// 值需 ≥ 0 且最多 2 位小数
 const manualPriceError = computed(() => {
   if (!manualPrice.value) return ''
   if (!/^\d+(\.\d{1,2})?$/.test(manualPrice.value.trim())) return '金额需为不小于 0 的数字，最多 2 位小数'
-  if (parseFloat(manualPrice.value) > total.value) return `不能超过应收 ¥${total.value.toFixed(2)}`
   return ''
 })
 
