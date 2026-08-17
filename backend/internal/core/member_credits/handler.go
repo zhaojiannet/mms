@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/decx"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
@@ -71,6 +72,10 @@ func Create(c *echo.Context) error {
 	var req CreateRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request: "+err.Error())
+	}
+	// 粗筛必须先于与 0 的比较：比较本身就会触发 rescale
+	if err := decx.Amount("amount", req.Amount); err != nil {
+		return err
 	}
 	if req.Amount.LessThanOrEqual(decimal.Zero) {
 		return echo.NewHTTPError(http.StatusBadRequest, "amount must be positive")

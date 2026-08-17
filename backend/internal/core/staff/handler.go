@@ -13,6 +13,7 @@ import (
 
 	"github.com/zhaojiannet/mms/backend/internal/core/quota"
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/decx"
 	"github.com/zhaojiannet/mms/backend/internal/platform/util/timex"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
@@ -109,6 +110,10 @@ func Create(c *echo.Context) error {
 
 	var commNull decimal.NullDecimal
 	if req.DefaultCommissionRate != nil {
+		// DB 侧 NUMERIC(4,3) CHECK 限 [0,1]，这里前置成 400 而不是撞库 500
+		if !decx.Sane(*req.DefaultCommissionRate) || req.DefaultCommissionRate.IsNegative() || req.DefaultCommissionRate.GreaterThan(decimal.NewFromInt(1)) {
+			return echo.NewHTTPError(http.StatusBadRequest, "default_commission_rate 需在 0-1 之间")
+		}
 		commNull = decimal.NullDecimal{Decimal: *req.DefaultCommissionRate, Valid: true}
 	}
 
@@ -154,6 +159,9 @@ func Update(c *echo.Context) error {
 	}
 	var commNull decimal.NullDecimal
 	if req.DefaultCommissionRate != nil {
+		if !decx.Sane(*req.DefaultCommissionRate) || req.DefaultCommissionRate.IsNegative() || req.DefaultCommissionRate.GreaterThan(decimal.NewFromInt(1)) {
+			return echo.NewHTTPError(http.StatusBadRequest, "default_commission_rate 需在 0-1 之间")
+		}
 		commNull = decimal.NullDecimal{Decimal: *req.DefaultCommissionRate, Valid: true}
 	}
 	tx := mw.TxFrom(c)

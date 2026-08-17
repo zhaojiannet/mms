@@ -9,6 +9,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/decx"
 )
 
 type editionDTO struct {
@@ -58,6 +59,17 @@ func UpdateEdition(c *echo.Context) error {
 	var req updateEditionRequest
 	if err := c.Bind(&req); err != nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "invalid request")
+	}
+	for name, p := range map[string]*decimal.Decimal{"price_monthly": req.PriceMonthly, "price_yearly": req.PriceYearly} {
+		if p == nil {
+			continue
+		}
+		if err := decx.Amount(name, *p); err != nil {
+			return err
+		}
+		if p.IsNegative() {
+			return echo.NewHTTPError(http.StatusBadRequest, name+" 不能为负数")
+		}
 	}
 	if len(req.Quotas) == 0 {
 		// 空对象若整体覆盖，缺键会被 quota 判为"不限"，等于静默清零该档全部商户的限额

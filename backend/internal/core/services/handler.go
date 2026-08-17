@@ -12,6 +12,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/decx"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -108,6 +109,9 @@ func Create(c *echo.Context) error {
 	if req.Price == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "price is required")
 	}
+	if err := decx.Amount("price", *req.Price); err != nil {
+		return err
+	}
 	if req.Price.IsNegative() {
 		return echo.NewHTTPError(http.StatusBadRequest, "price must be non-negative")
 	}
@@ -144,6 +148,9 @@ func Update(c *echo.Context) error {
 
 	var priceNull decimal.NullDecimal
 	if req.Price != nil {
+		if err := decx.Amount("price", *req.Price); err != nil {
+			return err
+		}
 		if req.Price.IsNegative() {
 			return echo.NewHTTPError(http.StatusBadRequest, "price must be non-negative")
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/shopspring/decimal"
 
 	mw "github.com/zhaojiannet/mms/backend/internal/platform/middleware"
+	"github.com/zhaojiannet/mms/backend/internal/platform/util/decx"
 	"github.com/zhaojiannet/mms/backend/sqlc"
 )
 
@@ -86,8 +87,14 @@ func Create(c *echo.Context) error {
 	if req.Price == nil || req.DiscountRate == nil {
 		return echo.NewHTTPError(http.StatusBadRequest, "price and discount_rate are required")
 	}
+	if err := decx.Amount("price", *req.Price); err != nil {
+		return err
+	}
+	if req.Price.IsNegative() {
+		return echo.NewHTTPError(http.StatusBadRequest, "price must be non-negative")
+	}
 	rate := *req.DiscountRate
-	if rate.LessThanOrEqual(decimal.Zero) || rate.GreaterThan(decimal.NewFromInt(1)) {
+	if !decx.Sane(rate) || rate.LessThanOrEqual(decimal.Zero) || rate.GreaterThan(decimal.NewFromInt(1)) {
 		return echo.NewHTTPError(http.StatusBadRequest, "discount_rate must be in (0, 1]")
 	}
 
@@ -119,10 +126,16 @@ func Update(c *echo.Context) error {
 
 	var priceNull, rateNull decimal.NullDecimal
 	if req.Price != nil {
+		if err := decx.Amount("price", *req.Price); err != nil {
+			return err
+		}
+		if req.Price.IsNegative() {
+			return echo.NewHTTPError(http.StatusBadRequest, "price must be non-negative")
+		}
 		priceNull = decimal.NullDecimal{Decimal: *req.Price, Valid: true}
 	}
 	if req.DiscountRate != nil {
-		if req.DiscountRate.LessThanOrEqual(decimal.Zero) || req.DiscountRate.GreaterThan(decimal.NewFromInt(1)) {
+		if !decx.Sane(*req.DiscountRate) || req.DiscountRate.LessThanOrEqual(decimal.Zero) || req.DiscountRate.GreaterThan(decimal.NewFromInt(1)) {
 			return echo.NewHTTPError(http.StatusBadRequest, "discount_rate must be in (0, 1]")
 		}
 		rateNull = decimal.NullDecimal{Decimal: *req.DiscountRate, Valid: true}
