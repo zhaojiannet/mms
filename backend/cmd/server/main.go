@@ -444,7 +444,11 @@ func runMigrations() error {
 	}
 	defer db.Close()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// 预算必须宽于任何单条迁移的等锁上限（00035 的 lock_timeout 60s）：goose
+	// 用这个 ctx 执行每条语句，掐得比等锁窗口短会让 SET LOCAL lock_timeout
+	// 变成死代码，撞上备份窗口时仍以 context deadline exceeded 崩溃重启。
+	// 迁移不完成服务本就不可用，这里给宽预算只为让真卡死仍能报出错误
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 	if err := db.PingContext(ctx); err != nil {
 		return fmt.Errorf("ping db: %w", err)

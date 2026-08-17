@@ -11,7 +11,8 @@
 
 -- ALTER 要拿 transactions 的 ACCESS EXCLUSIVE 锁，可能撞上 pg_dump 备份
 -- 窗口（持 ACCESS SHARE 数十秒）：解除 DSN 带来的 5s 语句超时，改为最长
--- 等锁 60s，等过备份而不是超时进崩溃重启循环
+-- 等锁 60s，等过备份而不是超时进崩溃重启循环。
+-- 这个 60s 依赖 runMigrations 的 ctx 预算宽于它，两处一起改
 SET LOCAL statement_timeout = 0;
 SET LOCAL lock_timeout = '60s';
 
