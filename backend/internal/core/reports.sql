@@ -163,12 +163,12 @@ LIMIT $1 OFFSET $2;
 --   revenue          营业额 = sale 实收 + 当月新增挂账（挂账登记行实收为 0，金额在挂账表）
 --   card_consumption 卡耗 = 扣卡流水净额（消费+清账，撤销的不计）
 --   customers        客数 = sale 按会员去重（非会员按交易），含挂账登记，不含清账/办卡
--- bounds 由调用方按本地日历算好的 13 个月初（旧→新）：timestamptz 减 interval 按会话时区算，
--- 会话时区与本地不一致时月初会落到上月底或下月 1 号
+-- bounds 是调用方按本地日历算好的升序月初，相邻两项成一个月；
+-- 月界不在 SQL 里推算的原因见 monthBounds
 WITH months AS (
-  SELECT (sqlc.arg('bounds')::timestamptz[])[g]     AS m_start,
-         (sqlc.arg('bounds')::timestamptz[])[g + 1] AS m_end
-  FROM generate_series(1, 12) AS g
+  SELECT p.b[g] AS m_start, p.b[g + 1] AS m_end
+  FROM (SELECT sqlc.arg('bounds')::timestamptz[] AS b) p,
+       generate_series(1, array_length(p.b, 1) - 1) AS g
 )
 SELECT
   m.m_start::timestamptz AS m_start,

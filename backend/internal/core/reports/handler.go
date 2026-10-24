@@ -17,17 +17,17 @@ import (
 // ================= 1. 营业报表 =================
 
 type BusinessResponse struct {
-	SaleRevenue     decimal.Decimal `json:"sale_revenue"`      // 服务消费实收（不含办卡）
-	CreditCharged   decimal.Decimal `json:"credit_charged"`    // 新增挂账
-	TotalRevenue    decimal.Decimal `json:"total_revenue"`     // sale_revenue + credit_charged（老"总消费"口径）
-	CardConsumption decimal.Decimal `json:"card_consumption"`  // 卡耗
-	RechargeAmount  decimal.Decimal `json:"recharge_amount"`   // 充值
+	SaleRevenue     decimal.Decimal `json:"sale_revenue"`     // 服务消费实收（不含办卡）
+	CreditCharged   decimal.Decimal `json:"credit_charged"`   // 新增挂账
+	TotalRevenue    decimal.Decimal `json:"total_revenue"`    // sale_revenue + credit_charged（老"总消费"口径）
+	CardConsumption decimal.Decimal `json:"card_consumption"` // 卡耗
+	RechargeAmount  decimal.Decimal `json:"recharge_amount"`  // 充值
 	CustomerCount   int64           `json:"customer_count"`
 	AverageOrder    decimal.Decimal `json:"average_order_value"`
 }
 
 func Business(c *echo.Context) error {
-	start, end, err := parseDateRange(c)
+	start, end, err := parseDateRange(c, time.Local)
 	if err != nil {
 		return err
 	}
@@ -79,7 +79,7 @@ func CardPool(c *echo.Context) error {
 // ================= 2. 项目销售排行 =================
 
 func ServiceRanking(c *echo.Context) error {
-	start, end, err := parseDateRange(c)
+	start, end, err := parseDateRange(c, time.Local)
 	if err != nil {
 		return err
 	}
@@ -117,7 +117,7 @@ func SleepingMembers(c *echo.Context) error {
 // ================= 4. 会员消费排行 =================
 
 func MemberRanking(c *echo.Context) error {
-	start, end, err := parseDateRange(c)
+	start, end, err := parseDateRange(c, time.Local)
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func BirthdayReminders(c *echo.Context) error {
 // ================= 6. 支付方式构成 =================
 
 func PaymentSummary(c *echo.Context) error {
-	start, end, err := parseDateRange(c)
+	start, end, err := parseDateRange(c, time.Local)
 	if err != nil {
 		return err
 	}
@@ -163,7 +163,7 @@ func PaymentSummary(c *echo.Context) error {
 // ================= 7. 卡销售分析 =================
 
 func CardSalesSummary(c *echo.Context) error {
-	start, end, err := parseDateRange(c)
+	start, end, err := parseDateRange(c, time.Local)
 	if err != nil {
 		return err
 	}
@@ -179,10 +179,10 @@ func CardSalesSummary(c *echo.Context) error {
 // ================= 8. 挂账统计 =================
 
 type PendingStatsResponse struct {
-	Summary PendingStatsSummary              `json:"summary"`
-	Data    []sqlc.ReportPendingByMemberRow  `json:"data"`
-	Page    int32                            `json:"page"`
-	Limit   int32                            `json:"limit"`
+	Summary PendingStatsSummary             `json:"summary"`
+	Data    []sqlc.ReportPendingByMemberRow `json:"data"`
+	Page    int32                           `json:"page"`
+	Limit   int32                           `json:"limit"`
 }
 
 type PendingStatsSummary struct {
@@ -224,45 +224,52 @@ func PendingStats(c *echo.Context) error {
 
 // ================= 工具 =================
 
-func parseDateRange(c *echo.Context) (pgtype.Timestamptz, pgtype.Timestamptz, error) {
+// loc 是业务日界所在时区，handler 传进程时区（容器 TZ 环境变量，默认 Asia/Shanghai）：
+// 按 UTC 解析会让 UTC+8 商户的"今日营收"偏移 8 小时
+func parseDateRange(c *echo.Context, loc *time.Location) (pgtype.Timestamptz, pgtype.Timestamptz, error) {
 	startStr := c.QueryParam("start_date")
 	endStr := c.QueryParam("end_date")
 	if startStr == "" || endStr == "" {
 		return pgtype.Timestamptz{}, pgtype.Timestamptz{},
 			echo.NewHTTPError(http.StatusBadRequest, "start_date and end_date required (YYYY-MM-DD)")
 	}
-	// 业务日界用进程时区（容器 TZ 环境变量，默认 Asia/Shanghai）：
-	// 按 UTC 解析会让 UTC+8 商户的"今日营收"偏移 8 小时
-	start, err := time.ParseInLocation("2006-01-02", startStr, time.Local)
+	start, err := time.ParseInLocation("2006-01-02", startStr, loc)
 	if err != nil {
 		return pgtype.Timestamptz{}, pgtype.Timestamptz{},
 			echo.NewHTTPError(http.StatusBadRequest, "invalid start_date")
 	}
-	end, err := time.ParseInLocation("2006-01-02", endStr, time.Local)
+	end, err := time.ParseInLocation("2006-01-02", endStr, loc)
 	if err != nil {
 		return pgtype.Timestamptz{}, pgtype.Timestamptz{},
 			echo.NewHTTPError(http.StatusBadRequest, "invalid end_date")
 	}
-	// end 包含当日（使用下一天 00:00 做 [start, end) 左闭右开）
-	end = end.Add(24 * time.Hour)
+	// end 包含当日（使用下一天 00:00 做 [start, end) 左闭右开）；
+	// 加 24h 在夏令时切换日会偏一小时，按日历加一天
+	end = end.AddDate(0, 0, 1)
 	return pgtype.Timestamptz{Time: start, Valid: true},
 		pgtype.Timestamptz{Time: end, Valid: true}, nil
 }
 
+// monthBounds 返回截至 now 所在月的近 n 个月的 n+1 个月初（旧→新，最后一项是下月初），
+// 时区取 now.Location()。月界在 Go 里按本地日历算：PG 里 timestamptz 减 interval
+// 按会话时区算，会话时区与本地不一致时月初会落到上月底或下月 1 号
+func monthBounds(now time.Time, n int) []pgtype.Timestamptz {
+	bounds := make([]pgtype.Timestamptz, n+1)
+	for i := range bounds {
+		bounds[i] = pgtype.Timestamptz{
+			Time:  time.Date(now.Year(), now.Month()-time.Month(n-1-i), 1, 0, 0, 0, 0, now.Location()),
+			Valid: true,
+		}
+	}
+	return bounds
+}
 
 // BusinessMonthly GET /api/reports/business/monthly
 // 月度对比：近 12 个月的经营指标（口径见 ReportMonthlyBusiness 的 SQL 注释）
 func BusinessMonthly(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
 	now := time.Now()
-	bounds := make([]pgtype.Timestamptz, 13)
-	for i := range bounds {
-		bounds[i] = pgtype.Timestamptz{
-			Time:  time.Date(now.Year(), now.Month()-11+time.Month(i), 1, 0, 0, 0, 0, time.Local),
-			Valid: true,
-		}
-	}
-	rows, err := q.ReportMonthlyBusiness(c.Request().Context(), bounds)
+	rows, err := q.ReportMonthlyBusiness(c.Request().Context(), monthBounds(now, 12))
 	if err != nil {
 		return mw.InternalError(c, "reports.monthly", err)
 	}
@@ -285,7 +292,7 @@ func BusinessMonthly(c *echo.Context) error {
 			avg = r.Revenue.Div(decimal.NewFromInt32(r.Customers)).Round(2)
 		}
 		out = append(out, monthDTO{
-			Month:           r.MStart.Time.In(time.Local).Format("2006-01"),
+			Month:           r.MStart.Time.In(now.Location()).Format("2006-01"),
 			Revenue:         r.Revenue,
 			PendingAdded:    r.PendingAdded,
 			PendingCleared:  r.PendingCleared,
