@@ -255,9 +255,14 @@ func parseDateRange(c *echo.Context) (pgtype.Timestamptz, pgtype.Timestamptz, er
 func BusinessMonthly(c *echo.Context) error {
 	q := sqlc.New(mw.TxFrom(c))
 	now := time.Now()
-	base := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.Local)
-	rows, err := q.ReportMonthlyBusiness(c.Request().Context(),
-		pgtype.Timestamptz{Time: base, Valid: true})
+	bounds := make([]pgtype.Timestamptz, 13)
+	for i := range bounds {
+		bounds[i] = pgtype.Timestamptz{
+			Time:  time.Date(now.Year(), now.Month()-11+time.Month(i), 1, 0, 0, 0, 0, time.Local),
+			Valid: true,
+		}
+	}
+	rows, err := q.ReportMonthlyBusiness(c.Request().Context(), bounds)
 	if err != nil {
 		return mw.InternalError(c, "reports.monthly", err)
 	}

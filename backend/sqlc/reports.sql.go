@@ -262,9 +262,9 @@ func (q *Queries) ReportMemberRanking(ctx context.Context, arg ReportMemberRanki
 
 const reportMonthlyBusiness = `-- name: ReportMonthlyBusiness :many
 WITH months AS (
-  SELECT ($1::timestamptz - make_interval(months => g))     AS m_start,
-         ($1::timestamptz - make_interval(months => g - 1)) AS m_end
-  FROM generate_series(0, 11) AS g
+  SELECT ($1::timestamptz[])[g]     AS m_start,
+         ($1::timestamptz[])[g + 1] AS m_end
+  FROM generate_series(1, 12) AS g
 )
 SELECT
   m.m_start::timestamptz AS m_start,
@@ -311,9 +311,10 @@ type ReportMonthlyBusinessRow struct {
 //	card_consumption 卡耗 = 扣卡流水净额（消费+清账，撤销的不计）
 //	customers        客数 = sale 按会员去重（非会员按交易），含挂账登记，不含清账/办卡
 //
-// base 由调用方传入「本月首日的本地 0 点」，月界在 timestamptz 域上前推
-func (q *Queries) ReportMonthlyBusiness(ctx context.Context, base pgtype.Timestamptz) ([]ReportMonthlyBusinessRow, error) {
-	rows, err := q.db.Query(ctx, reportMonthlyBusiness, base)
+// bounds 由调用方按本地日历算好的 13 个月初（旧→新）：timestamptz 减 interval 按会话时区算，
+// 会话时区与本地不一致时月初会落到上月底或下月 1 号
+func (q *Queries) ReportMonthlyBusiness(ctx context.Context, bounds []pgtype.Timestamptz) ([]ReportMonthlyBusinessRow, error) {
+	rows, err := q.db.Query(ctx, reportMonthlyBusiness, bounds)
 	if err != nil {
 		return nil, err
 	}
