@@ -1,0 +1,11 @@
+[build]
+cmd = "go build -o ./tmp/main ./cmd/server"
+entrypoint = ["./tmp/main"]
+# uploads 是商户上传的文件，变了不用重新编译
+exclude_dir = ["tmp", "uploads", "vendor", "testdata"]
+# 迁移 *.sql 和 announcements.json 经 go:embed 编进二进制，改了也要重新编译
+include_ext = ["go", "tpl", "tmpl", "html", "sql", "json"]
+# 默认直接 SIGKILL，会跳过 cmd/server 的优雅关闭，丢掉还没落盘的审计记录。
+# 25s 盖住 GracefulTimeout 15s + AuditWait 8s，进程提前退出就不用等满
+send_interrupt = true
+kill_delay = "25s"

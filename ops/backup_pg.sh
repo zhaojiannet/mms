@@ -9,7 +9,7 @@
 # pipefail：pg_dump 失败而 gzip 成功时管道整体不能算成功，否则产出空备份还报正常
 set -eo pipefail
 
-PG_CONTAINER=${PG_CONTAINER:-postgres-server}
+PG_CONTAINER=${PG_CONTAINER:-postgres}
 PG_SUPERUSER=${PG_SUPERUSER:-postgres}
 DB_NAME=${DB_NAME:-mms}
 BACKUP_DIR=${BACKUP_DIR:-/backups/mms}

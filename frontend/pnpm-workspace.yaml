@@ -1,3 +1,14 @@
+# 新版本发布满 3 天才装
+minimumReleaseAge: 4320
+
+# 不装信任等级比之前版本低的新版本
+trustPolicy: no-downgrade
+# 已核实的误报，只放行确切版本：
+# semver@5.7.2、6.3.1 是 npm 团队 2023-07-10 在旧版本线上手动发的安全补丁，比带来源证明的 7.5.4 晚三天，被判成降级
+trustPolicyExclude:
+  - semver@5.7.2
+  - semver@6.3.1
+
 # pnpm 11 起依赖的构建脚本默认不执行，必须逐个批准（供应链防护）。
 # 这三个不跑脚本就装不成：esbuild 取平台二进制、@parcel/watcher 取原生监听模块、
 # vue-demi 按当前 Vue 版本切入口
@@ -8,6 +19,14 @@ allowBuilds:
 
 # fontless（@nuxt/fonts 的依赖）钉着 esbuild ^0.27，那一支拉进的 0.27.7 带
 # Windows 路径遍历漏洞 GHSA-g7r4-m6w7-qqqr。依赖树里本来就装着 0.28.1（Vite 用），
-# 这里只把 fontless 这一支对齐过去，不影响其他包各自解析的 esbuild
+# 这里只把 fontless 这一支对齐过去，不影响其他包各自解析的 esbuild。
+# @tiptap/core 与 prosemirror-view 是安全版本下限（GHSA-cp6q-959q-f8rh、GHSA-j95f-988m-3j2f、
+# GHSA-c8x8-7fp4-3x9w）。tiptap 各包互相精确钉版本，只抬 core 会和其余包错开，升级时整套一起升
 overrides:
+  '@tiptap/core@<3.30.5': ^3.30.5
   "fontless>esbuild": "^0.28.1"
+  prosemirror-view@<1.42.3: ^1.42.3
+
+# 安全修复版不等 3 天：serialize-javascript 7.1.3 修 GHSA-m5mm-p8h7-m29v
+minimumReleaseAgeExclude:
+  - serialize-javascript@7.1.3

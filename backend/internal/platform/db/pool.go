@@ -22,7 +22,7 @@ func BuildDSN() string {
 		"postgres://%s:%s@%s:%s/%s?sslmode=%s&statement_timeout=%s&application_name=mms",
 		getenv("DB_USER", "mms"),
 		url.QueryEscape(os.Getenv("DB_PASSWORD")),
-		getenv("DB_HOST", "postgres-server"),
+		getenv("DB_HOST", "postgres"),
 		getenv("DB_PORT", "5432"),
 		getenv("DB_NAME", "mms"),
 		getenv("DB_SSLMODE", "prefer"),

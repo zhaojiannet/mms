@@ -184,7 +184,7 @@ docker compose up -d
    mkdir -p frontend/.output   # 产物占位；首次推送前前后端容器起不来属正常
    ```
 
-   然后回本机执行一次 `./ops/deploy.sh`——它会把镜像和产物一起推上去并拉起容器（PG 复用全局 `postgres-server`）。**服务器不下载任何依赖，也不构建镜像**：生产镜像同样在本机 `docker buildx` 构建成 linux/amd64 后整包推送。这样服务器一次外网都不用连（`proxy.golang.org` 与 Docker Hub 在部分地区都不可达），代价是 Dockerfile.prod 改动时多传一次约 75MB(前端)/27MB(后端)，没改则一个字节都不传。
+   然后回本机执行一次 `./ops/deploy.sh`——它会把镜像和产物一起推上去并拉起容器（PG 复用全局 `postgres`）。**服务器不下载任何依赖，也不构建镜像**：生产镜像同样在本机 `docker buildx` 构建成 linux/amd64 后整包推送。这样服务器一次外网都不用连（`proxy.golang.org` 与 Docker Hub 在部分地区都不可达），代价是 Dockerfile.prod 改动时多传一次约 75MB(前端)/27MB(后端)，没改则一个字节都不传。
 
 
 5. 备份定时任务：`crontab -e` 加 `0 3 * * * /opt/mms/ops/backup_pg.sh >> /var/log/mms_backup.log 2>&1`
@@ -215,10 +215,10 @@ docker compose logs -f backend # 查看日志
 # 进入后端容器
 docker compose exec backend sh
 go mod tidy                    # 刷新依赖
-go run ./cmd/server            # 手动启动
+# 后端由 air 启动，改了代码自动重新编译重启，不用手动 go run
 
 # 进入数据库
-docker exec -it postgres-server psql -U mms -d mms
+docker exec -it postgres psql -U mms -d mms
 ```
 
 ## 项目结构

@@ -25,7 +25,7 @@ cd "$(dirname "$0")/.."
 [ -f ops/deploy.env ] && . ops/deploy.env
 
 # 服务器上 PG 容器名 / 超级用户名 / 库名（面板安装的不固定），deploy.env 可覆盖
-PG_CONTAINER="${PG_CONTAINER:-postgres-server}"
+PG_CONTAINER="${PG_CONTAINER:-postgres}"
 PG_SUPERUSER="${PG_SUPERUSER:-postgres}"
 DB_NAME="${DB_NAME:-mms}"
 # 生产容器运行身份：须与服务器 compose 实际取到的 HOST_UID/HOST_GID 一致
@@ -42,12 +42,17 @@ done
 PART="${1:-all}"
 COMPOSE="docker compose -f docker-compose.yml -f docker-compose.prod.yml"
 
-# 生产镜像本机构建 → 整包推送。仅当 Dockerfile.prod 或运行身份变过才做：
+# 生产镜像本机构建 → 整包推送。仅当 Dockerfile.prod、运行身份或官方基础镜像变过才做：
 # 平时一个字节都不传，改动时才付出一次约 75MB(前端)/27MB(后端) 的传输。
+# 基础镜像算进来是因为标签不变时官方也会发安全补丁，只看 Dockerfile.prod 的话服务器会一直跑旧的 Node、Debian。
 # 推送前把现役镜像打上时间戳标签留 3 代，新镜像出问题可退回。
 sync_image() {
-	local svc="$1" img="mms-${1}-prod" want have
-	want=$(printf '%s|%s|%s' "$(cat "${svc}/Dockerfile.prod")" "$PROD_UID" "$PROD_GID" | shasum -a 256 | cut -d' ' -f1)
+	local svc="$1" img="mms-${1}-prod" want have base digest
+	base=$(awk '/^FROM /{print $2; exit}' "${svc}/Dockerfile.prod")
+	# 摘要单独赋值：嵌在 printf 参数里取不到时 set -e 不生效，会拿空摘要算出错误的 stamp
+	digest=$(docker buildx imagetools inspect "${base}" --format '{{json .Manifest.Digest}}')
+	want=$(printf '%s|%s|%s|%s' "$(cat "${svc}/Dockerfile.prod")" "$PROD_UID" "$PROD_GID" "${digest}" \
+		| shasum -a 256 | cut -d' ' -f1)
 	have=$(ssh "${SERVER}" "cat '${APP_DIR}/${svc}/.image_stamp' 2>/dev/null" || true)
 	if [ "$want" = "$have" ]; then
 		echo "== ${svc}：生产镜像未变，跳过推送"
@@ -55,7 +60,7 @@ sync_image() {
 	fi
 
 	echo "== ${svc}：本机构建 linux/amd64 生产镜像"
-	docker buildx build --platform linux/amd64 \
+	docker buildx build --pull --platform linux/amd64 \
 		--build-arg UID="${PROD_UID}" --build-arg GID="${PROD_GID}" \
 		-f "${svc}/Dockerfile.prod" -t "${img}" --load "${svc}/"
 
@@ -95,6 +100,18 @@ rsync -az frontend/Dockerfile.prod "${SERVER}:${APP_DIR}/frontend/"
 rsync -az ops/backup_pg.sh "${SERVER}:${APP_DIR}/ops/"
 
 if [ "${PART}" != "backend" ]; then
+	# 两个 Dockerfile 都跟 node:lts 浮动，但开发镜像只在 --pull 重建时换代，
+	# 不核对就可能用旧 Node 构建 .output、到服务器上用新 Node 运行
+	prod_base=$(awk '/^FROM /{print $2; exit}' frontend/Dockerfile.prod)
+	dev_node=$(docker exec mms_frontend printenv NODE_VERSION)
+	prod_node=$(docker buildx imagetools inspect "${prod_base}" \
+		--format '{{range (index .Image "linux/amd64").Config.Env}}{{println .}}{{end}}' | sed -n 's/^NODE_VERSION=//p')
+	if [ "${dev_node%%.*}" != "${prod_node%%.*}" ]; then
+		echo "开发容器 Node ${dev_node} 与 ${prod_base} 的 Node ${prod_node:-未知} 主版本不同，先重建开发镜像：" >&2
+		echo "  docker compose build --pull frontend && docker compose up -d frontend" >&2
+		exit 1
+	fi
+
 	echo "== 前端：本机容器内构建"
 	docker exec mms_frontend sh -c 'cd /app && pnpm install --frozen-lockfile && npx nuxi build'
 

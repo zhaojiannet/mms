@@ -1,9 +1,10 @@
 # ============================================
-# Go 1.26 开发容器
+# Go 开发容器
 # UID/GID 由 build args 传入（macOS 501/20，Linux 1000/1000）
+# 标签跟官方浮动，不钉版本：构建时加 --pull 就拿到官方当前的 Go
 # ============================================
 
-FROM golang:1.26-bookworm
+FROM golang:trixie
 
 ARG UID=1000
 ARG GID=1000
@@ -35,4 +36,5 @@ RUN go install github.com/sqlc-dev/sqlc/cmd/sqlc@v1.31.1
 
 EXPOSE 8080
 
-CMD ["tail", "-f", "/dev/null"]
+# air 用 go.mod 的 tool 指令登记在项目里，版本跟着项目走；改了代码自动重新编译重启
+CMD ["go", "tool", "air"]

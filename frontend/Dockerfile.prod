@@ -5,9 +5,10 @@
 # 运行时依赖（node_modules 已随产物生成），服务器无需 pnpm install。
 # 故镜像里不装 pnpm/corepack——省掉一次 npm registry 下载，
 # 生产容器也不带包管理器。
+# 标签须与 frontend/Dockerfile 一致：.output 在开发容器里构建，ops/deploy.sh 部署前核对两边 Node 主版本
 # ============================================
 
-FROM node:24-bookworm-slim
+FROM node:lts-trixie-slim
 
 ARG UID=1000
 ARG GID=1000

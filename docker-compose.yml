@@ -16,22 +16,15 @@ services:
       - mms-go-mod-cache:/home/app/go/pkg/mod
       - mms-go-build-cache:/home/app/.cache/go-build
       - mms-uploads:/app/uploads   # 店铺 logo 等上传资产：独立 volume 持久化
+    # 只绑回环：服务器上也叠加这份 compose 启动，反代走 127.0.0.1，绑 0.0.0.0 就只剩防火墙一道拦截直连
     ports:
-      - "8081:8080"   # 宿主机 8081 → 容器 8080（避开 anydeli-api 占用的 8080）
+      - "127.0.0.1:8081:8080"   # 宿主机 8081 → 容器 8080（避开 anydeli-api 占用的 8080）
     env_file:
       - .env
     environment:
       # 业务日界时区：报表"今日/本月"、员工当日窗口都按此时区切日
       TZ: ${TZ:-Asia/Shanghai}
     restart: unless-stopped
-    command: >
-      sh -c "
-      set -e &&
-      echo '=== Go 依赖同步 ===' &&
-      go mod tidy &&
-      echo '=== 启动 MMS ===' &&
-      go run ./cmd/server
-      "
     networks:
       - docker-net
 
@@ -52,9 +45,13 @@ services:
       - mms-pnpm-store:/home/node/.local/share/pnpm/store
       - mms-nuxt-cache:/app/.nuxt
     ports:
-      - "3001:3000"   # 宿主机 3001 → 容器 3000
+      - "127.0.0.1:3001:3000"   # 宿主机 3001 → 容器 3000
     env_file:
       - .env
+    environment:
+      # Vite 默认只放行 localhost 和 IP，用 OrbStack 域名 https://frontend.mms.orb.local 访问会返回 403。
+      # 只有开发服务器读它，生产跑 .output 不受影响
+      __VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS: .orb.local
     restart: unless-stopped
     command: sh -c "pnpm install && pnpm dev"
     networks:
@@ -62,7 +59,7 @@ services:
 
 # ============================================================
 # 外部网络（预先创建：docker network create docker-net）
-# 通用 postgres 容器也在此网络内，容器名 "postgres-server"，DB_HOST=postgres-server
+# 通用 postgres 容器也在此网络内，容器名 "postgres"，DB_HOST=postgres
 # ============================================================
 networks:
   docker-net:
