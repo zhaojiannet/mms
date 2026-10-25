@@ -1,8 +1,6 @@
 // 状态在 useStoreInfoState（叶子模块）；这里只挂请求逻辑，防经 useApi 绕回 auth 的循环 import
 import { globalStoreInfo, rememberBg, type StoreInfo } from '~/composables/useStoreInfoState'
 
-export type { StoreInfo }
-
 export function useStoreInfo() {
   const api = useApi()
 
