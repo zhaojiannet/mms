@@ -20,7 +20,7 @@
     "@vueuse/core": "^14.4.0",
     "@vueuse/nuxt": "^14.4.0",
     "marked": "^18.1.1",
-    "nuxt": "^4.6.2",
+    "nuxt": "^4.6.3",
     "pinia": "^4.1.0",
     "qrcode": "^1.5.4",
     "tailwindcss": "^4.3.3",
