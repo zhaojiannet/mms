@@ -6,7 +6,7 @@
 # 时区数据由 `import _ "time/tzdata"` 嵌进二进制，无需 tzdata 包。
 # ============================================
 
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 
 ARG UID=1000
 ARG GID=1000
