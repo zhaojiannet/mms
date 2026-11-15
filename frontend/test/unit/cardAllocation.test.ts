@@ -66,6 +66,20 @@ describe('autoAllocate', () => {
     expect(autoAllocate(cards, 33.33, 0).plan).toEqual([{ card_id: 'a', deduct: '28.33' }])
   })
 
+  it('先旧后新会超过张数上限时，改用余额多的卡少用几张', () => {
+    const smalls = Array.from({ length: 11 }, (_, i) =>
+      card(`small-${i}`, '5.00', '0.800', `2025-01-${String(i + 1).padStart(2, '0')}T10:00:00+08:00`))
+    const cards = [...smalls, card('big', '1000.00', '0.800', '2026-11-13T10:00:00+08:00')]
+    expect(autoAllocate(cards, 75, 0)).toEqual({ plan: [{ card_id: 'big', deduct: '60.00' }], coverable: 75 })
+  })
+
+  it('张数上限内凑不够时不出方案，能抵金额只算上限内的卡', () => {
+    const cards = Array.from({ length: 12 }, (_, i) =>
+      card(`c${i}`, '8.00', '0.800', `2025-01-${String(i + 1).padStart(2, '0')}T10:00:00+08:00`))
+    // 12 张合计 96 元够付 120×0.8=96，但一单最多 10 张，只能抵 80/0.8=100
+    expect(autoAllocate(cards, 120, 0)).toEqual({ plan: [], coverable: 100 })
+  })
+
   it('不改动传入数组的顺序', () => {
     const cards = [
       card('later', '300.00', '0.800', '2026-11-13T10:00:00+08:00'),
@@ -87,6 +101,13 @@ describe('allocateManualPrice', () => {
       plan: [{ card_id: 'earlier', deduct: '30.00' }, { card_id: 'later', deduct: '20.55' }],
       coverable: 50.55,
     })
+  })
+
+  it('先旧后新会超过张数上限时，改用余额多的卡', () => {
+    const smalls = Array.from({ length: 11 }, (_, i) =>
+      card(`small-${i}`, '5.00', '0.800', `2025-01-${String(i + 1).padStart(2, '0')}T10:00:00+08:00`))
+    const cards = [...smalls, card('big', '1000.00', '0.800', '2026-11-13T10:00:00+08:00')]
+    expect(allocateManualPrice(cards, 60)).toEqual({ plan: [{ card_id: 'big', deduct: '60.00' }], coverable: 60 })
   })
 
   it('手选卡时只用这张，不够就不出方案', () => {
