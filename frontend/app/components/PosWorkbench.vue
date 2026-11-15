@@ -781,6 +781,8 @@
 </template>
 
 <script setup lang="ts">
+import type { CardAllocation, CardCoverage } from '~/utils/cardAllocation'
+
 // settled：本页任何入账变动（结算 / 撤单）后触发，供首页立即重算顶部 KPI
 const emit = defineEmits<{ settled: [] }>()
 
@@ -791,8 +793,6 @@ const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
 interface Service { id: string; name: string; price: string; no_discount: boolean; sort_order: number; status: string }
 interface Member { id: string; name: string; phone: string | null; status?: string; total_balance?: string; total_pending?: string; card_count?: number }
 interface Card { id: string; card_type_name: string; balance: string; final_discount_rate: string; status: string; issued_at: string; expires_at: string | null }
-// 扣款方案与「卡最多能抵的标价」，由 cardCoverage 一次算出
-interface CardCoverage { plan: { card_id: string; deduct: string }[]; coverable: number }
 // 可用卡判据用共享的 utils/cards.ts isUsableCard（清账选卡器同源），此处不再内联
 interface PaymentMethod { id: string; name: string }
 interface Staff { id: string; name: string; position: string }
@@ -1020,81 +1020,20 @@ async function doVoid() {
   } finally { voidLoading.value = false }
 }
 
-// 自动分配：按折扣率从低到高用卡，同折扣率按 compareCardUseOrder。同时给出「卡最多能抵多少标价」——
-// 它与分配方案必须同源，分头计算就会出现「余额比应付多却说余额不足」
-function autoAllocate(discountable: number, noDiscount: number): CardCoverage {
-  const cards = [...memberCards.value]
-    .filter(c => parseFloat(c.balance) > 0)
-    .sort((a, b) => parseFloat(a.final_discount_rate) - parseFloat(b.final_discount_rate) || compareCardUseOrder(a, b))
-  const result: { card_id: string; deduct: string }[] = []
-  let remainNoDiscount = noDiscount
-  let remainDiscountable = discountable
-  for (const c of cards) {
-    if (remainNoDiscount <= 0 && remainDiscountable <= 0) break
-    let bal = parseFloat(c.balance)
-    const rate = parseFloat(c.final_discount_rate)
-    let deduct = 0
-    if (remainNoDiscount > 0) {
-      const take = Math.min(remainNoDiscount, bal)
-      deduct += take; bal -= take; remainNoDiscount -= take
-    }
-    if (remainDiscountable > 0 && bal > 0) {
-      const maxCoverable = bal / rate
-      const take = Math.min(remainDiscountable, maxCoverable)
-      deduct += take * rate; remainDiscountable -= take
-    }
-    // 半分以下的 deduct 是上一张卡的浮点残渣，push 会产生 ¥0.00 的幽灵分配行
-    if (deduct >= 0.005) result.push({ card_id: c.id, deduct: deduct.toFixed(2) })
-  }
-  const uncovered = Math.max(0, remainNoDiscount) + Math.max(0, remainDiscountable)
-  const coverable = Math.max(0, noDiscount + discountable - uncovered)
-  // 半分以下的剩余是浮点残渣，不是真缺口：按此判「不足」会把余额恰好够扣的
-  // 单（如 33.33×0.85 对 28.33 余额）错推进挂账
-  if (uncovered > 0.005) return { plan: [], coverable }
-  return { plan: result, coverable }
-}
-
-// 卡的覆盖能力：扣款方案 + 最多能抵的标价金额，一次算清。
-// 余额不足横幅拿 coverable、结算拿 plan，同源保证两者永远说得通
 const cardCoverage = computed<CardCoverage>(() => {
   if (!isMemberCardPay.value || !member.value || items.value.length === 0) return { plan: [], coverable: 0 }
-  // 一单一价：改价即本单最终应收，卡此时只是余额钱包，不再按折扣率放大。
-  // 全程用「分」做整数运算，保证扣卡合计与改价金额分毫不差（后端强校验相等）
   if (useManualPrice.value) {
     const mp = parseFloat(manualPrice.value)
     if (isNaN(mp) || manualPriceError.value) return { plan: [], coverable: 0 }
-    let remainC = Math.round(mp * 100)
-    const usable = (manualCardMode.value && manualCardId.value)
-      ? memberCards.value.filter(c => c.id === manualCardId.value)
-      : [...memberCards.value].sort(compareCardUseOrder)
-    const plan: { card_id: string; deduct: string }[] = []
-    let balSumC = 0
-    for (const c of usable) {
-      const balC = Math.round(parseFloat(c.balance) * 100)
-      if (balC <= 0) continue
-      balSumC += balC
-      const take = Math.min(remainC, balC)
-      if (take > 0) { plan.push({ card_id: c.id, deduct: (take / 100).toFixed(2) }); remainC -= take }
-    }
-    if (remainC > 0) return { plan: [], coverable: Math.min(balSumC, Math.round(mp * 100)) / 100 }
-    return { plan, coverable: mp }
+    return allocateManualPrice(memberCards.value, mp, manualCardMode.value ? manualCardId.value : undefined)
   }
   const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
   const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
   if (manualCardMode.value && manualCardId.value) {
     const c = memberCards.value.find(x => x.id === manualCardId.value)
-    if (!c) return { plan: [], coverable: 0 }
-    const rate = parseFloat(c.final_discount_rate)
-    const bal = parseFloat(c.balance)
-    // 按分舍入后再与余额比较：未舍入浮点会在半分边界把够扣判成不足
-    const need = Math.round((noDiscount + discountable * rate) * 100) / 100
-    if (bal >= need) return { plan: [{ card_id: c.id, deduct: need.toFixed(2) }], coverable: total.value }
-    // 付不动：这张卡最多抵多少标价——先抵不打折的项，剩下的按折扣率放大
-    const forNoDisc = Math.min(noDiscount, bal)
-    const rest = bal - forNoDisc
-    return { plan: [], coverable: Math.min(total.value, forNoDisc + (rate > 0 ? rest / rate : 0)) }
+    return c ? allocateSingleCard(c, discountable, noDiscount, total.value) : { plan: [], coverable: 0 }
   }
-  return autoAllocate(discountable, noDiscount)
+  return autoAllocate(memberCards.value, discountable, noDiscount)
 })
 
 const allocationPlan = computed(() => cardCoverage.value.plan)
@@ -1105,7 +1044,7 @@ const autoCanCover = computed(() => {
   if (!isMemberCardPay.value || !member.value || items.value.length === 0) return false
   const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
   const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  return autoAllocate(discountable, noDiscount).plan.length > 0
+  return autoAllocate(memberCards.value, discountable, noDiscount).plan.length > 0
 })
 
 const previewRate = computed(() => {
@@ -1282,18 +1221,14 @@ const pendingOptions = computed(() => {
   return opts
 })
 
-const useBalanceAllocations = computed<{ card_id: string; deduct: string }[]>(() => {
+const useBalanceAllocations = computed<CardAllocation[]>(() => {
   if (!member.value || memberCards.value.length === 0) return []
   // 手选卡时只扣选中那张：收银员明确排除的卡不能被「利用余额」顺手扣走
   if (manualCardMode.value && manualCardId.value) {
     const c = memberCards.value.find(x => x.id === manualCardId.value)
-    return c ? [{ card_id: c.id, deduct: parseFloat(c.balance).toFixed(2) }] : []
+    return c ? drainBalancesPlan([c]) : []
   }
-  // 后端最多接受 10 张卡组合支付：按余额降序取前 10，小额卡多的会员不至于整条路 400
-  return [...memberCards.value]
-    .sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance))
-    .slice(0, 10)
-    .map(c => ({ card_id: c.id, deduct: parseFloat(c.balance).toFixed(2) }))
+  return drainBalancesPlan(memberCards.value)
 })
 
 const useBalanceDeduct = computed(() =>
