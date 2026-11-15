@@ -997,27 +997,35 @@ function openVoid(t: TodayTx) {
   voidOpen.value = true
 }
 async function doVoid() {
-  if (!voiding.value) return
+  const target = voiding.value
+  if (!target) return
   voidLoading.value = true
   voidErr.value = ''
   try {
-    await api(`/api/transactions/${voiding.value.id}/void`, { method: 'POST', body: { reason: voidReason.value } })
-    voiding.value.status = 'voided'
-    todayTx.voidedCount = todayTx.items.filter(t => t.status === 'voided').length
-    todayTx.total = todayTx.items.length - todayTx.voidedCount
-    voidOpen.value = false
-    // 撤销改变实收合计与卡余额：整体重拉今日记录（撤单后 updated_at 变化，ETag 必失效拿到新数据）
-    fetchTodayTx()
-    emit('settled')
-    if (member.value) {
-      const id = member.value.id
-      // 余额和挂账取后端聚合，与会员列表同口径（过期卡余额也算）；撤消费单还会删掉它产生的挂账
-      const [, m] = await Promise.all([loadMemberCards(id), api<Member>(`/api/members/${id}`)])
-      if (member.value?.id === id) member.value = { ...member.value, total_balance: m.total_balance, total_pending: m.total_pending }
-    }
+    await api(`/api/transactions/${target.id}/void`, { method: 'POST', body: { reason: voidReason.value } })
   } catch (e: any) {
     voidErr.value = e?.data?.message || '撤销失败（请确认在"设置 → 交易撤销"里开启）'
+    return
   } finally { voidLoading.value = false }
+  target.status = 'voided'
+  todayTx.voidedCount = todayTx.items.filter(t => t.status === 'voided').length
+  todayTx.total = todayTx.items.length - todayTx.voidedCount
+  voidOpen.value = false
+  // 撤销改变实收合计与卡余额：整体重拉今日记录（撤单后 updated_at 变化，ETag 必失效拿到新数据）
+  fetchTodayTx()
+  emit('settled')
+  if (member.value) await refreshMemberBalance(member.value.id)
+}
+
+// 撤销已成功后的刷新，失败不能算成撤销失败。余额和挂账取后端聚合，
+// 与会员列表同口径（过期卡余额也算）；撤消费单还会删掉它产生的挂账
+async function refreshMemberBalance(memberId: string) {
+  try {
+    const [m] = await Promise.all([api<Member>(`/api/members/${memberId}`), loadMemberCards(memberId)])
+    if (member.value?.id === memberId) member.value = { ...member.value, total_balance: m.total_balance, total_pending: m.total_pending }
+  } catch {
+    toast.add({ title: '撤销已完成，会员余额刷新失败', description: '重新选择该会员即可看到最新余额', color: 'warning' })
+  }
 }
 
 const cardCoverage = computed<CardCoverage>(() => {
@@ -1406,6 +1414,8 @@ function handleEnter() {
 // 卡集合变了最优折扣率可能跟着变，留着旧值会让行级折后提示报错价
 async function loadMemberCards(memberId: string) {
   const cards = await api<{ items: Card[] }>(`/api/members/${memberId}/cards`)
+  // 请求途中收银员换了会员或清空了会员：晚到的结果不能盖掉当前会员的卡
+  if (member.value?.id !== memberId) return
   memberCards.value = cards.items.filter(isUsableCard)
   // 过期卡不可用但要让收银员知道存在，否则「卡去哪了」说不清
   expiredCardCount.value = cards.items.filter(c => c.status === 'active' && isCardExpired(c)).length
@@ -1418,6 +1428,7 @@ async function pickMember(m: Member) {
   memberOptions.value = []
   memberSearch.value = ''
   await loadMemberCards(m.id)
+  if (member.value?.id !== m.id) return
   if (memberCards.value.length > 0) {
     const mc = paymentMethods.value.find(p => p.name === '会员卡')
     if (mc) selectedPm.value = mc.id
