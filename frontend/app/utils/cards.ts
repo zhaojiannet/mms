@@ -10,3 +10,16 @@ export function isCardExpired(c: { expires_at: string | null }): boolean {
 export function isUsableCard(c: { status: string; balance: string; expires_at: string | null }): boolean {
   return c.status === 'active' && parseFloat(c.balance) > 0 && !isCardExpired(c)
 }
+
+// 同等条件下的用卡先后：先到期的先用，不限期的排最后，再按办卡先后。
+// 余额多的先用会让零头卡一直剩着，还会让刚办的卡被下一单动用，
+// 办重了就撤不掉（撤销办卡要求余额等于面值）
+export function compareCardUseOrder(
+  a: { expires_at: string | null; issued_at: string },
+  b: { expires_at: string | null; issued_at: string },
+): number {
+  const exp = (c: { expires_at: string | null }) => c.expires_at ? new Date(c.expires_at).getTime() : Infinity
+  const ea = exp(a), eb = exp(b)
+  if (ea !== eb) return ea < eb ? -1 : 1
+  return new Date(a.issued_at).getTime() - new Date(b.issued_at).getTime()
+}

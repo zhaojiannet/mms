@@ -790,7 +790,7 @@ const { canVoid, ensureFetched: ensureVoidFetched } = useVoidEnabled()
 
 interface Service { id: string; name: string; price: string; no_discount: boolean; sort_order: number; status: string }
 interface Member { id: string; name: string; phone: string | null; status?: string; total_balance?: string; total_pending?: string; card_count?: number }
-interface Card { id: string; card_type_name: string; balance: string; final_discount_rate: string; status: string; expires_at: string | null }
+interface Card { id: string; card_type_name: string; balance: string; final_discount_rate: string; status: string; issued_at: string; expires_at: string | null }
 // 扣款方案与「卡最多能抵的标价」，由 cardCoverage 一次算出
 interface CardCoverage { plan: { card_id: string; deduct: string }[]; coverable: number }
 // 可用卡判据用共享的 utils/cards.ts isUsableCard（清账选卡器同源），此处不再内联
@@ -1019,12 +1019,12 @@ async function doVoid() {
   } finally { voidLoading.value = false }
 }
 
-// 自动分配：按折扣率从低到高用卡。同时给出「卡最多能抵多少标价」——
+// 自动分配：按折扣率从低到高用卡，同折扣率按 compareCardUseOrder。同时给出「卡最多能抵多少标价」——
 // 它与分配方案必须同源，分头计算就会出现「余额比应付多却说余额不足」
 function autoAllocate(discountable: number, noDiscount: number): CardCoverage {
   const cards = [...memberCards.value]
     .filter(c => parseFloat(c.balance) > 0)
-    .sort((a, b) => parseFloat(a.final_discount_rate) - parseFloat(b.final_discount_rate) || parseFloat(b.balance) - parseFloat(a.balance))
+    .sort((a, b) => parseFloat(a.final_discount_rate) - parseFloat(b.final_discount_rate) || compareCardUseOrder(a, b))
   const result: { card_id: string; deduct: string }[] = []
   let remainNoDiscount = noDiscount
   let remainDiscountable = discountable
@@ -1065,7 +1065,7 @@ const cardCoverage = computed<CardCoverage>(() => {
     let remainC = Math.round(mp * 100)
     const usable = (manualCardMode.value && manualCardId.value)
       ? memberCards.value.filter(c => c.id === manualCardId.value)
-      : [...memberCards.value].sort((a, b) => parseFloat(b.balance) - parseFloat(a.balance))
+      : [...memberCards.value].sort(compareCardUseOrder)
     const plan: { card_id: string; deduct: string }[] = []
     let balSumC = 0
     for (const c of usable) {
