@@ -638,14 +638,25 @@
             </UFormField>
           </div>
 
+          <UAlert
+            v-if="issueDupPrompted && issueTodayDups.length > 0"
+            color="warning" variant="soft" icon="i-lucide-copy"
+            title="今天已办过同类型的卡，确认不是重复办理？"
+          >
+            <template #description>
+              <p v-for="c in issueTodayDups" :key="c.id" class="tabular-nums">
+                {{ formatTime(c.issued_at) }} 办理 · 面值 ¥{{ c.final_price }} · 余额 ¥{{ c.balance }}
+              </p>
+            </template>
+          </UAlert>
           <UAlert v-if="issueError" :description="issueError" color="error" variant="soft" icon="i-lucide-alert-circle" />
         </div>
       </template>
       <template #footer>
         <div class="flex justify-end gap-2 w-full">
           <UButton variant="ghost" color="neutral" @click="issueOpen = false">取消</UButton>
-          <UButton :loading="issueSaving" @click="submitIssue">
-            确认办理 {{ issueMode === 'custom' ? '自定义面值卡' : '标准会员卡' }}
+          <UButton :loading="issueSaving" :color="issueDupPrompted && issueTodayDups.length > 0 ? 'warning' : 'primary'" @click="submitIssue">
+            {{ issueDupPrompted && issueTodayDups.length > 0 ? '仍然办理' : `确认办理 ${issueMode === 'custom' ? '自定义面值卡' : '标准会员卡'}` }}
           </UButton>
         </div>
       </template>
@@ -689,6 +700,7 @@ interface ListResponse { items: Member[]; total: number; has_pending: boolean; h
 
 interface CardInfo {
   id: string
+  card_type_id: string
   card_type_name: string
   final_discount_rate: string
   final_price: string
@@ -1060,6 +1072,13 @@ const issueForm = reactive({
   staffId: '',
   paymentMethodId: '',
 })
+// 自定义折扣率模式的 card_type_id 只是挂靠模板，不代表卡型，不做重复判断
+const issueTodayDups = computed(() => {
+  const typeId = issueMode.value === 'standard' || issueForm.discountMode === 'inherit' ? issueForm.cardTypeId : ''
+  return typeId ? cardsIssuedTodayOfType(detailCards.value, typeId) : []
+})
+const issueDupPrompted = ref(false)
+watch(() => [issueMode.value, issueForm.cardTypeId, issueForm.discountMode], () => { issueDupPrompted.value = false })
 const cardTypes = ref<{ id: string; name: string; price: string; discount_rate: string }[]>([])
 const cardTypeOptions = computed(() =>
   cardTypes.value.map(c => ({
@@ -1101,6 +1120,7 @@ function openIssueCard() {
   issueForm.staffId = ''
   issueForm.paymentMethodId = ''
   issueError.value = ''
+  issueDupPrompted.value = false
   ensureCardTypes()
   ensurePaymentMethods()
   ensureStaff()
@@ -1124,6 +1144,7 @@ async function submitIssue() {
       if (!r || r <= 0 || r > 1) { issueError.value = '折扣率需在 0-1 之间（如 0.8 = 8 折）'; return }
     }
   }
+  if (issueTodayDups.value.length > 0 && !issueDupPrompted.value) { issueDupPrompted.value = true; return }
 
   issueSaving.value = true
   issueError.value = ''

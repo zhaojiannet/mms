@@ -196,13 +196,26 @@
             <UFormField label="收款方式" required>
               <USelect v-model="issueForm.paymentMethodId" :items="paymentOptions" class="w-full" />
             </UFormField>
+            <UAlert
+              v-if="issueDupPrompted && issueTodayDups.length > 0"
+              color="warning" variant="soft" icon="i-lucide-copy"
+              title="今天已办过同类型的卡，确认不是重复办理？"
+            >
+              <template #description>
+                <p v-for="c in issueTodayDups" :key="c.id" class="tabular-nums">
+                  {{ formatTime(c.issued_at) }} 办理 · 面值 ¥{{ c.final_price }} · 余额 ¥{{ c.balance }}
+                </p>
+              </template>
+            </UAlert>
             <UAlert v-if="issueErr" :description="issueErr" color="error" variant="soft" icon="i-lucide-alert-circle" />
           </div>
         </template>
         <template #footer>
           <div class="flex justify-end gap-2 w-full">
             <UButton variant="ghost" color="neutral" @click="issueOpen = false">取消</UButton>
-            <UButton :loading="issueSaving" @click="submitIssue">办理</UButton>
+            <UButton :loading="issueSaving" :color="issueDupPrompted && issueTodayDups.length > 0 ? 'warning' : 'primary'" @click="submitIssue">
+              {{ issueDupPrompted && issueTodayDups.length > 0 ? '仍然办理' : '办理' }}
+            </UButton>
           </div>
         </template>
       </UModal>
@@ -359,9 +372,13 @@ const issueOpen = ref(false)
 const issueSaving = ref(false)
 const issueErr = ref('')
 const issueForm = reactive({ cardTypeId: '', finalPrice: '', paymentMethodId: '' })
-function openIssueCard() { issueForm.cardTypeId = ''; issueForm.finalPrice = ''; issueForm.paymentMethodId = ''; issueErr.value = ''; issueOpen.value = true }
+const issueTodayDups = computed(() => issueForm.cardTypeId ? cardsIssuedTodayOfType(cards.value, issueForm.cardTypeId) : [])
+const issueDupPrompted = ref(false)
+watch(() => issueForm.cardTypeId, () => { issueDupPrompted.value = false })
+function openIssueCard() { issueForm.cardTypeId = ''; issueForm.finalPrice = ''; issueForm.paymentMethodId = ''; issueErr.value = ''; issueDupPrompted.value = false; issueOpen.value = true }
 async function submitIssue() {
   if (!issueForm.cardTypeId || !issueForm.paymentMethodId) { issueErr.value = '请选卡型和收款方式'; return }
+  if (issueTodayDups.value.length > 0 && !issueDupPrompted.value) { issueDupPrompted.value = true; return }
   issueSaving.value = true; issueErr.value = ''
   try {
     const body: Record<string, unknown> = {
