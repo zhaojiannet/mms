@@ -33,5 +33,5 @@
     "typescript": "^6.0.3",
     "vue-tsc": "^3.3.14"
   },
-  "packageManager": "pnpm@11.21.0"
+  "packageManager": "pnpm@12.20.0"
 }
