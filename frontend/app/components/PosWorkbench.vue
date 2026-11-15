@@ -1010,9 +1010,10 @@ async function doVoid() {
     fetchTodayTx()
     emit('settled')
     if (member.value) {
-      await loadMemberCards(member.value.id)
-      const sum = memberCards.value.reduce((s, c) => s + parseFloat(c.balance), 0)
-      member.value = { ...member.value, total_balance: sum.toFixed(2) }
+      const id = member.value.id
+      // 余额和挂账取后端聚合，与会员列表同口径（过期卡余额也算）；撤消费单还会删掉它产生的挂账
+      const [, m] = await Promise.all([loadMemberCards(id), api<Member>(`/api/members/${id}`)])
+      if (member.value?.id === id) member.value = { ...member.value, total_balance: m.total_balance, total_pending: m.total_pending }
     }
   } catch (e: any) {
     voidErr.value = e?.data?.message || '撤销失败（请确认在"设置 → 交易撤销"里开启）'
@@ -1261,7 +1262,8 @@ const discountedTotal = computed(() => {
   return parseFloat(pendingPreview.value.discounted_total)
 })
 
-const memberTotalBalance = computed(() => {
+// memberCards 已滤掉过期卡，只是本单能刷的钱；会员总余额以后端 total_balance 为准
+const memberUsableBalance = computed(() => {
   return memberCards.value
     .filter(c => parseFloat(c.balance) > 0)
     .reduce((s, c) => s + parseFloat(c.balance), 0)
@@ -1580,7 +1582,7 @@ async function submit() {
   const deducted = ((body.card_allocations as { deduct: string }[] | undefined) ?? [])
     .reduce((s, a) => s + parseFloat(a.deduct), 0)
   const balanceTip = member.value && memberCards.value.length > 0
-    ? `，${member.value.name} 卡内余额 ¥${(parseFloat(memberTotalBalance.value) - deducted).toFixed(2)}`
+    ? `，${member.value.name} 可用余额 ¥${(parseFloat(memberUsableBalance.value) - deducted).toFixed(2)}`
     : ''
   try {
     const res = await api<{ credit_amount: string }>('/api/transactions', { method: 'POST', body })
