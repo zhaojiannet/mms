@@ -5,7 +5,10 @@ minimumReleaseAge: 4320
 trustPolicy: no-downgrade
 # 已核实的误报，只放行确切版本：
 # semver@5.7.2、6.3.1 是 npm 团队 2023-07-10 在旧版本线上手动发的安全补丁，比带来源证明的 7.5.4 晚三天，被判成降级
+# encodeurl@2.0.2 是维护者 2026-11-12 在 2.x 线上手动发的正则修复，比带来源证明的 3.0.0 晚，被判成降级；
+# 包内 index.js 与 GitHub 标签 v2.0.2 逐字节一致
 trustPolicyExclude:
+  - encodeurl@2.0.2
   - semver@5.7.2
   - semver@6.3.1
 
