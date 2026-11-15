@@ -15,10 +15,15 @@ func TestSane(t *testing.T) {
 			t.Errorf("Sane(%s) = false, want true", s)
 		}
 	}
-	bad := []string{"1e1000000000", "1e-1000000000", "-1e1000000000", "1e11", "1234567890123"}
-	for _, s := range bad {
-		if Sane(decimal.RequireFromString(s)) {
-			t.Errorf("Sane(%s) = true, want false", s)
+	// 巨指数直接构造：decimal 解析字符串时已拒绝超过 MaxDecodeExponent 的指数，
+	// 但这个上限只管解析，指数在它之内的值和非解析来源的值仍要靠 Sane 拦
+	bad := []decimal.Decimal{
+		decimal.New(1, 1_000_000_000), decimal.New(1, -1_000_000_000), decimal.New(-1, 1_000_000_000),
+		decimal.RequireFromString("1e5000"), decimal.RequireFromString("1e11"), decimal.RequireFromString("1234567890123"),
+	}
+	for _, d := range bad {
+		if Sane(d) {
+			t.Errorf("Sane(%se%d) = true, want false", d.Coefficient(), d.Exponent())
 		}
 	}
 }
@@ -27,9 +32,9 @@ func TestAmount(t *testing.T) {
 	if err := Amount("x", decimal.RequireFromString("99999999.99")); err != nil {
 		t.Errorf("99999999.99 should pass: %v", err)
 	}
-	for _, s := range []string{"100000000", "1e1000000000"} {
-		if err := Amount("x", decimal.RequireFromString(s)); err == nil {
-			t.Errorf("Amount(%s) should fail", s)
+	for _, d := range []decimal.Decimal{decimal.RequireFromString("100000000"), decimal.New(1, 1_000_000_000)} {
+		if err := Amount("x", d); err == nil {
+			t.Errorf("Amount(%se%d) should fail", d.Coefficient(), d.Exponent())
 		}
 	}
 	// 负数放行（符号由调用点管），巨负指数仍拦
