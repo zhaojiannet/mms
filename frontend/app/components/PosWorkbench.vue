@@ -1028,6 +1028,17 @@ async function refreshMemberBalance(memberId: string) {
   }
 }
 
+// 购物车按能否打折拆成两部分标价合计
+const cartSplit = computed(() => {
+  let discountable = 0, noDiscount = 0
+  for (const it of items.value) {
+    const amount = parseFloat(it.price) * it.quantity
+    if (it.no_discount) noDiscount += amount
+    else discountable += amount
+  }
+  return { discountable, noDiscount }
+})
+
 const cardCoverage = computed<CardCoverage>(() => {
   if (!isMemberCardPay.value || !member.value || items.value.length === 0) return { plan: [], coverable: 0 }
   if (useManualPrice.value) {
@@ -1035,8 +1046,7 @@ const cardCoverage = computed<CardCoverage>(() => {
     if (isNaN(mp) || manualPriceError.value) return { plan: [], coverable: 0 }
     return allocateManualPrice(memberCards.value, mp, manualCardMode.value ? manualCardId.value : undefined)
   }
-  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
+  const { discountable, noDiscount } = cartSplit.value
   if (manualCardMode.value && manualCardId.value) {
     const c = memberCards.value.find(x => x.id === manualCardId.value)
     return c ? allocateSingleCard(c, discountable, noDiscount, total.value) : { plan: [], coverable: 0 }
@@ -1050,9 +1060,7 @@ const allocationPlan = computed(() => cardCoverage.value.plan)
 const autoCanCover = computed(() => {
   if (!manualCardMode.value || !manualCardId.value) return false
   if (!isMemberCardPay.value || !member.value || items.value.length === 0) return false
-  const discountable = items.value.filter(i => !i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  const noDiscount   = items.value.filter(i =>  i.no_discount).reduce((s, it) => s + parseFloat(it.price) * it.quantity, 0)
-  return autoAllocate(memberCards.value, discountable, noDiscount).plan.length > 0
+  return autoAllocate(memberCards.value, cartSplit.value.discountable, cartSplit.value.noDiscount).plan.length > 0
 })
 
 const previewRate = computed(() => {
@@ -1209,13 +1217,9 @@ const discountedTotal = computed(() => {
   return parseFloat(pendingPreview.value.discounted_total)
 })
 
-// memberCards 已滤掉过期卡，只是本单能刷的钱；会员总余额以后端 total_balance 为准
-const memberUsableBalance = computed(() => {
-  return memberCards.value
-    .filter(c => parseFloat(c.balance) > 0)
-    .reduce((s, c) => s + parseFloat(c.balance), 0)
-    .toFixed(2)
-})
+// memberCards 已按 isUsableCard 滤掉过期和零余额的卡，只是本单能刷的钱；会员总余额以后端 total_balance 为准
+const memberUsableBalance = computed(() =>
+  memberCards.value.reduce((s, c) => s + parseFloat(c.balance), 0).toFixed(2))
 
 // 挂账方式选项：扣卡额达到折后应收时「利用余额」无账可挂（差额 ≤ 0），
 // 不提供该选项，后端同样会 400 拒绝这种请求
